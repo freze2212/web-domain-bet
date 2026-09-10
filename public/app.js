@@ -258,6 +258,24 @@ async function fetchTemplates() {
   }
 }
 
+function getTemplateLiveHost(t) {
+  return String(t?.cnameTarget || "")
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .trim();
+}
+
+function getTemplateLiveUrl(t) {
+  const host = getTemplateLiveHost(t);
+  return host ? `https://${host}` : "#";
+}
+
+function getTemplateLiveName(t) {
+  if (t?.pagesProject) return t.pagesProject;
+  const host = getTemplateLiveHost(t);
+  return host.replace(/\.pages\.dev$/i, "") || "Mẫu live";
+}
+
 function getBrandForTemplate(t) {
   if (t.brand && ["GG88", "MM88", "LLWIN", "XX88"].includes(t.brand.toUpperCase())) return t.brand.toUpperCase();
   const full = ((t.id || "") + " " + (t.name || "") + " " + (t.title || "") + " " + (t.folder || "") + " " + (t.cnameTarget || "")).toLowerCase();
@@ -307,9 +325,10 @@ function filterTemplatesList() {
       const matchName = t.name?.toLowerCase().includes(q);
       const matchTitle = t.title?.toLowerCase().includes(q);
       const matchTarget = t.cnameTarget?.toLowerCase().includes(q);
+      const matchLive = getTemplateLiveName(t).toLowerCase().includes(q) || (t.pagesProject || "").toLowerCase().includes(q);
       const matchDir = t.folder?.toLowerCase().includes(q);
       const matchBrand = brand.toLowerCase().includes(q) || (t.brandLabel || "").toLowerCase().includes(q);
-      return matchName || matchTitle || matchTarget || matchDir || matchBrand;
+      return matchName || matchTitle || matchTarget || matchLive || matchDir || matchBrand;
     }
     return true;
   });
@@ -333,7 +352,8 @@ function renderTemplates() {
     card.dataset.id = t.id;
 
     const brandBadgeClass = `badge-${brand}`;
-    const previewUrl = `https://${t.cnameTarget}`;
+    const previewUrl = getTemplateLiveUrl(t);
+    const liveName = getTemplateLiveName(t);
     const screenshotSrc = t.screenshotUrl || getFallbackPlaceholder(t.name);
 
     card.innerHTML = `
@@ -352,11 +372,11 @@ function renderTemplates() {
       <div class="card-body">
         <h4 class="card-title" title="${t.title || t.name}">${t.title || t.name}</h4>
         <div class="card-meta">
-          <div class="cname-box" title="Bấm để sao chép CNAME">
-            <span class="cname-label">CNAME:</span>
-            <code class="cname-val">${t.cnameTarget}</code>
-            <button class="btn-copy" data-cname="${t.cnameTarget}" title="Sao chép">📋</button>
-          </div>
+          <a class="cname-box cname-link" href="${previewUrl}" target="_blank" rel="noopener noreferrer" title="Mở trang mẫu live">
+            <span class="cname-label">Mẫu live:</span>
+            <span class="cname-val">${liveName}</span>
+            <span class="cname-open">↗</span>
+          </a>
         </div>
       </div>
       <div class="card-footer" style="display: flex; gap: 8px;">
@@ -402,14 +422,8 @@ function attachTemplateCardEvents() {
     };
   });
 
-  document.querySelectorAll(".btn-copy").forEach((btn) => {
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      const cname = btn.dataset.cname;
-      navigator.clipboard.writeText(cname).then(() => {
-        showToast(`📋 Đã chép CNAME: ${cname}`);
-      });
-    };
+  document.querySelectorAll(".cname-link").forEach((link) => {
+    link.onclick = (e) => e.stopPropagation();
   });
 }
 
@@ -417,7 +431,7 @@ function populateTemplateSelects() {
   const optionsHtml = allTemplates
     .map((t) => {
       const brand = getBrandForTemplate(t);
-      return `<option value="${t.id}">[${brand}] ${t.name} (${t.cnameTarget})</option>`;
+      return `<option value="${t.id}">[${brand}] ${t.name} (${getTemplateLiveName(t)})</option>`;
     })
     .join("");
 
@@ -504,7 +518,9 @@ function triggerTemplatePreviewChange(templateId, previewContainer) {
     <img src="${t.screenshotUrl || getFallbackPlaceholder(t.name)}" alt="${t.name}">
     <div class="template-inline-preview-info">
       <div><b>${t.name}</b></div>
-      <div style="color: var(--accent-cyan); font-family: var(--font-mono);">${t.cnameTarget}</div>
+      <div style="color: var(--accent-cyan); font-family: var(--font-mono);">
+        <a href="${getTemplateLiveUrl(t)}" target="_blank" rel="noopener noreferrer" style="color: inherit;">${getTemplateLiveName(t)}</a>
+      </div>
       <div style="color: var(--text-dim);">${t.folder || ""}</div>
     </div>
   `;
@@ -1950,6 +1966,9 @@ function closeModal(modalId) {
     modal.classList.remove("active");
     modal.style.display = "none";
   }
+  if (modalId === "topupModal" && typeof stopTopupBalancePoll === "function") {
+    stopTopupBalancePoll();
+  }
 }
 
 function openPreviewModal(templateId) {
@@ -1958,9 +1977,9 @@ function openPreviewModal(templateId) {
   selectedTemplate = t;
 
   document.getElementById("modalTitle").textContent = t.title || t.name;
-  document.getElementById("modalTarget").textContent = `CNAME: ${t.cnameTarget}`;
+  document.getElementById("modalTarget").textContent = `Mẫu live: ${getTemplateLiveName(t)}`;
   document.getElementById("modalImage").src = t.screenshotUrl || getFallbackPlaceholder(t.name);
-  document.getElementById("modalLiveDemo").href = `https://${t.cnameTarget}`;
+  document.getElementById("modalLiveDemo").href = getTemplateLiveUrl(t);
 
   const selectBtn = document.getElementById("modalSelectBtn");
   if (selectBtn) {
@@ -2104,7 +2123,8 @@ function renderPickerTemplates() {
       (t.name && t.name.toLowerCase().includes(query)) ||
       (t.title && t.title.toLowerCase().includes(query)) ||
       (t.folder && t.folder.toLowerCase().includes(query)) ||
-      (t.cnameTarget && t.cnameTarget.toLowerCase().includes(query));
+      (t.cnameTarget && t.cnameTarget.toLowerCase().includes(query)) ||
+      (t.pagesProject && t.pagesProject.toLowerCase().includes(query));
     return matchesBrand && matchesSearch;
   });
 
@@ -2132,9 +2152,9 @@ function renderPickerTemplates() {
           </div>
           <div class="template-body" style="padding: 12px;">
             <h4 class="template-title" style="font-size: 13px; line-height: 1.3; height: 34px; overflow: hidden;" title="${t.name}">${t.name}</h4>
-            <div style="font-size: 11px; color: var(--accent-cyan); font-family: var(--font-mono); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-              ${t.cnameTarget}
-            </div>
+            <a href="${getTemplateLiveUrl(t)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="display: block; font-size: 11px; color: var(--accent-cyan); font-family: var(--font-mono); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none;">
+              ${getTemplateLiveName(t)} ↗
+            </a>
             <button type="button" class="btn btn-primary btn-sm" style="width: 100%; margin-top: 8px;" onclick="event.stopPropagation(); openConfirmSelectTemplateModal('${t.id}')">
               📌 Chọn Mẫu Này
             </button>
@@ -2164,8 +2184,10 @@ function openConfirmSelectTemplateModal(templateId) {
     brandEl.className = `brand-badge badge-${brand.toLowerCase()}`;
     brandEl.textContent = brand;
   }
-  if (cnameEl) cnameEl.textContent = `CNAME: ${t.cnameTarget}`;
-  if (liveDemoBtn) liveDemoBtn.href = `https://${t.cnameTarget}`;
+  if (cnameEl) {
+    cnameEl.innerHTML = `<a href="${getTemplateLiveUrl(t)}" target="_blank" rel="noopener noreferrer" style="color: inherit;">Mẫu live: ${getTemplateLiveName(t)} ↗</a>`;
+  }
+  if (liveDemoBtn) liveDemoBtn.href = getTemplateLiveUrl(t);
 
   if (contextBox) {
     const { targetType, domain } = pickerContext;
@@ -4018,9 +4040,53 @@ async function handleDomainAssignSubmit(e) {
 }
 
 // ── 8C. VIETQR DYNAMIC GENERATION & AUTO WEBHOOK TOPUP ─────────────────────
+let topupBalancePollTimer = null;
+let topupBalanceBaseline = null;
+
 function openTopupModal() {
+  const simBtn = document.getElementById("btnSimulatePay");
+  if (simBtn) {
+    // Chỉ hiện nút test cho Admin (backend vẫn cần ALLOW_SIMULATE_PAY=true)
+    simBtn.style.display = currentUser?.role === "admin" ? "inline-flex" : "none";
+  }
   refreshVietQr();
+  startTopupBalancePoll();
   openModal("topupModal");
+}
+
+function startTopupBalancePoll() {
+  stopTopupBalancePoll();
+  topupBalanceBaseline = typeof currentUser?.balance === "number" ? currentUser.balance : null;
+  const hint = document.getElementById("topupPollHint");
+  if (hint) hint.textContent = "Đang chờ webhook ngân hàng… số dư sẽ cập nhật tự động khi nhận được giao dịch.";
+
+  topupBalancePollTimer = setInterval(async () => {
+    try {
+      const res = await fetch("/api/wallet/balance", { headers: authHeaders() });
+      const data = await res.json();
+      if (!data.success) return;
+      const bal = data.balance;
+      if (topupBalanceBaseline === null) {
+        topupBalanceBaseline = bal;
+        return;
+      }
+      if (typeof bal === "number" && bal > topupBalanceBaseline) {
+        const gained = bal - topupBalanceBaseline;
+        showToast(`🎉 Đã cộng tự động +${gained.toLocaleString("vi-VN")} Xu! Số dư: ${bal.toLocaleString("vi-VN")} Xu`);
+        topupBalanceBaseline = bal;
+        if (typeof checkAuth === "function") checkAuth();
+        stopTopupBalancePoll();
+        closeModal("topupModal");
+      }
+    } catch {}
+  }, 2000);
+}
+
+function stopTopupBalancePoll() {
+  if (topupBalancePollTimer) {
+    clearInterval(topupBalancePollTimer);
+    topupBalancePollTimer = null;
+  }
 }
 
 function quickTopupForUser(userId, username) {
@@ -4897,7 +4963,8 @@ async function searchPermDomains() {
     if (data.success && Array.isArray(data.results)) {
       permSearchResultsCache = data.results;
       if (summary) {
-        summary.textContent = `Tìm thấy ${data.count} / ${data.totalInSystem} tên miền trên hệ thống Cloudflare`;
+        const scopeNote = currentUser?.role === "admin" ? "trên hệ thống" : "trong danh sách được cấp / đang chờ duyệt";
+        summary.textContent = `Tìm thấy ${data.count} tên miền ${scopeNote}`;
       }
       renderPermSearchResults(data.results);
     } else {

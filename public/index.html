@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1788904000000">
+  <link rel="stylesheet" href="style.css?v=20260910-live-name">
   <!-- Telegram WebApp Script (nếu mở trong Telegram) -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
@@ -164,7 +164,7 @@
       <div class="control-panel">
         <div class="search-box">
           <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input type="text" id="searchInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Tìm kiếm mẫu theo tên, thư mục, CNAME hoặc thương hiệu (GG88, LLWIN, MM88, ALO8...)...">
+          <input type="text" id="searchInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Tìm kiếm mẫu theo tên, thư mục, mẫu live hoặc thương hiệu (GG88, LLWIN, MM88, ALO8...)...">
           <button id="clearSearch" class="btn-clear" style="display: none;">&times;</button>
         </div>
 
@@ -709,8 +709,8 @@
     <section id="tab-domain-perms" class="tab-pane">
       <div class="section-header">
         <div>
-          <h2>🔑 Tra Cứu Tên Miền, Xin Quyền & Phê Duyệt Quản Lý</h2>
-          <p class="section-desc">Tra cứu 1.250+ tên miền trên hệ thống Cloudflare. Gửi yêu cầu cấp quyền quản lý cho Admin phê duyệt để thực hiện thay link, đổi mẫu và trỏ 302.</p>
+          <h2>🔑 Tên Miền Được Cấp & Xin Quyền Quản Lý</h2>
+          <p class="section-desc">User chỉ thấy tên miền Admin đã cấp. Domain chưa cấp sẽ không hiện khi tìm kiếm. Có thể gửi yêu cầu xin cấp bằng cách nhập đúng tên miền.</p>
         </div>
         <div class="header-tools">
           <button class="btn btn-secondary btn-sm" onclick="loadPermsData()">
@@ -723,7 +723,7 @@
       <div class="sub-nav-pills" style="margin-bottom: 20px;">
         <button class="sub-pill active" id="pillPermSearch" onclick="switchPermSubTab('search')">
           <span class="pill-icon">🔍</span>
-          <span>Tra Cứu & Xin Quyền (1.250+ Miền)</span>
+          <span>Tìm Trong Miền Được Cấp</span>
         </button>
         <button class="sub-pill" id="pillPermMyDomains" onclick="switchPermSubTab('my-domains')">
           <span class="pill-icon">🟢</span>
@@ -755,7 +755,8 @@
             </button>
           </div>
           <div style="margin-top: 10px; font-size: 12px; color: var(--text-dim); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-            <span>💡 Nhập từ khóa tên miền để kiểm tra quyền và gửi yêu cầu cấp quyền tới Admin.</span>
+            <span>💡 Chỉ hiện domain đã được Admin cấp (hoặc yêu cầu đang chờ). Domain chưa cấp → không tìm thấy. Xin cấp: bấm nút bên cạnh và nhập đúng tên miền.</span>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openRequestDomainModal('')">📩 Xin cấp quyền (nhập tên miền)</button>
             <span id="permSearchResultSummary" style="color: var(--accent-cyan); font-weight: 600;">Đang nạp danh sách...</span>
           </div>
         </div>
@@ -1625,10 +1626,11 @@
               </div>
             </div>
 
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-              <button type="button" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);" onclick="simulatePaymentWebhook()">
+            <div id="simulatePayRow" style="display: flex; flex-direction: column; gap: 8px;">
+              <button type="button" id="btnSimulatePay" class="btn btn-primary" style="display:none; background: linear-gradient(135deg, #10b981 0%, #059669 100%);" onclick="simulatePaymentWebhook()">
                 ⚡ Mô Phỏng Quét QR Thành Công (Test Auto Webhook)
               </button>
+              <p id="topupPollHint" style="font-size: 12px; color: var(--text-dim); margin: 0;">Sau khi chuyển khoản đúng nội dung CK, hệ thống sẽ tự cộng Xu khi ngân hàng gửi webhook. Đang theo dõi số dư…</p>
             </div>
           </div>
         </div>
@@ -2595,7 +2597,7 @@
     <div class="toast-message" id="toastMessage">Thông báo</div>
   </div>
 
-  <script src="app.js?v=1789032000001"></script>
+  <script src="app.js?v=20260910-live-name"></script>
 </body>
 </html>
 

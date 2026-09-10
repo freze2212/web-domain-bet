@@ -381,7 +381,11 @@ const server = http.createServer(async (req, res) => {
   // GET /api/wallet/qr-code (Tạo mã VietQR động cho người dùng theo Xu: 100k = 100 Xu)
   if (req.method === "GET" && pathname === "/api/wallet/qr-code") {
     const amountXu = parseFloat(parsedUrl.searchParams.get("amount") || parsedUrl.searchParams.get("xu") || "100");
-    const targetUsername = parsedUrl.searchParams.get("username") || currentUser.username || "admin";
+    let targetUsername = parsedUrl.searchParams.get("username") || currentUser.username || "admin";
+    // User thường không được tạo QR nạp hộ người khác
+    if (currentUser.role !== "admin") {
+      targetUsername = currentUser.username;
+    }
     const qrData = generateVietQrInfo(targetUsername, amountXu);
     sendJson(res, 200, { success: true, ...qrData });
     return;
@@ -539,6 +543,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // GET /api/domains/search (Tra cứu tên miền & quyền của user)
+  // User thường: CHỈ thấy domain đã được cấp (+ đang chờ duyệt của chính họ). Không lộ domain chưa cấp.
   if (req.method === "GET" && pathname === "/api/domains/search") {
     try {
       const q = (parsedUrl.searchParams.get("q") || "").trim().toLowerCase();
@@ -550,7 +555,6 @@ const server = http.createServer(async (req, res) => {
         } catch {}
       }
 
-      // Lấy danh sách yêu cầu đang pending của user
       const userRequests = listDomainRequests({ userId: currentUser.userId, role: currentUser.role });
       const pendingReqMap = new Map();
       userRequests.forEach((r) => {
@@ -560,38 +564,51 @@ const server = http.createServer(async (req, res) => {
       });
 
       const ownershipMap = listAllAssignments();
+      const isAdmin = currentUser.role === "admin";
 
       let filteredZones = zones;
       if (q) {
         filteredZones = zones.filter((z) => z.name.toLowerCase().includes(q));
       }
 
-      const results = filteredZones.slice(0, 50).map((z) => {
-        const normName = z.name.toLowerCase();
-        const owner = ownershipMap[normName] || null;
-        let permission = "none";
+      const results = filteredZones
+        .map((z) => {
+          const normName = z.name.toLowerCase().replace(/^www\./, "");
+          const owner = ownershipMap[normName] || ownershipMap[z.name.toLowerCase()] || null;
+          let permission = "none";
 
-        if (currentUser.role === "admin" || (owner && owner.userId === currentUser.userId)) {
-          permission = "owned";
-        } else if (pendingReqMap.has(normName)) {
-          permission = "pending";
-        }
+          if (isAdmin || (owner && owner.userId === currentUser.userId)) {
+            permission = "owned";
+          } else if (pendingReqMap.has(normName) || pendingReqMap.has(z.name.toLowerCase())) {
+            permission = "pending";
+          }
 
-        return {
-          id: z.id,
-          domain: z.name,
-          status: z.status,
-          accountName: z.accountName,
-          permission,
-          owner: currentUser.role === "admin" && owner ? { userId: owner.userId, username: owner.username || owner.userId, assignedAt: owner.assignedAt } : (owner && owner.userId === currentUser.userId ? "Bạn" : null),
-          pendingRequest: pendingReqMap.get(normName) || null,
-        };
-      });
+          return {
+            id: z.id,
+            domain: z.name,
+            status: z.status,
+            accountName: z.accountName,
+            permission,
+            owner:
+              isAdmin && owner
+                ? { userId: owner.userId, username: owner.username || owner.userId, assignedAt: owner.assignedAt }
+                : owner && owner.userId === currentUser.userId
+                  ? "Bạn"
+                  : null,
+            pendingRequest: pendingReqMap.get(normName) || pendingReqMap.get(z.name.toLowerCase()) || null,
+          };
+        })
+        .filter((r) => {
+          if (isAdmin) return true;
+          // User: không hiện domain chưa cấp (kể cả khi search)
+          return r.permission === "owned" || r.permission === "pending";
+        })
+        .slice(0, 50);
 
       sendJson(res, 200, {
         success: true,
         count: results.length,
-        totalInSystem: zones.length,
+        totalInSystem: isAdmin ? zones.length : results.length,
         results,
       });
     } catch (err) {
