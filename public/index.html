@@ -1,0 +1,2603 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>BET DOMAIN PRO • Hệ Thống Quản Trị Tên Miền Quốc Tế</title>
+  <meta name="description" content="Trung tâm phân quyền, mua tên miền, trỏ 302, đổi link affiliate và cài đặt Landing Page tự động cực nhanh.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=1788904000000">
+  <!-- Telegram WebApp Script (nếu mở trong Telegram) -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div class="bg-glow-1"></div>
+  <div class="bg-glow-2"></div>
+  <div class="bg-glow-3"></div>
+
+  <!-- Header Section -->
+  <header class="navbar">
+    <!-- Top Row: Brand, Status, User Profile & Actions -->
+    <div class="navbar-top">
+      <div class="brand">
+        <div class="brand-icon">👑</div>
+        <div class="brand-text">
+          <div class="brand-title-row">
+            <h1>BET DOMAIN VIP HUB</h1>
+            <span class="version-badge">PRO v3.0 VIP</span>
+          </div>
+          <p>Cloudflare Enterprise • Multi-Brand GG88 • MM88 • LLWIN • XX88</p>
+        </div>
+      </div>
+
+      <div class="header-center-info">
+        <div class="status-pill connected" title="Trạng thái máy chủ">
+          <span class="pulse-dot"></span>
+          <span id="serverStatusText">Trực Tuyến</span>
+        </div>
+        <div class="task-indicator-pill" id="headerTaskIndicator" onclick="switchToTab('tab-tasks')" style="cursor: pointer;" title="Xem các tác vụ đang chạy ngầm">
+          <span>⏳</span>
+          <span id="headerTaskCount">0 tác vụ ngầm</span>
+        </div>
+      </div>
+
+      <div class="nav-actions">
+        <!-- Wallet Balance Pill -->
+        <div class="wallet-badge-pill" id="walletBadgeBtn" onclick="openTopupModal()" title="Bấm để nạp tiền vào ví qua VietQR">
+          <span class="wallet-icon">💰</span>
+          <div class="wallet-text-group">
+            <span class="wallet-label">Số Dư Ví</span>
+            <span class="wallet-amount" id="userBalanceText">0.00$</span>
+          </div>
+          <span class="wallet-add-btn">+ Nạp</span>
+        </div>
+
+        <!-- User Profile Pill -->
+        <div class="user-badge-pill" id="userBadgeBtn" onclick="switchToTab('tab-wallet')" title="Xem thông tin tài khoản">
+          <span class="user-avatar-icon">👤</span>
+          <div class="user-text-group">
+            <span class="user-name" id="userNameText">admin</span>
+            <span class="user-role-tag admin" id="userRoleTag">ADMIN</span>
+          </div>
+        </div>
+
+        <!-- Refresh Button -->
+        <button id="globalRefreshBtn" class="btn btn-secondary btn-icon-text" title="Làm mới toàn bộ dữ liệu">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          <span>Làm mới</span>
+        </button>
+
+        <!-- Logout Button -->
+        <button class="btn btn-secondary btn-logout" onclick="handleLogout()" title="Đăng xuất khỏi hệ thống">
+          <span>🚪</span>
+          <span>Đăng Xuất</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Bottom Row: Navigation Tabs -->
+    <div class="navbar-bottom">
+      <nav class="nav-menu" id="mainNavMenu">
+        <button class="nav-tab active" data-tab="tab-templates">
+          <span class="nav-tab-icon">🎨</span>
+          <span>Mẫu Landing Page</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-buy">
+          <span class="nav-tab-icon">🚀</span>
+          <span id="navTabBuyLabel">Tra Cứu & Mua Miền</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-point" data-role="admin">
+          <span class="nav-tab-icon">⚡</span>
+          <span>Trỏ Miền Có Sẵn</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-cloner">
+          <span class="nav-tab-icon">🥷</span>
+          <span>VIP Web Cloner</span>
+          <span class="tab-badge" style="background: rgba(99,102,241,0.2); color:#818cf8; border:1px solid rgba(99,102,241,0.4);">Pro</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-batch" data-role="admin">
+          <span class="nav-tab-icon">🪄</span>
+          <span>Chạy Hàng Loạt</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-domains">
+          <span class="nav-tab-icon">📋</span>
+          <span id="navTabDomainsLabel">Quản Lý Domain</span>
+          <span class="tab-badge" id="badgeDomainsCount">0</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-domain-perms">
+          <span class="nav-tab-icon">🔑</span>
+          <span>Tra Cứu & Xin Quyền</span>
+          <span class="tab-badge" id="badgePendingPermsCount" style="display: none; background: #ef4444; color: #fff;">0</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-tasks">
+          <span class="nav-tab-icon">⏳</span>
+          <span id="navTabTasksLabel">Tiến Trình Ngầm</span>
+          <span class="tab-badge" id="badgeTasksCount">0</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-check" data-role="admin">
+          <span class="nav-tab-icon">🩺</span>
+          <span>Kiểm Tra & Tự Sửa</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-wallet">
+          <span class="nav-tab-icon">💳</span>
+          <span id="navTabWalletLabel">Ví & Thành Viên</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-history">
+          <span class="nav-tab-icon">📜</span>
+          <span>Lịch Sử</span>
+          <span class="tab-badge" id="badgeHistoryCount">0</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-settings" data-role="admin">
+          <span class="nav-tab-icon">⚙️</span>
+          <span>Cài Đặt & API</span>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="main-container">
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB 1: MẪU LANDING PAGE (GALLERY & QUICK DEPLOY)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-templates" class="tab-pane active">
+      <div class="section-header">
+        <div>
+          <h2>Kho Mẫu Landing Page Trực Quan</h2>
+          <p class="section-desc">Duyệt xem ảnh thực tế toàn bộ mẫu giao diện, xem Live Demo và gán tên miền chỉ với 1 cú click.</p>
+        </div>
+        <div class="header-tools">
+          <button class="btn btn-primary" onclick="openQuickDeployModal()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Cài Đặt Mẫu Nhanh
+          </button>
+        </div>
+      </div>
+
+      <!-- Filter & Search Bar -->
+      <div class="control-panel">
+        <div class="search-box">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" id="searchInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Tìm kiếm mẫu theo tên, thư mục, CNAME hoặc thương hiệu (GG88, LLWIN, MM88, ALO8...)...">
+          <button id="clearSearch" class="btn-clear" style="display: none;">&times;</button>
+        </div>
+
+        <div class="filter-tabs" id="filterTabs">
+          <button class="filter-btn active" data-filter="all">Tất cả (<span id="countAll">0</span>)</button>
+          <button class="filter-btn" data-filter="GG88">⭐ GG88 (<span id="countGG88">0</span>)</button>
+          <button class="filter-btn" data-filter="MM88">💎 MM88 (<span id="countMM88">0</span>)</button>
+          <button class="filter-btn" data-filter="LLWIN">🚀 LLWIN (<span id="countLLWIN">0</span>)</button>
+          <button class="filter-btn" data-filter="XX88">👑 XX88 (<span id="countXX88">0</span>)</button>
+        </div>
+      </div>
+
+      <!-- Templates Grid -->
+      <div class="templates-section">
+        <div id="loadingState" class="state-container">
+          <div class="spinner"></div>
+          <p>Đang tải danh sách mẫu Landing Page...</p>
+        </div>
+
+        <div id="emptyState" class="state-container" style="display: none;">
+          <div class="empty-icon">📂</div>
+          <h3>Không tìm thấy mẫu Landing Page nào</h3>
+          <p>Vui lòng thử tìm kiếm với từ khoá khác hoặc bấm làm mới.</p>
+        </div>
+
+        <div id="templatesGrid" class="templates-grid">
+          <!-- Render động qua app.js -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB 2: MUA TÊN MIỀN (BUY & AUTO DEPLOY WIZARD)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-buy" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>Đăng Ký & Cài Đặt Tên Miền Tự Động</h2>
+          <p class="section-desc">Mua tên miền giá rẻ qua Spaceship và tự động kết nối Cloudflare DNS, SSL, Landing Page hoặc 302 trong 1 phút.</p>
+        </div>
+      </div>
+
+      <div class="wizard-container">
+        <!-- Sub Mode Switcher -->
+        <div class="sub-nav-pills">
+          <button class="sub-pill active" data-sub="buy-lp">
+            <span class="pill-icon">🎨</span>
+            <span>Mua & Gán Landing Page</span>
+          </button>
+          <button class="sub-pill" data-sub="buy-302">
+            <span class="pill-icon">⚡</span>
+            <span>Mua & Trỏ 302 Trực Tiếp</span>
+          </button>
+          <button class="sub-pill" data-sub="check-batch">
+            <span class="pill-icon">🔍</span>
+            <span>Tra Cứu & Check Giá Hàng Loạt</span>
+          </button>
+        </div>
+
+        <!-- Form 1: Mua & Gán Landing Page -->
+        <div id="form-buy-lp" class="wizard-card active">
+          <div class="wizard-header">
+            <h3>🎨 Đăng Ký Miền & Kích Hoạt Landing Page</h3>
+            <p>Hệ thống tự động: Đăng ký Spaceship ➔ Tạo DNS CNAME Cloudflare ➔ Kích hoạt SSL ➔ Cập nhật domains.json ➔ Git Push.</p>
+          </div>
+
+          <form id="buyLpForm" class="form-grid">
+            <div class="form-group full-width">
+              <label for="buyLpDomain">Tên miền muốn mua <span class="required">*</span></label>
+              <div class="input-with-button">
+                <input type="text" id="buyLpDomain" placeholder="Ví dụ: gg88top.live, ggquocte.net, betgg88.vip..." required>
+                <button type="button" id="btnCheckBuyLp" class="btn btn-secondary">
+                  🔍 Check Giá
+                </button>
+              </div>
+              <div id="buyLpDomainStatus" class="field-feedback"></div>
+            </div>
+
+            <div class="form-group full-width">
+              <label for="buyLpLink">Link đích / Game (Hậu đài) <span class="required">*</span></label>
+              <input type="url" id="buyLpLink" placeholder="Ví dụ: https://gg8830.com/?id=490467336" required>
+              <span class="field-hint">💡 Link chuyển hướng chính (nút Đăng Ký / Vào Cổng)</span>
+            </div>
+
+            <div class="form-group full-width">
+              <label for="buyLpTele">Link Telegram CSKH / Hỗ Trợ (Tuỳ chọn)</label>
+              <input type="url" id="buyLpTele" placeholder="Ví dụ: https://t.me/cskh hoặc https://t.me/longhoangxoamaan">
+              <span class="field-hint">💡 Nếu để trống sẽ dùng mặc định theo mẫu hoặc trỏ theo link đích</span>
+            </div>
+
+            <div class="form-group full-width">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label for="buyLpTemplate" style="margin-bottom: 0;">Chọn mẫu giao diện Landing Page <span class="required">*</span></label>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openVisualTemplatePicker('buy')">
+                  🖼️ Mở Kho Chọn Mẫu Trực Quan (Xem Ảnh)
+                </button>
+              </div>
+              <select id="buyLpTemplate" class="form-select" required>
+                <option value="">-- Đang nạp danh sách mẫu --</option>
+              </select>
+              <div id="buyLpTemplatePreview" class="template-inline-preview"></div>
+            </div>
+
+            <div class="form-actions full-width">
+              <button type="submit" class="btn btn-primary btn-lg">
+                <span class="btn-icon">🚀</span>
+                <span>Mua & Kích Hoạt Landing Page Ngay</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Form 2: Mua & Trỏ 302 Trực Tiếp -->
+        <div id="form-buy-302" class="wizard-card" style="display: none;">
+          <div class="wizard-header">
+            <h3>⚡ Đăng Ký Miền & Trỏ 302 Trực Tiếp (Cloudflare Page Rules)</h3>
+            <p>Hệ thống tự động: Đăng ký Spaceship ➔ Tạo Cloudflare Zone ➔ Cấu hình Page Rule 302 chuyển hướng tức thì 0.05s.</p>
+          </div>
+
+          <form id="buy302Form" class="form-grid">
+            <div class="form-group full-width">
+              <label for="buy302Domain">Tên miền muốn mua <span class="required">*</span></label>
+              <div class="input-with-button">
+                <input type="text" id="buy302Domain" placeholder="Ví dụ: gg88win.top, mm8883.vip..." required>
+                <button type="button" id="btnCheckBuy302" class="btn btn-secondary">
+                  🔍 Check Giá
+                </button>
+              </div>
+              <div id="buy302DomainStatus" class="field-feedback"></div>
+            </div>
+
+            <div class="form-group full-width">
+              <label for="buy302Link">Link đích chuyển hướng 302 <span class="required">*</span></label>
+              <input type="url" id="buy302Link" placeholder="Ví dụ: https://14llwin.com/?id=785929208 hoặc https://mm88.com/register" required>
+            </div>
+
+            <div class="form-actions full-width">
+              <button type="submit" class="btn btn-primary btn-lg">
+                <span class="btn-icon">⚡</span>
+                <span>Mua & Trỏ 302 Ngay</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Form 3: Tra Cứu & Check Giá Hàng Loạt (Batch List Domain Checker) -->
+        <div id="form-check-batch" class="wizard-card" style="display: none;">
+          <div class="wizard-header">
+            <h3>🔍 Tra Cứu & Kiểm Tra Giá Danh Sách Tên Miền</h3>
+            <p>Dán danh sách tên miền cần kiểm tra (mỗi dòng 1 tên miền). Hệ thống kiểm tra tình trạng còn trống và hiển thị bảng giá chính xác trong 1 giây.</p>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group full-width">
+              <label for="batchCheckDomainInput">Danh sách tên miền (Mỗi dòng 1 tên miền) <span class="required">*</span></label>
+              <textarea id="batchCheckDomainInput" rows="5" class="form-control font-mono" placeholder="betgg88.top&#10;gamevip2026.xyz&#10;nhacaiuytin.com&#10;sieunohu.live&#10;winbet88.vip"></textarea>
+            </div>
+
+            <div class="form-actions full-width" style="display: flex; gap: 10px; justify-content: space-between; flex-wrap: wrap;">
+              <div style="display: flex; gap: 8px;">
+                <button type="button" id="btnRunBatchCheckDomains" class="btn btn-primary" onclick="runBatchDomainCheck()">
+                  <span>🔍 Kiểm Tra Tất Cả Tên Miền</span>
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="loadSampleBatchCheckDomains()">
+                  <span>📋 Nạp Danh Sách Mẫu</span>
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="clearBatchDomainCheck()">
+                  <span>🗑️ Xóa Trắng</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Results Table -->
+          <div id="batchCheckResultsWrapper" style="display: none; margin-top: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 10px 16px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px;">
+              <div style="font-size: 13px; color: #fff;">
+                Đã kiểm tra: <strong id="batchCheckTotalCount" style="color: var(--accent-cyan);">0</strong> tên miền • 
+                Còn trống: <strong id="batchCheckAvailableCount" style="color: var(--accent-emerald);">0</strong> tên miền
+              </div>
+            </div>
+
+            <div class="table-wrapper">
+              <table class="domains-table">
+                <thead>
+                  <tr>
+                    <th style="width: 45px;">#</th>
+                    <th>Tên Miền</th>
+                    <th style="width: 150px;">Tình Trạng</th>
+                    <th style="width: 180px;">Giá Niêm Yết</th>
+                    <th style="text-align: right; width: 220px;">Hành Động</th>
+                  </tr>
+                </thead>
+                <tbody id="batchCheckResultsTbody">
+                  <!-- Rendered by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB 3: TRỎ MIỀN CÓ SẴN (POINT EXISTING DOMAINS)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-point" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>Trỏ Miền Đã Mua Vào Hệ Thống</h2>
+          <p class="section-desc">Cấu hình cho các tên miền bạn đã mua trước đó vào mẫu Landing Page hoặc chuyển hướng 302.</p>
+        </div>
+      </div>
+
+      <div class="wizard-container">
+        <!-- Sub Mode Switcher -->
+        <div class="sub-nav-pills">
+          <button class="sub-pill active" data-sub="point-lp">
+            <span class="pill-icon">🎨</span>
+            <span>Trỏ Miền Có Sẵn ➔ Landing Page</span>
+          </button>
+          <button class="sub-pill" data-sub="point-302">
+            <span class="pill-icon">⚡</span>
+            <span>Trỏ 302 Miền Có Sẵn</span>
+          </button>
+        </div>
+
+        <!-- Form: Trỏ Miền Có Sẵn ➔ LP -->
+        <div id="form-point-lp" class="wizard-card active">
+          <div class="wizard-header">
+            <h3>🎨 Gán Giao Diện Landing Page Cho Miền Đã Có</h3>
+            <p>Thiết lập DNS CNAME ➔ Gán Custom Domain trên Cloudflare Pages ➔ Cập nhật domains.json ➔ Git Push đồng bộ.</p>
+          </div>
+
+          <form id="pointLpForm" class="form-grid">
+            <div class="form-group full-width">
+              <label for="pointLpDomain">Tên miền đã có <span class="required">*</span></label>
+              <input type="text" id="pointLpDomain" placeholder="Ví dụ: gg88tt.com, gg88zz.com, gg88fifa.com..." required>
+            </div>
+
+            <div class="form-group full-width">
+              <label for="pointLpLink">Link đích / Game (Hậu đài) <span class="required">*</span></label>
+              <input type="url" id="pointLpLink" placeholder="Ví dụ: https://www.gg8853.com/home/register?id=565275739" required>
+            </div>
+
+            <div class="form-group full-width">
+              <label for="pointLpTele">Link Telegram CSKH / Hỗ Trợ (Tuỳ chọn)</label>
+              <input type="url" id="pointLpTele" placeholder="Ví dụ: https://t.me/cskh hoặc https://t.me/laodai6789">
+              <span class="field-hint">💡 Nếu để trống sẽ dùng mặc định theo mẫu hoặc trỏ theo link đích</span>
+            </div>
+
+            <div class="form-group full-width">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label for="pointLpTemplate" style="margin-bottom: 0;">Chọn mẫu giao diện Landing Page <span class="required">*</span></label>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openVisualTemplatePicker('point')">
+                  🖼️ Mở Kho Chọn Mẫu Trực Quan (Xem Ảnh)
+                </button>
+              </div>
+              <select id="pointLpTemplate" class="form-select" required>
+                <option value="">-- Đang nạp danh sách mẫu --</option>
+              </select>
+              <div id="pointLpTemplatePreview" class="template-inline-preview"></div>
+            </div>
+
+
+            <div class="form-actions full-width">
+              <button type="submit" class="btn btn-primary btn-lg">
+                <span class="btn-icon">🚀</span>
+                <span>Gán & Kích Hoạt Landing Page</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Form: Trỏ 302 Miền Có Sẵn -->
+        <div id="form-point-302" class="wizard-card" style="display: none;">
+          <div class="wizard-header">
+            <h3>⚡ Trỏ Chuyển Hướng 302 Cho Miền Đã Có</h3>
+            <p>Cập nhật quy tắc Cloudflare Page Rules 302 tức thì mà không cần qua web hosting.</p>
+          </div>
+
+          <form id="point302Form" class="form-grid">
+            <div class="form-group full-width">
+              <label for="point302Domain">Tên miền đã có <span class="required">*</span></label>
+              <input type="text" id="point302Domain" placeholder="Ví dụ: g8us.top, 88vip.top..." required>
+            </div>
+
+            <div class="form-group full-width">
+              <label for="point302Link">Link đích chuyển hướng 302 <span class="required">*</span></label>
+              <input type="url" id="point302Link" placeholder="Ví dụ: https://t.me/link_dich hoặc https://cskh..." required>
+            </div>
+
+            <div class="form-actions full-width">
+              <button type="submit" class="btn btn-primary btn-lg">
+                <span class="btn-icon">⚡</span>
+                <span>Kích Hoạt Trỏ 302 Ngay</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB: NHẬP VĂN BẢN & MUA / GÁN HÀNG LOẠT (SMART TEXT PARSER & BATCH DEPLOY)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-batch" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>🪄 Nhập Văn Bản & Cấu Hình Hàng Loạt</h2>
+          <p class="section-desc">Dán danh sách tên miền & link từ bất kỳ đâu (Telegram, Zalo, Excel, Notepad). Hệ thống tự động phân tích và cho phép chọn Landing Page riêng cho từng dòng hoặc chọn chung 1 mẫu.</p>
+        </div>
+      </div>
+
+      <!-- Text Input & Parser Box -->
+      <div class="batch-parser-card">
+        <div class="batch-input-header">
+          <label for="batchRawText"><b>📝 Dán danh sách vào đây:</b> (Hỗ trợ mọi định dạng: số thứ tự, gạch ngang, trỏ qua link, dấu hai chấm, tab/khoảng trắng...)</label>
+          <div class="batch-quick-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="btnBatchSample" onclick="handleBatchSampleClick()">
+              💡 Dán Ví Dụ Mẫu
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnBatchPasteClipboard" onclick="handleBatchPasteClick()">
+              📋 Dán Từ Clipboard
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnBatchClear" onclick="handleBatchClearClick()">
+              🗑️ Xoá
+            </button>
+          </div>
+        </div>
+
+        <textarea id="batchRawText" class="form-control batch-textarea" rows="6" placeholder="Ví dụ dán vào:&#10;1: trangchugg88.com trỏ qua link : https://gg8845.com/?id=489735814&#10;2: ggsing88.com trỏ qua link : https://gg8845.com/?id=489735814&#10;3: gg88tong.us trỏ qua link : https://gg8845.com/?id=489735814&#10;4: gg8us.com trỏ qua link : https://gg8845.com/?id=489735814&#10;5 : gg88tong.co trỏ qua link : https://gg8832.com/?id=825873513"></textarea>
+
+        <div class="batch-parser-actions">
+          <button type="button" id="btnBatchParse" class="btn btn-primary btn-lg" onclick="handleBatchParseClick()">
+            🪄 Phân Tích Thông Minh
+          </button>
+        </div>
+
+        <div id="batchParseFeedback" style="display: none; margin-top: 14px; padding: 12px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; transition: all 0.3s ease;"></div>
+      </div>
+
+      <!-- Batch Config & Results Section (Hiển thị sau khi parse) -->
+      <div id="batchResultSection" class="batch-result-section" style="display: none;">
+        
+        <!-- Batch Master Controls Bar -->
+        <div class="batch-master-bar">
+          <div class="batch-mode-selector">
+            <span class="control-label"><b>Chế độ thực thi:</b></span>
+            <label class="radio-label">
+              <input type="radio" name="batchDeployMode" value="buy" checked>
+              <span>🛒 Mua Mới Trên Spaceship & Cài Đặt</span>
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="batchDeployMode" value="point">
+              <span>⚡ Trỏ Tên Miền Có Sẵn</span>
+            </label>
+          </div>
+
+          <div class="batch-bulk-assign">
+            <span class="control-label"><b>Áp dụng nhanh 1 mẫu cho tất cả:</b></span>
+            <div class="batch-global-picker-group">
+              <div id="batchGlobalTplThumbWrapper" class="batch-global-thumb" title="Bấm để mở kho ảnh mẫu trực quan" onclick="openVisualPickerForGlobalBatch()">
+                <img id="batchGlobalTplThumb" src="" alt="Thumbnail">
+              </div>
+              <select id="batchGlobalTemplateSelect" class="form-control" style="max-width: 280px;">
+                <!-- Option templates -->
+              </select>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnOpenGlobalPickerModal" onclick="openVisualPickerForGlobalBatch()">
+                🎨 Xem Kho Ảnh Mẫu
+              </button>
+              <button type="button" id="btnBatchApplyGlobalTpl" class="btn btn-primary btn-sm">
+                ✨ Gán Cho Tất Cả
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Batch Items Table -->
+        <div class="batch-table-wrapper">
+          <div class="batch-table-header-row">
+            <div class="batch-stats-info">
+              <span>Đã phân tích: <strong id="batchItemCount" style="color: var(--accent-cyan);">0</strong> tên miền</span>
+              <span style="color: var(--text-dim);">•</span>
+              <span id="batchSelectedCount" style="color: var(--text-muted);">Đã chọn: 0</span>
+            </div>
+            <div class="batch-table-tools">
+              <button type="button" class="btn btn-secondary btn-sm" id="btnBatchAddRow">
+                ➕ Thêm Dòng Thủ Công
+              </button>
+            </div>
+          </div>
+
+          <table class="batch-table" id="batchTable">
+            <thead>
+              <tr>
+                <th style="width: 40px;"><input type="checkbox" id="batchSelectAll" checked></th>
+                <th style="width: 45px;">STT</th>
+                <th style="width: 210px;">Tên Miền</th>
+                <th>Link Đích (Game / Đăng Ký)</th>
+                <th style="width: 170px;">Telegram CSKH</th>
+                <th style="width: 280px;">Mẫu Landing Page Riêng</th>
+                <th style="width: 180px;">Trạng Thái / Tiến Trình</th>
+                <th style="width: 45px; text-align: center;">Xoá</th>
+              </tr>
+            </thead>
+            <tbody id="batchTableBody">
+              <!-- Render dynamic rows -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Batch Progress Bar & Action Execution -->
+        <div class="batch-execution-card">
+          <div id="batchProgressBarWrapper" class="batch-progress-wrapper" style="display: none;">
+            <div class="batch-progress-info">
+              <span id="batchProgressLabel">Đang xử lý: 0/0...</span>
+              <span id="batchProgressPercent" style="font-weight: 700; color: var(--accent-cyan);">0%</span>
+            </div>
+            <div class="batch-progress-track">
+              <div id="batchProgressBar" class="batch-progress-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <div class="batch-options-row" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; padding: 10px 16px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); border-radius: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 13px; font-weight: 700; color: var(--accent-cyan);">⚡ Chế Độ Chạy Song Song:</span>
+              <select id="batchConcurrencySelect" class="form-control" style="max-width: 320px; font-size: 13px; font-weight: 600; color: #10b981; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.08);">
+                <option value="15" selected>🚀 Song song CỰC NHANH (Tất cả 11+ miền cùng lúc)</option>
+                <option value="5">⚡ Song song 5 tên miền / đợt</option>
+                <option value="10">⚡ Song song 10 tên miền / đợt</option>
+                <option value="1">🐢 Tuần tự từng cái 1 (Chậm)</option>
+              </select>
+            </div>
+            <span style="font-size: 12px; color: var(--text-dim);">Chạy song song giúp hoàn tất 11 tên miền chỉ trong vài chục giây thay vì đợi từng cái.</span>
+          </div>
+
+          <div class="batch-run-buttons">
+            <button type="button" id="btnStartBatchExecution" class="btn btn-primary btn-lg" style="padding: 14px 36px; font-size: 16px; font-weight: 700;">
+              🚀 BẮT ĐẦU CHẠY CÀI ĐẶT HÀNG LOẠT
+            </button>
+            <button type="button" id="btnRetryBatchErrors" class="btn btn-secondary btn-lg" style="display: none; padding: 14px 28px; font-size: 15px; font-weight: 700; color: #f59e0b; border-color: #f59e0b;" onclick="retryFailedBatchItems()">
+              🔄 Thử Lại Các Miền Lỗi
+            </button>
+            <button type="button" id="btnStopBatchExecution" class="btn btn-danger" style="display: none;">
+              ⏹️ Dừng Lại
+            </button>
+          </div>
+        </div>
+
+        <!-- Real-time Live Log Box -->
+        <div id="batchLogBox" class="batch-log-box" style="display: none;">
+          <div class="batch-log-header">
+            <span>📜 Nhật Ký Xử Lý Trực Tiếp (Live Realtime Log)</span>
+            <button type="button" class="btn-clear" onclick="document.getElementById('batchLogBox').style.display='none'">&times;</button>
+          </div>
+          <div id="batchLogContent" class="batch-log-content"></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB 4: QUẢN LÝ DOMAIN & SỬA LINK / ĐỔI MẪU
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-domains" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>Quản Lý Danh Sách Tên Miền & Link Đích</h2>
+          <p class="section-desc">Toàn bộ tên miền đang chạy trên các thư mục mã nguồn. Cho phép sửa link nhanh và đổi mẫu 1-click.</p>
+        </div>
+        <div class="header-tools">
+          <button class="btn btn-secondary" onclick="openBatchSetLinkModal()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+            Cập Nhật Link Hàng Loạt
+          </button>
+          <button id="syncCfBtn" class="btn btn-secondary btn-icon" onclick="syncCloudflareDomains()" title="Đồng bộ 1250+ tên miền từ Cloudflare">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+            Đồng bộ CF (1250+)
+          </button>
+          <button id="refreshDomainsBtn" class="btn btn-secondary btn-icon" title="Quét lại toàn bộ thư mục">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            Quét lại
+          </button>
+        </div>
+      </div>
+
+      <!-- Domain Manager Tools -->
+      <div class="domain-manager-panel">
+        <div class="search-box">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" id="domainSearchInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Tìm theo tên miền, link đích, thương hiệu hoặc thư mục...">
+          <button id="clearDomainSearch" class="btn-clear" style="display: none;">&times;</button>
+        </div>
+
+        <div class="domains-stats-bar">
+          <div class="stat-item">
+            <span class="stat-label">Tổng số tên miền:</span>
+            <span class="stat-val" id="statTotalDomains">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Đang hiển thị:</span>
+            <span class="stat-val" id="statFilteredDomains">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Domains Table Container -->
+      <div class="domains-table-wrapper">
+        <div id="domainsLoading" class="state-container">
+          <div class="spinner"></div>
+          <p>Đang quét toàn bộ các thư mục Landing Page trên máy...</p>
+        </div>
+
+        <table class="domains-table" id="domainsTable" style="display: none;">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Tên Miền</th>
+              <th>Thương Hiệu / Mẫu</th>
+              <th>Link Đích Hiện Tại (Target URL)</th>
+              <th>Thư Mục Nguồn</th>
+              <th style="text-align: right;">Hành Động</th>
+            </tr>
+          </thead>
+          <tbody id="domainsTableBody">
+            <!-- Render động qua app.js -->
+          </tbody>
+        </table>
+
+        <div id="domainsEmpty" class="state-container" style="display: none;">
+          <div class="empty-icon">🔍</div>
+          <h3>Không tìm thấy tên miền phù hợp</h3>
+          <p>Thử tìm kiếm từ khoá khác hoặc nhấn nút Quét Lại.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB: TRA CỨU TÊN MIỀN & XIN CẤP QUYỀN / DUYỆT ADMIN
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-domain-perms" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>🔑 Tra Cứu Tên Miền, Xin Quyền & Phê Duyệt Quản Lý</h2>
+          <p class="section-desc">Tra cứu 1.250+ tên miền trên hệ thống Cloudflare. Gửi yêu cầu cấp quyền quản lý cho Admin phê duyệt để thực hiện thay link, đổi mẫu và trỏ 302.</p>
+        </div>
+        <div class="header-tools">
+          <button class="btn btn-secondary btn-sm" onclick="loadPermsData()">
+            🔄 Làm mới
+          </button>
+        </div>
+      </div>
+
+      <!-- Sub Navigation Tabs for Domain Perms -->
+      <div class="sub-nav-pills" style="margin-bottom: 20px;">
+        <button class="sub-pill active" id="pillPermSearch" onclick="switchPermSubTab('search')">
+          <span class="pill-icon">🔍</span>
+          <span>Tra Cứu & Xin Quyền (1.250+ Miền)</span>
+        </button>
+        <button class="sub-pill" id="pillPermMyDomains" onclick="switchPermSubTab('my-domains')">
+          <span class="pill-icon">🟢</span>
+          <span>Tên Miền Của Tôi (<span id="countMyOwnedDomains">0</span>)</span>
+        </button>
+        <button class="sub-pill" id="pillPermMyRequests" onclick="switchPermSubTab('my-requests')">
+          <span class="pill-icon">📜</span>
+          <span>Yêu Cầu Đã Gửi (<span id="countMyRequests">0</span>)</span>
+        </button>
+        <button class="sub-pill" id="pillPermAdminApproval" onclick="switchPermSubTab('admin-approval')" style="display: none; border-color: rgba(239, 68, 68, 0.4); color: #f87171;">
+          <span class="pill-icon">🛡️</span>
+          <span>Admin Phê Duyệt Cấp Quyền (<span id="countAdminPendingRequests">0</span>)</span>
+        </button>
+      </div>
+
+      <!-- VIEW 1: SEARCH & REQUEST ACCESS -->
+      <div id="permViewSearch" class="perm-sub-view">
+        <div class="batch-parser-card" style="margin-bottom: 20px;">
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <div class="search-box" style="flex: 1; min-width: 280px;">
+              <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <input type="text" id="permSearchInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Nhập tên miền cần tìm (ví dụ: gg88, autotest, llwin, mm88, xx88...)..." onkeyup="if(event.key==='Enter') searchPermDomains()">
+            </div>
+            <button class="btn btn-primary" onclick="searchPermDomains()">
+              🔍 Tìm Kiếm
+            </button>
+            <button class="btn btn-secondary" onclick="document.getElementById('permSearchInput').value=''; searchPermDomains();">
+              Xóa lọc
+            </button>
+          </div>
+          <div style="margin-top: 10px; font-size: 12px; color: var(--text-dim); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <span>💡 Nhập từ khóa tên miền để kiểm tra quyền và gửi yêu cầu cấp quyền tới Admin.</span>
+            <span id="permSearchResultSummary" style="color: var(--accent-cyan); font-weight: 600;">Đang nạp danh sách...</span>
+          </div>
+        </div>
+
+        <div class="domains-table-wrapper">
+          <div id="permSearchLoading" class="state-container" style="display: none;">
+            <div class="spinner"></div>
+            <p>Đang tìm kiếm tên miền...</p>
+          </div>
+          <table class="domains-table" id="permSearchTable">
+            <thead>
+              <tr>
+                <th style="width: 50px;">#</th>
+                <th>Tên Miền</th>
+                <th>Trạng Thái Cloudflare</th>
+                <th>Tài Khoản Quản Lý</th>
+                <th>Quyền Quản Trị Của Bạn</th>
+                <th style="text-align: right;">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody id="permSearchTableBody">
+              <!-- Render động qua JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- VIEW 2: MY APPROVED DOMAINS -->
+      <div id="permViewMyDomains" class="perm-sub-view" style="display: none;">
+        <div class="domains-table-wrapper">
+          <table class="domains-table" id="permMyDomainsTable">
+            <thead>
+              <tr>
+                <th style="width: 50px;">#</th>
+                <th>Tên Miền</th>
+                <th>Thương Hiệu / Mẫu</th>
+                <th>Link Đích Hiện Tại</th>
+                <th>Trạng Thái Quyền</th>
+                <th style="text-align: right;">Thao Tác Nhanh</th>
+              </tr>
+            </thead>
+            <tbody id="permMyDomainsTableBody">
+              <!-- Render động qua JS -->
+            </tbody>
+          </table>
+          <div id="permMyDomainsEmpty" class="state-container" style="display: none;">
+            <div class="empty-icon">🔒</div>
+            <h3>Bạn chưa có tên miền nào được cấp quyền</h3>
+            <p>Hãy chuyển sang tab "Tra Cứu & Xin Quyền" để tìm tên miền và gửi yêu cầu cấp quyền tới Admin.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW 3: MY REQUESTS HISTORY -->
+      <div id="permViewMyRequests" class="perm-sub-view" style="display: none;">
+        <div class="domains-table-wrapper">
+          <table class="domains-table" id="permMyRequestsTable">
+            <thead>
+              <tr>
+                <th style="width: 50px;">#</th>
+                <th>Thời Gian Gửi</th>
+                <th>Tên Miền</th>
+                <th>Ghi Chú / Lý Do</th>
+                <th>Trạng Thái Phê Duyệt</th>
+                <th>Phản Hồi / Xử Lý Bởi</th>
+              </tr>
+            </thead>
+            <tbody id="permMyRequestsTableBody">
+              <!-- Render động qua JS -->
+            </tbody>
+          </table>
+          <div id="permMyRequestsEmpty" class="state-container" style="display: none;">
+            <div class="empty-icon">📜</div>
+            <h3>Chưa có yêu cầu cấp quyền nào</h3>
+            <p>Các yêu cầu xin cấp quyền tên miền bạn gửi sẽ xuất hiện và cập nhật trạng thái tại đây.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW 4: ADMIN APPROVAL PANEL -->
+      <div id="permViewAdminApproval" class="perm-sub-view" style="display: none;">
+        <!-- Card: Manual Assign Tool -->
+        <div class="card" style="padding: 18px; margin-bottom: 20px; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(99, 102, 241, 0.3);">
+          <h3 style="margin: 0 0 10px 0; font-size: 15px; font-weight: 700; color: #fff;">⚡ Gán Trực Tiếp Tên Miền Cho User (Admin Quick Assign)</h3>
+          <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <input type="text" id="adminAssignDomainInput" class="form-input" placeholder="Tên miền (ví dụ: gg8868.uk)" style="flex: 1; min-width: 200px;">
+            <select id="adminAssignUserSelect" class="form-input" style="flex: 1; min-width: 200px;">
+              <option value="">-- Chọn User / Đại lý --</option>
+            </select>
+            <button class="btn btn-primary" onclick="handleAdminManualAssign()">
+              ➕ Gán Quyền Ngay
+            </button>
+          </div>
+        </div>
+
+        <div class="domains-table-wrapper">
+          <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff;">📋 Danh Sách Yêu Cầu Xin Cấp Quyền Đang Chờ Duyệt</h3>
+            <span class="user-role-tag admin" id="adminPendingCountTag">0 Yêu Cầu Chờ Duyệt</span>
+          </div>
+          <table class="domains-table" id="adminRequestsTable">
+            <thead>
+              <tr>
+                <th style="width: 50px;">#</th>
+                <th>Thời Gian</th>
+                <th>Người Gửi (User)</th>
+                <th>Tên Miền Xin Cấp Quyền</th>
+                <th>Ghi Chú / Lý Do</th>
+                <th>Trạng Thái</th>
+                <th style="text-align: right; width: 220px;">Hành Động</th>
+              </tr>
+            </thead>
+            <tbody id="adminRequestsTableBody">
+              <!-- Render động qua JS -->
+            </tbody>
+          </table>
+          <div id="adminRequestsEmpty" class="state-container" style="display: none;">
+            <div class="empty-icon">✨</div>
+            <h3>Tất cả yêu cầu đã được xử lý xong!</h3>
+            <p>Không có yêu cầu cấp quyền nào đang chờ duyệt.</p>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB 5: KIỂM TRA SỨC KHỎE & TỰ SỬA LỖI (HEALTH INSPECTOR & 1-CLICK FIX)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-check" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>🩺 Kiểm Tra Sức Khỏe & Tự Sửa Lỗi Tên Miền (1-Click Auto Fix)</h2>
+          <p class="section-desc">Chẩn đoán chuyên sâu 7 cấp độ: Spaceship ➔ Nameservers ➔ Cloudflare Zone ➔ DNS CNAME ➔ Pages Custom Domain ➔ Source Code ➔ HTTP 200. Phát hiện lỗi và tự động sửa ngay tức thì.</p>
+        </div>
+      </div>
+
+      <!-- Sub Mode Switcher -->
+      <div class="sub-nav-pills" style="margin-bottom: 20px;">
+        <button class="sub-pill active" data-sub="check-single" onclick="switchCheckSubTab('single')">
+          <span class="pill-icon">🔍</span>
+          <span>Chẩn Đoán Từng Tên Miền</span>
+        </button>
+        <button class="sub-pill" data-sub="check-batch" onclick="switchCheckSubTab('batch')">
+          <span class="pill-icon">⚡</span>
+          <span>Quét & Tự Sửa Toàn Bộ Danh Sách (Batch Fix All)</span>
+        </button>
+      </div>
+
+      <!-- PANEL 1: SINGLE DOMAIN INSPECTOR -->
+      <div id="check-single-panel">
+        <div class="inspector-card">
+          <div class="inspector-input-box">
+            <input type="text" id="inspectorDomainInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Nhập tên miền cần chẩn đoán (ví dụ: kjcgg.com, gtong.us, gg8868.uk, mmquocte.com...)...">
+            <button id="btnInspectDomain" class="btn btn-primary btn-lg">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              🩺 Chẩn Đoán Toàn Diện
+            </button>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap;">
+            <span style="font-size: 12px; color: var(--text-dim);">🔍 Kiểm tra nhanh:</span>
+            <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 10px; font-size: 11px;" onclick="inspectSpecificDomain('kjcgg.com')">kjcgg.com</button>
+            <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 10px; font-size: 11px;" onclick="inspectSpecificDomain('gg8868.uk')">gg8868.uk</button>
+            <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 10px; font-size: 11px;" onclick="inspectSpecificDomain('gtong.us')">gtong.us</button>
+            <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 10px; font-size: 11px;" onclick="inspectSpecificDomain('gg88qt.com')">gg88qt.com</button>
+          </div>
+
+          <div id="inspectorLoading" class="state-container" style="display: none;">
+            <div class="spinner"></div>
+            <p>Đang thực hiện chẩn đoán chuyên sâu 7 cấp độ từ Spaceship, Cloudflare, Pages và kết nối mạng...</p>
+          </div>
+
+          <!-- Result Box -->
+          <div id="inspectorResult" class="inspector-result-box" style="display: none;">
+            <!-- Render qua app.js -->
+          </div>
+        </div>
+      </div>
+
+      <!-- PANEL 2: BATCH HEALTH INSPECTOR & 1-CLICK FIX ALL -->
+      <div id="check-batch-panel" style="display: none;">
+        <div class="batch-parser-card" style="margin-bottom: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+            <div>
+              <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff;">⚡ Quét Sức Khỏe & Tự Động Sửa Toàn Bộ Danh Sách</h3>
+              <span style="font-size: 12px; color: var(--text-dim);">Tự động quét toàn diện 7 tiêu chí cho tất cả tên miền, phát hiện lỗi 522/Pages/DNS và tự sửa 1-Click</span>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="loadAllDomainsForBatchCheck()">
+                📋 Nạp Toàn Bộ Domain Đang Chạy
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('batchCheckTextarea').value=''">
+                🗑️ Xoá
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 14px;">
+            <label for="batchCheckTextarea" style="font-size: 13px; font-weight: 600;">Danh sách tên miền cần quét (mỗi dòng 1 tên miền hoặc dán cả đoạn văn bản):</label>
+            <textarea id="batchCheckTextarea" class="form-control font-mono" rows="4" placeholder="kjcgg.com&#10;gg8868.uk&#10;gtong.us&#10;gg88qt.com&#10;mmquocte.com..."></textarea>
+          </div>
+
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <button type="button" class="btn btn-primary btn-lg" id="btnStartBatchCheck" onclick="startBatchHealthInspection()">
+              <span class="btn-icon">🩺</span>
+              <span>Bắt Đầu Quét Toàn Bộ Danh Sách</span>
+            </button>
+            <button type="button" class="btn btn-primary btn-lg" id="btnFixAllFailingDomains" onclick="startFixAllFailingDomains()" style="display: none; background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%); border-color: #f43f5e; box-shadow: 0 4px 15px rgba(244,63,94,0.4);">
+              <span class="btn-icon">⚡</span>
+              <span>TỰ ĐỘNG SỬA TẤT CẢ TÊN MIỀN BỊ LỖI (1-CLICK FIX ALL)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Batch Stats Bar -->
+        <div id="batchCheckStatsBar" class="domains-stats-bar" style="display: none; margin-bottom: 16px;">
+          <div class="stat-item">
+            <span class="stat-label">Tổng số tên miền:</span>
+            <span class="stat-val" id="statBatchTotal">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">🟢 100% Hoàn Hảo (200 OK):</span>
+            <span class="stat-val" id="statBatchHealthy" style="color: var(--accent-emerald);">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">🟡 Cảnh Báo:</span>
+            <span class="stat-val" id="statBatchDegraded" style="color: var(--accent-amber);">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">🔴 Sự Cố / 522:</span>
+            <span class="stat-val" id="statBatchCritical" style="color: var(--accent-rose);">0</span>
+          </div>
+        </div>
+
+        <!-- Batch Progress Bar & Logs -->
+        <div id="batchFixProgressWrapper" style="display: none; margin-bottom: 18px;">
+          <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+            <span id="batchFixProgressLabel" style="font-weight: 600; color: #fff;">Đang xử lý tự động sửa lỗi...</span>
+            <span id="batchFixProgressPercent" style="font-family: var(--font-mono); font-weight: 700; color: var(--accent-cyan);">0%</span>
+          </div>
+          <div class="batch-progress-bar-bg" style="height: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; overflow: hidden;">
+            <div id="batchFixProgressBar" style="height: 100%; width: 0%; background: linear-gradient(90deg, #6366f1, #10b981); transition: width 0.3s ease;"></div>
+          </div>
+        </div>
+
+        <!-- Batch Check Results Table Wrapper -->
+        <div id="batchCheckLoading" class="state-container" style="display: none;">
+          <div class="spinner"></div>
+          <p id="batchCheckLoadingText">Đang tiến hành quét và chẩn đoán toàn diện cho danh sách tên miền...</p>
+        </div>
+
+        <div class="domains-table-wrapper" id="batchCheckTableWrapper" style="display: none;">
+          <table class="domains-table" id="batchCheckTable">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Tên Miền</th>
+                <th>Điểm Sức Khỏe</th>
+                <th>Trạng Thái Hệ Thống</th>
+                <th>Chi Tiết Vấn Đề</th>
+                <th>Kết Nối HTTP</th>
+                <th style="text-align: right;">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody id="batchCheckTableBody">
+              <!-- Render động qua app.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         TAB 6: LỊCH SỬ MUA & CÀI ĐẶT (PURCHASE & DEPLOYMENT HISTORY)
+         ══════════════════════════════════════════════════════════════════ -->
+    <section id="tab-history" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>📜 Lịch Sử Vận Hành & Tiến Độ Tên Miền</h2>
+          <p class="section-desc">Theo dõi tiến trình kiểm tra HTTP 200 tự động, trạng thái xử lý ngầm và lịch sử giao dịch chi tiết.</p>
+        </div>
+        <div class="header-tools">
+          <button class="btn btn-primary btn-sm" id="verifyAllHistoryBtn" title="Kiểm tra HTTP 200 toàn bộ các miền đang chờ">
+            ⚡ Quét Kiểm Tra (Check 200)
+          </button>
+          <button class="btn btn-secondary btn-icon" id="refreshHistoryBtn" title="Làm mới lịch sử">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            Làm mới
+          </button>
+          <button class="btn btn-secondary btn-sm" id="clearHistoryBtn" title="Xoá sạch lịch sử" style="color: var(--accent-rose); border-color: rgba(244,63,94,0.3);">
+            🗑️ Xoá Lịch Sử
+          </button>
+        </div>
+      </div>
+
+      <!-- History Stats & Search -->
+      <div class="domain-manager-panel">
+        <div class="search-box">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" id="historySearchInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Tìm theo domain, user, hành động, link, mẫu...">
+          <button id="clearHistorySearch" class="btn-clear" style="display: none;">&times;</button>
+        </div>
+
+        <div class="domains-stats-bar">
+          <div class="stat-item">
+            <span class="stat-label">Tổng giao dịch:</span>
+            <span class="stat-val" id="statTotalHistory">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Đã Live 200 OK:</span>
+            <span class="stat-val" id="statLiveHistory" style="color: var(--accent-emerald);">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Mua tên miền:</span>
+            <span class="stat-val" id="statBuyHistory">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Đổi mẫu / Trỏ LP:</span>
+            <span class="stat-val" id="statLpHistory">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- History Table -->
+      <div class="domains-table-wrapper">
+        <div id="historyLoading" class="state-container">
+          <div class="spinner"></div>
+          <p>Đang tải dữ liệu lịch sử...</p>
+        </div>
+
+        <table class="domains-table" id="historyTable" style="display: none;">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Thời Gian</th>
+              <th>Tài Khoản</th>
+              <th>Tên Miền</th>
+              <th>Hành Động</th>
+              <th>Mẫu Giao Diện</th>
+              <th>Link Đích</th>
+              <th>Trạng Thái Kiểm Tra</th>
+              <th style="text-align: right;">Thao Tác</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody">
+            <!-- Render động qua app.js -->
+          </tbody>
+        </table>
+
+        <div id="historyEmpty" class="state-container" style="display: none;">
+          <div class="empty-icon">📜</div>
+          <h3>Chưa có bản ghi lịch sử nào</h3>
+          <p>Các thao tác mua miền, đổi mẫu và trỏ link sẽ tự động được ghi lại tại đây.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB 8: CÀI ĐẶT & QUẢN LÝ API TOKEN (SETTINGS & API KEYS)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-settings" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>⚙️ Cài Đặt Hệ Thống & Quản Lý API Token</h2>
+          <p class="section-desc">Cấu hình API Token Cloudflare, xem phân quyền tài khoản, kết nối Spaceship và quản lý các thiết lập vận hành.</p>
+        </div>
+      </div>
+
+      <!-- Cloudflare API Token Manager Card -->
+      <div class="batch-parser-card" style="margin-bottom: 24px; border-color: rgba(99, 102, 241, 0.3); background: rgba(15, 23, 42, 0.65);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 24px;">🔑</span>
+            <div>
+              <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff;">Quản Lý & Kiểm Tra Quyền API Token Cloudflare</h3>
+              <span style="font-size: 12px; color: var(--text-dim);">Kiểm tra tính hợp lệ và quyền hạn thêm tên miền vào Cloudflare Pages, quản lý DNS Zones</span>
+            </div>
+          </div>
+          <span id="cfTokenStatusBadge" class="badge-status badge-success" style="font-size: 12px; padding: 5px 12px;">
+            🟢 Đang Nạp Token...
+          </span>
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
+          <input type="password" id="cfTokenInput" class="form-control font-mono" placeholder="Nhập mã CLOUDFLARE_API_TOKEN (cfut_...)" style="flex: 1; min-width: 280px;">
+          <button type="button" class="btn btn-secondary btn-sm" id="btnToggleTokenVisibility" onclick="toggleTokenVisibility()">
+            👁️ Hiện
+          </button>
+          <button type="button" class="btn btn-secondary" id="btnCheckCfToken" onclick="checkCurrentCfToken()">
+            🔍 Kiểm Tra Quyền Token
+          </button>
+          <button type="button" class="btn btn-primary" id="btnSaveCfToken" onclick="saveNewCfToken()">
+            💾 Lưu & Kích Hoạt
+          </button>
+        </div>
+
+        <div id="cfTokenVerifyResult" style="display: none; margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; font-family: var(--font-mono);">
+          <!-- Dynamic verification result -->
+        </div>
+
+        <!-- Help & Instructions -->
+        <div style="margin-top: 16px; padding: 12px 16px; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 8px; font-size: 12px; color: var(--text-dim); line-height: 1.6;">
+          <strong style="color: var(--accent-cyan);">💡 Yêu cầu quyền hạn tối thiểu cho Cloudflare API Token:</strong><br>
+          1. <b>Account ➔ Cloudflare Pages: Edit</b> (Bắt buộc để tự động thêm Custom Domain và liên kết dự án Pages)<br>
+          2. <b>Zone ➔ Zone: Edit, Read</b> (Bắt buộc để tạo Zone và quản lý miền)<br>
+          3. <b>Zone ➔ DNS: Edit</b> (Bắt buộc để tạo và sửa bản ghi DNS CNAME trỏ về Pages/Page Rules)<br>
+          4. <b>Zone ➔ Page Rules: Edit</b> (Dành cho tính năng trỏ chuyển hướng 302 siêu tốc)
+        </div>
+      </div>
+
+      <!-- Environment & Services Overview Card -->
+      <div class="batch-parser-card" style="border-color: rgba(16, 185, 129, 0.3); background: rgba(15, 23, 42, 0.65);">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px;">
+          <span style="font-size: 24px;">🚀</span>
+          <div>
+            <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff;">Trạng Thái Kết Nối & Dịch Vụ Hệ Thống</h3>
+            <span style="font-size: 12px; color: var(--text-dim);">Thông tin tích hợp Spaceship API, Git Auto Push và Watchdog Auto Repair</span>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+          <div style="padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px;">
+            <div style="font-size: 12px; color: var(--text-dim);">Spaceship API</div>
+            <div style="font-size: 14px; font-weight: 600; color: var(--accent-emerald); margin-top: 2px;">🟢 Đã Kết Nối (Sandbox/Live)</div>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">Tự động đăng ký & cấu hình Nameservers</div>
+          </div>
+          <div style="padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px;">
+            <div style="font-size: 12px; color: var(--text-dim);">Cloudflare Pages</div>
+            <div style="font-size: 14px; font-weight: 600; color: var(--accent-cyan); margin-top: 2px;">⚡ Tự Động Auto-Scale Projects</div>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">Quản lý và bound Custom Domains trực tiếp</div>
+          </div>
+          <div style="padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px;">
+            <div style="font-size: 12px; color: var(--text-dim);">Watchdog Auto Repair (>10m)</div>
+            <div style="font-size: 14px; font-weight: 600; color: var(--accent-amber); margin-top: 2px;">🔄 Đang Chạy Tự Động</div>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">Tự quét & sửa lỗi DNS/Pages sau 10 phút</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB: VIP WEB CLONER
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-cloner" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>🥷 VIP Website Cloner & Auto-Router</h2>
+          <p class="section-desc">Sao chép trọn gói mã nguồn (HTML, CSS, JS, Ảnh) của bất kỳ trang web nào, tự động tiêm Dynamic Router và deploy lên Cloudflare Pages chỉ trong 30 giây.</p>
+        </div>
+      </div>
+
+      <div class="cloner-hero-card">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 28px;">⚡</span>
+            <div>
+              <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: #fff;">Nhập Link Website Cần Sao Chép</h3>
+              <span style="font-size: 13px; color: var(--text-dim);">Hệ thống sẽ tự động bóc tách link rác, tải assets về VPS, tạo Git Repo & cấu hình Dynamic Router</span>
+            </div>
+          </div>
+          <div style="background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.4); border-radius: 8px; padding: 6px 12px; color: #818cf8; font-size: 13px; font-weight: 700; text-align: right;">
+            ✨ Tự Động & Độc Quyền
+          </div>
+        </div>
+
+        <form id="clonerForm" onsubmit="handleCloneWebsite(event)">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;">
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label>🔗 URL Website Nguồn <span style="color: var(--accent-rose);">*</span></label>
+              <input type="url" id="clonerSourceUrl" class="form-input" placeholder="Ví dụ: https://landing-vip-game.com" required>
+            </div>
+            <div class="form-group">
+              <label>🏷️ Đặt Tên Mẫu Clone</label>
+              <input type="text" id="clonerTemplateName" class="form-input" placeholder="Ví dụ: Mẫu Game VIP 2026">
+            </div>
+            <div class="form-group">
+              <label>🌐 Gán Luôn Tên Miền (Tùy chọn)</label>
+              <input type="text" id="clonerDomain" class="form-input" placeholder="Ví dụ: mydomain.top">
+            </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label>🎯 Link Hậu Đài / Đích Đến Cho Tên Miền (Nếu có)</label>
+              <input type="url" id="clonerTargetUrl" class="form-input" placeholder="Ví dụ: https://mybrand.com/register?id=999">
+            </div>
+          </div>
+
+          <!-- ── TÙY CHỈNH NÂNG CAO: THAY LOGO, FAVICON, TEXT TOÀN TRANG ── -->
+          <div style="margin-top: 20px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(6, 182, 212, 0.35); border-radius: 12px; padding: 20px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 12px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 20px;">🎨</span>
+                <div>
+                  <h4 style="margin: 0; font-size: 15px; font-weight: 700; color: #fff;">Tùy Chỉnh Nâng Cao: Thay Logo, Favicon & Text Toàn Trang</h4>
+                  <span style="font-size: 12px; color: var(--accent-cyan);">Tự động bóc tách và thay thế toàn bộ giao diện theo thương hiệu của bạn</span>
+                </div>
+              </div>
+              <span class="badge" style="background: rgba(6,182,212,0.15); color: var(--accent-cyan); border: 1px solid rgba(6,182,212,0.3); font-size: 11px;">Tùy Chọn Miễn Phí</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+              <!-- Mục 1: Thay Logo -->
+              <div class="form-group" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 14px;">
+                <label style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span>🖼️ Thay Logo Mới:</span>
+                  <span style="font-size: 11px; color: var(--text-dim);">Hỗ trợ tải ảnh hoặc dán Link</span>
+                </label>
+                
+                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('clonerLogoFileInput').click()" style="display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+                    📁 Tải Ảnh Lên
+                  </button>
+                  <input type="file" id="clonerLogoFileInput" accept="image/*" style="display: none;" onchange="handleClonerLogoUpload(event)">
+                  <input type="text" id="clonerLogoUrlInput" class="form-input" placeholder="Hoặc dán link ảnh: https://.../logo.png" style="font-size: 12px;" oninput="handleClonerLogoUrlInput(event)">
+                </div>
+
+                <!-- Preview Logo -->
+                <div id="clonerLogoPreviewContainer" style="display: none; align-items: center; gap: 10px; background: rgba(0,0,0,0.4); border: 1px dashed rgba(6,182,212,0.5); border-radius: 8px; padding: 8px 12px;">
+                  <img id="clonerLogoPreviewImg" src="" alt="Logo Preview" style="max-height: 40px; max-width: 140px; object-fit: contain;">
+                  <div style="flex: 1; font-size: 12px; color: var(--accent-cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" id="clonerLogoFilenameText">Logo đã chọn</div>
+                  <button type="button" class="btn-clear" onclick="clearClonerLogo()" title="Xóa logo này">&times;</button>
+                </div>
+              </div>
+
+              <!-- Mục 2: Thay Favicon -->
+              <div class="form-group" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 14px;">
+                <label style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span>🔖 Thay Favicon (Icon Tab Web):</span>
+                  <span style="font-size: 11px; color: var(--text-dim);">Hỗ trợ tải icon hoặc dán Link</span>
+                </label>
+                
+                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('clonerFaviconFileInput').click()" style="display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+                    📁 Tải Icon Lên
+                  </button>
+                  <input type="file" id="clonerFaviconFileInput" accept="image/*,.ico" style="display: none;" onchange="handleClonerFaviconUpload(event)">
+                  <input type="text" id="clonerFaviconUrlInput" class="form-input" placeholder="Hoặc dán link icon: https://.../favicon.ico" style="font-size: 12px;" oninput="handleClonerFaviconUrlInput(event)">
+                </div>
+
+                <!-- Preview Favicon -->
+                <div id="clonerFaviconPreviewContainer" style="display: none; align-items: center; gap: 10px; background: rgba(0,0,0,0.4); border: 1px dashed rgba(6,182,212,0.5); border-radius: 8px; padding: 8px 12px;">
+                  <img id="clonerFaviconPreviewImg" src="" alt="Favicon Preview" style="width: 24px; height: 24px; object-fit: contain;">
+                  <div style="flex: 1; font-size: 12px; color: var(--accent-cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" id="clonerFaviconFilenameText">Favicon đã chọn</div>
+                  <button type="button" class="btn-clear" onclick="clearClonerFavicon()" title="Xóa favicon này">&times;</button>
+                </div>
+              </div>
+
+              <!-- Mục 3: Thay Tiêu Đề Website -->
+              <div class="form-group" style="grid-column: 1 / -1; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 14px;">
+                <label style="margin-bottom: 6px;">🏷️ Thay Tiêu Đề Trang Mới (Hiển thị trên tab trình duyệt & SEO):</label>
+                <input type="text" id="clonerPageTitleInput" class="form-input" placeholder="Ví dụ: GG88 - CỔNG GAME QUỐC TẾ UY TÍN 2026 | TẶNG 88K">
+              </div>
+
+              <!-- Mục 4: Thay Thế Text / Tên Thương Hiệu Toàn Trang -->
+              <div class="form-group" style="grid-column: 1 / -1; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <div>
+                    <label style="margin-bottom: 2px;">✍️ Thay Thế Text / Tên Thương Hiệu Hàng Loạt (Toàn Bộ HTML, CSS & JS):</label>
+                    <div style="font-size: 12px; color: var(--text-dim);">Hệ thống sẽ tự động quét và thay thế tất cả từ khóa cũ thành từ khóa mới.</div>
+                  </div>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="addClonerTextReplacementRow()" style="font-size: 12px; padding: 4px 10px; color: var(--accent-cyan); border-color: rgba(6, 182, 212, 0.4);">
+                    ➕ Thêm Cặp Từ Khóa
+                  </button>
+                </div>
+
+                <div id="clonerTextReplacementsContainer" style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+                  <!-- Row 1 mặc định -->
+                  <div class="cloner-replace-row" style="display: flex; align-items: center; gap: 10px;">
+                    <input type="text" class="form-input cloner-find-text" placeholder="Từ khóa cũ (VD: MM88 hoặc mm88win.com)" style="flex: 1; font-size: 13px;">
+                    <span style="color: var(--accent-cyan); font-weight: 800; font-size: 15px;">➔</span>
+                    <input type="text" class="form-input cloner-replace-text" placeholder="Thay bằng (VD: GG88 hoặc gg88vip.top)" style="flex: 1; font-size: 13px;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="removeClonerTextReplacementRow(this)" style="color: var(--accent-rose); border-color: rgba(244,63,94,0.3); padding: 6px 10px;" title="Xóa dòng này">
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 24px;">
+            <span style="font-size: 13px; color: var(--text-dim);">Tự động bóc tách CSS/JS, ảnh gốc, tạo Git Repo & cấu hình Cloudflare Pages</span>
+            <button type="submit" class="btn btn-primary" id="btnSubmitClone">
+              <span>🚀 Bắt Đầu Sao Chép & Đóng Gói VIP</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Quick Tips -->
+      <div class="card" style="padding: 20px; background: rgba(15,23,42,0.5);">
+        <h4 style="font-size: 14px; color: var(--accent-cyan); margin-bottom: 8px;">💡 Cơ Chế Hoạt Động Của VIP Web Cloner:</h4>
+        <ul style="padding-left: 20px; font-size: 13px; color: var(--text-muted); line-height: 1.8;">
+          <li><b>Bóc tách toàn diện:</b> Tự động tải về file HTML gốc, gom toàn bộ stylesheet CSS, images, javascript về máy chủ.</li>
+          <li><b>Xóa sạch link tiếp thị liên kết cũ:</b> Quét và vô hiệu hóa tất cả các link cứng của đối thủ trên trang gốc.</li>
+          <li><b>Tiêm Dynamic Router 2026:</b> Tự động gắn script đọc <code>domains.json</code> để khi bất kỳ khách nào bấm vào nút trên trang cũng nhảy đúng link của bạn 100%.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB: TIẾN TRÌNH CHẠY NGẦM (TASK QUEUE)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-tasks" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>⏳ Hàng Đợi & Tiến Trình Chạy Ngầm</h2>
+          <p class="section-desc">Theo dõi thời gian thực tất cả tác vụ mua domain, trỏ DNS, deploy Pages và clone web mà không lo bị đơ trình duyệt.</p>
+        </div>
+        <div class="header-tools">
+          <button class="btn btn-secondary btn-sm" onclick="loadTasksList()">
+            🔄 Làm mới hàng đợi
+          </button>
+        </div>
+      </div>
+
+      <div id="tasksListContainer">
+        <!-- Rendered by JS -->
+        <div class="empty-state">
+          <span style="font-size: 40px;">☕</span>
+          <p>Hiện tại không có tác vụ nào đang chờ xử lý.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB: VÍ TIỀN & THÀNH VIÊN
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-wallet" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>💳 Ví Số Dư & Phân Quyền Thành Viên</h2>
+          <p class="section-desc">Quản lý số dư, lịch sử giao dịch nạp/trừ tiền và phân quyền gán domain cho từng người dùng.</p>
+        </div>
+        <div class="header-tools">
+          <button class="btn btn-primary btn-sm" onclick="openTopupModal()">
+            ➕ Nạp Tiền Vào Ví
+          </button>
+        </div>
+      </div>
+
+      <!-- Balance Summary Cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 24px;">
+        <div class="card" style="padding: 20px; border-left: 4px solid var(--accent-emerald);">
+          <span style="font-size: 12px; color: var(--text-dim);">SỐ DƯ HIỆN TẠI</span>
+          <div style="font-size: 28px; font-weight: 800; color: var(--accent-emerald); margin-top: 4px;" id="walletCardBalance">0.00$</div>
+          <span style="font-size: 11px; color: var(--text-muted);" id="walletCardVnd">≈ 0 VNĐ</span>
+        </div>
+        <div class="card" style="padding: 20px; border-left: 4px solid var(--primary);">
+          <span style="font-size: 12px; color: var(--text-dim);">TÊN MIỀN ĐANG QUẢN LÝ</span>
+          <div style="font-size: 28px; font-weight: 800; color: #fff; margin-top: 4px;" id="walletCardDomains">0</div>
+          <span style="font-size: 11px; color: var(--text-muted);">Domain thuộc tài khoản</span>
+        </div>
+        <div class="card" style="padding: 20px; border-left: 4px solid var(--accent-cyan);">
+          <span style="font-size: 12px; color: var(--text-dim);">VAI TRÒ TÀI KHOẢN</span>
+          <div style="font-size: 20px; font-weight: 800; color: var(--accent-cyan); margin-top: 8px;" id="walletCardRole">ADMIN</div>
+          <span style="font-size: 11px; color: var(--text-muted);">Toàn quyền hệ thống</span>
+        </div>
+      </div>
+
+      <!-- Admin Only: User Management & Domain Assignment -->
+      <div id="adminUserManagementSection" style="margin-bottom: 24px;">
+        <div class="card" style="padding: 20px; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+            <div>
+              <h3 style="font-size: 16px; font-weight: 700; color: #fff;">👥 Quản Lý Thành Viên & Phân Quyền (Admin Panel)</h3>
+              <span style="font-size: 12px; color: var(--text-dim);">Thêm, sửa, xóa tài khoản, nạp tiền và gán tên miền cho từng đại lý</span>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary btn-sm" onclick="openCreateUserModal()">
+                ➕ Thêm Thành Viên
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="openDomainAssignModal()">
+                🔗 Gán Tên Miền
+              </button>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="domains-table">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Họ Tên</th>
+                  <th>Vai Trò</th>
+                  <th>Trạng Thái</th>
+                  <th>Số Dư</th>
+                  <th>Domain Quản Lý</th>
+                  <th>Thao Tác</th>
+                </tr>
+              </thead>
+              <tbody id="usersTableBody">
+                <!-- Rendered by JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Domain Purchase Orders (Đơn Mua Tên Miền & Duyệt Trừ Xu) -->
+      <div class="card" style="padding: 20px; margin-bottom: 24px; border-left: 4px solid var(--accent-amber);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h3 style="font-size: 16px; font-weight: 700; color: #fff;">🛒 Quản Lý Đơn Đặt Mua Tên Miền (Duyệt & Trừ Xu)</h3>
+            <span style="font-size: 12px; color: var(--text-dim);">Theo dõi tiến trình duyệt đơn mua miền, số dư thanh toán và trạng thái kích hoạt</span>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="loadDomainOrdersList()">
+            🔄 Làm Mới Đơn
+          </button>
+        </div>
+        <div class="table-wrapper">
+          <table class="domains-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Thời Gian</th>
+                <th>Người Đặt Mua</th>
+                <th>Tên Miền</th>
+                <th>Giá Thanh Toán</th>
+                <th>Số Dư Ví Lúc Duyệt</th>
+                <th>Ghi Chú / Công Việc</th>
+                <th>Trạng Thái</th>
+                <th style="text-align: right;">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody id="domainOrdersTableBody">
+              <!-- Rendered by JS -->
+            </tbody>
+          </table>
+          <div id="domainOrdersEmpty" class="state-container" style="display: none; padding: 25px;">
+            <div style="font-size: 28px;">🛒</div>
+            <h4 style="margin: 6px 0 2px 0; color: #fff;">Chưa có đơn đặt mua tên miền nào</h4>
+            <p style="font-size: 12px; color: var(--text-dim);">Khi bạn hoặc thành viên đặt mua tên miền, đơn sẽ hiển thị tại đây để Admin duyệt và trừ Xu.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Transaction History -->
+      <div class="card" style="padding: 20px;">
+        <h3 style="font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 12px;">📜 Lịch Sử Giao Dịch Ví</h3>
+        <div class="table-wrapper">
+          <table class="domains-table">
+            <thead>
+              <tr>
+                <th>Thời Gian</th>
+                <th>Loại Giao Dịch</th>
+                <th>Số Tiền</th>
+                <th>Số Dư Sau GD</th>
+                <th>Nội Dung / Ghi Chú</th>
+              </tr>
+            </thead>
+            <tbody id="transactionsTableBody">
+              <!-- Rendered by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+       MODALS
+       ══════════════════════════════════════════════════════════════════════════ -->
+
+  <!-- Modal: Đăng Nhập / Đổi Tài Khoản -->
+  <div id="loginModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('loginModal')"></div>
+    <div class="modal-content modal-md">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 22px;">👤</span>
+          <div>
+            <h3 id="authModalTitle">Tài Khoản & Đăng Nhập</h3>
+            <span class="modal-subtitle">Xác thực quyền Admin hoặc Thành Viên</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('loginModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="authForm" onsubmit="handleAuthSubmit(event)">
+          <div class="form-group">
+            <label>Tên đăng nhập</label>
+            <input type="text" id="authUsername" class="form-input" placeholder="admin hoặc tên tài khoản" required>
+          </div>
+          <div class="form-group">
+            <label>Mật khẩu</label>
+            <input type="password" id="authPassword" class="form-input" placeholder="••••••••" required>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAuthMode()" id="btnToggleAuthMode">
+              Chưa có tài khoản? Đăng ký
+            </button>
+            <button type="submit" class="btn btn-primary" id="btnAuthSubmit">
+              Đăng Nhập
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Nạp Tiền & Quét Mã VietQR Tự Động -->
+  <div id="topupModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('topupModal')"></div>
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 24px;">⚡</span>
+          <div>
+            <h3>Nạp Tiền Tự Động Qua VietQR</h3>
+            <span class="modal-subtitle">Quét mã QR để cộng tiền tự động vào ví trong 2 giây (Hands-free)</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('topupModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px; align-items: start;">
+          <!-- Left: QR Code Display -->
+          <div style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 18px; text-align: center;">
+            <div style="background: #fff; padding: 10px; border-radius: 8px; display: inline-block; box-shadow: 0 8px 25px rgba(0,0,0,0.4);">
+              <img id="vietQrImage" src="" alt="VietQR Code" style="width: 200px; height: 200px; display: block; object-fit: contain;">
+            </div>
+            <div style="margin-top: 12px;">
+              <span class="user-role-tag admin" style="font-size: 11px;">TỰ ĐỘNG CỘNG TIỀN 24/7</span>
+              <p style="font-size: 12px; color: var(--text-dim); margin-top: 6px;">Quét mã bằng App Ngân Hàng bất kỳ</p>
+            </div>
+          </div>
+
+          <!-- Right: Transfer Details & Simulators -->
+          <div>
+            <div class="form-group">
+              <label>Số Lượng Xu Cần Nạp <span style="color: var(--accent-amber); font-size: 12px;">(100k VNĐ = 100 Xu • 1 Xu = 1.000 VNĐ)</span></label>
+              <div style="display: flex; gap: 8px;">
+                <input type="number" step="10" min="10" id="topupAmountInput" class="form-input" value="100" oninput="refreshVietQr()">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="setTopupAmount(100)">100 Xu</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="setTopupAmount(200)">200 Xu</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="setTopupAmount(500)">500 Xu</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="setTopupAmount(1000)">1000 Xu</button>
+              </div>
+            </div>
+
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 14px; margin: 14px 0; font-size: 13px; line-height: 1.8;">
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: var(--text-dim);">Ngân hàng:</span>
+                <strong id="qrBankName" style="color: var(--accent-cyan);">MBBank</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-dim);">Số tài khoản:</span>
+                <div>
+                  <strong id="qrAccNumber" style="color: #fff; font-family: var(--font-mono);">0988889999</strong>
+                  <button class="btn-copy" onclick="copyText(document.getElementById('qrAccNumber').textContent)">📋</button>
+                </div>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: var(--text-dim);">Chủ tài khoản:</span>
+                <strong id="qrAccName" style="color: #fff;">NGUYEN VAN FREZE</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-dim);">Nội dung CK:</span>
+                <div>
+                  <strong id="qrTransferMemo" style="color: var(--accent-amber); font-family: var(--font-mono);">NAP DEMO_USER 1234</strong>
+                  <button class="btn-copy" onclick="copyText(document.getElementById('qrTransferMemo').textContent)">📋</button>
+                </div>
+              </div>
+              <div style="display: flex; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 6px; margin-top: 6px;">
+                <span style="color: var(--text-dim);">Số tiền VNĐ thực trả:</span>
+                <strong id="qrAmountVnd" style="color: var(--accent-emerald); font-size: 15px;">100,000 VNĐ</strong>
+              </div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <button type="button" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);" onclick="simulatePaymentWebhook()">
+                ⚡ Mô Phỏng Quét QR Thành Công (Test Auto Webhook)
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Tạo / Sửa Thành Viên (User CRUD) -->
+  <div id="userCrudModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('userCrudModal')"></div>
+    <div class="modal-content modal-md">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 22px;">👤</span>
+          <div>
+            <h3 id="userCrudTitle">Thêm Thành Viên Mới</h3>
+            <span class="modal-subtitle">Tạo tài khoản và phân quyền cho đại lý</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('userCrudModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="userCrudForm" onsubmit="handleUserCrudSubmit(event)">
+          <input type="hidden" id="crudUserId">
+          <div class="form-group">
+            <label>Tên đăng nhập (Username) <span style="color: var(--accent-rose);">*</span></label>
+            <input type="text" id="crudUsername" class="form-input" placeholder="agent_nam" required>
+          </div>
+          <div class="form-group">
+            <label>Mật khẩu <span id="crudPasswordReq" style="color: var(--accent-rose);">*</span></label>
+            <input type="password" id="crudPassword" class="form-input" placeholder="••••••••">
+          </div>
+          <div class="form-group">
+            <label>Họ và tên / Tên đại lý</label>
+            <input type="text" id="crudFullName" class="form-input" placeholder="Đại Lý Nam GG88">
+          </div>
+          <div class="form-group">
+            <label>Vai trò (Role)</label>
+            <select id="crudRole" class="form-input">
+              <option value="user">User (Thành viên / Đại lý)</option>
+              <option value="admin">Admin (Quản trị viên)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Trạng thái</label>
+            <select id="crudStatus" class="form-input">
+              <option value="active">Hoạt động (Active)</option>
+              <option value="banned">Tạm khóa (Banned)</option>
+            </select>
+          </div>
+          <div class="form-group" id="crudInitialBalanceGroup">
+            <label>Cấp vốn ban đầu (USD)</label>
+            <input type="number" step="1" id="crudInitialBalance" class="form-input" value="0">
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('userCrudModal')">Hủy</button>
+            <button type="submit" class="btn btn-primary" id="btnUserCrudSubmit">Lưu Thành Viên</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Gán Tên Miền Cho Người Dùng -->
+  <div id="domainAssignModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('domainAssignModal')"></div>
+    <div class="modal-content modal-md">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 22px;">🔗</span>
+          <div>
+            <h3>Gán Quyền Quản Lý Tên Miền</h3>
+            <span class="modal-subtitle">Chuyển quyền quản lý domain cho đại lý cụ thể</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('domainAssignModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="domainAssignForm" onsubmit="handleDomainAssignSubmit(event)">
+          <div class="form-group">
+            <label>Chọn Tên Miền Cần Gán</label>
+            <select id="assignDomainSelect" class="form-input" required></select>
+          </div>
+          <div class="form-group">
+            <label>Gán Cho Thành Viên</label>
+            <select id="assignUserSelect" class="form-input" required></select>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('domainAssignModal')">Hủy</button>
+            <button type="submit" class="btn btn-primary">Xác Nhận Gán Domain</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Modal: Chuyển Đổi 1-Click 302 🔁 Landing Page -->
+  <div id="switchModeModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('switchModeModal')"></div>
+    <div class="modal-content modal-md">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 22px;">🔁</span>
+          <div>
+            <h3>Chuyển Đổi Chế Độ Vận Hành</h3>
+            <span class="modal-subtitle" id="switchModalDomainTitle">domain.top</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('switchModeModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="switchModeForm" onsubmit="handleSwitchModeSubmit(event)">
+          <input type="hidden" id="switchModeDomain">
+          <div class="form-group">
+            <label>Chọn Chế Độ Chuyển Sang</label>
+            <select id="switchToMode" class="form-input" onchange="toggleSwitchModeFields()">
+              <option value="302">⚡ 302 Direct Redirect (Chuyển hướng trực tiếp siêu tốc)</option>
+              <option value="LP">🎨 Landing Page (Giao diện mẫu có nút bấm)</option>
+            </select>
+          </div>
+          <div class="form-group" id="switchModeTemplateGroup" style="display: none;">
+            <label>Chọn Mẫu Landing Page</label>
+            <select id="switchModeTemplate" class="form-input"></select>
+          </div>
+          <div class="form-group">
+            <label>Đường Link Đích (Target URL)</label>
+            <input type="url" id="switchModeTargetUrl" class="form-input" placeholder="Để trống = giữ link cũ (tự kế thừa)">
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('switchModeModal')">Hủy</button>
+            <button type="submit" class="btn btn-primary">Bắt Đầu Chuyển Đổi Ngầm</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Chi Tiết Tiến Trình Tác Vụ Ngầm -->
+  <div id="taskDetailModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('taskDetailModal')"></div>
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 22px;">📜</span>
+          <div>
+            <h3 id="taskDetailTitle">Chi Tiết Tác Vụ</h3>
+            <span class="modal-subtitle" id="taskDetailSubtitle">Đang xử lý ngầm</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('taskDetailModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="task-progress-track">
+          <div id="taskDetailProgressBar" class="task-progress-bar" style="width: 0%;"></div>
+        </div>
+        <div id="taskDetailLogs" class="task-step-log" style="max-height: 320px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary btn-sm" onclick="closeModal('taskDetailModal')">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 1: Preview Mẫu -->
+  <div id="previewModal" class="modal">
+    <div class="modal-backdrop" id="modalBackdrop"></div>
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <div>
+          <h3 id="modalTitle">Xem trước mẫu</h3>
+          <span id="modalTarget" class="modal-subtitle"></span>
+        </div>
+        <button class="modal-close" onclick="closeModal('previewModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="preview-wrapper">
+          <img id="modalImage" src="" alt="Landing Page Preview">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <a id="modalLiveDemo" href="#" target="_blank" class="btn btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          🌐 Mở Trang Web
+        </a>
+        <button id="modalSelectBtn" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+          🚀 Áp Dụng Mẫu Này
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 2: Sửa Link Nhanh (Edit Link Modal) -->
+  <div id="editLinkModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('editLinkModal')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h3>✏️ Cập Nhật Link & Telegram</h3>
+          <span id="editLinkDomainSubtitle" class="modal-subtitle"></span>
+        </div>
+        <button class="modal-close" onclick="closeModal('editLinkModal')">&times;</button>
+      </div>
+      <form id="editLinkForm">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="editLinkInput">Link đích / Game mới <span class="required">*</span></label>
+            <input type="url" id="editLinkInput" class="form-control" placeholder="https://gg8845.com/?id=..." required>
+            <span class="field-hint">Link đích chính khi khách bấm Đăng ký / Chơi ngay</span>
+          </div>
+          <div class="form-group">
+            <label for="editTeleInput">Link Telegram CSKH / Hỗ Trợ mới (Tuỳ chọn)</label>
+            <input type="url" id="editTeleInput" class="form-control" placeholder="https://t.me/longhoangxoamaan hoặc https://t.me/cskh">
+            <span class="field-hint">Tự động đồng bộ vào domains.json và js/config.js (nếu template có)</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('editLinkModal')">Huỷ</button>
+          <button type="submit" id="btnSubmitEditLink" class="btn btn-primary">
+            💾 Lưu & Kích Hoạt Ngay
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 3: Đổi Mẫu Landing Page (Switch Template Modal) -->
+  <div id="switchTemplateModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('switchTemplateModal')"></div>
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <div>
+          <h3>🎨 Đổi Mẫu Landing Page</h3>
+          <span id="switchTemplateDomainSubtitle" class="modal-subtitle"></span>
+        </div>
+        <button class="modal-close" onclick="closeModal('switchTemplateModal')">&times;</button>
+      </div>
+      <form id="switchTemplateForm">
+        <div class="modal-body">
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label for="switchTemplateSelect" style="margin-bottom: 0;">Chọn mẫu giao diện mới <span class="required">*</span></label>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openVisualTemplatePicker('switch')">
+                🖼️ Mở Kho Mẫu Xem Ảnh Lớn
+              </button>
+            </div>
+            <select id="switchTemplateSelect" class="form-select" required>
+              <!-- Render động -->
+            </select>
+            <div id="switchTemplatePreview" class="template-inline-preview" style="margin-top: 8px;"></div>
+          </div>
+          <div class="form-group">
+            <label for="switchTemplateLinkInput">Link đích mới (để trống nếu giữ nguyên)</label>
+            <input type="url" id="switchTemplateLinkInput" class="form-control" placeholder="https://... (Tuỳ chọn)">
+          </div>
+          <div class="form-group">
+            <label for="switchTemplateTeleInput">Link Telegram CSKH mới (Tuỳ chọn)</label>
+            <input type="url" id="switchTemplateTeleInput" class="form-control" placeholder="https://t.me/... (Tuỳ chọn)">
+          </div>
+          <div class="switch-notice">
+            ⚡ <b>Quy trình tự động:</b> Xoá tên miền khỏi repo cũ ➔ Tự tắt 302 cũ nếu có ➔ Thêm vào repo mới (cập nhật domains.json & js/config.js) ➔ Trỏ CNAME Cloudflare ➔ Git Push & kích hoạt tức thì!
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('switchTemplateModal')">Huỷ</button>
+          <button type="submit" id="btnSubmitSwitchTemplate" class="btn btn-primary">
+            🚀 Thực Hiện Đổi Mẫu
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+
+  <!-- Modal: Kho Chọn Mẫu Trực Quan (Visual Template Picker Modal) -->
+  <div id="templatePickerModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('templatePickerModal')"></div>
+    <div class="modal-content modal-xl" style="max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <div>
+          <h3 id="templatePickerModalTitle">🎯 Chọn Mẫu Giao Diện Landing Page</h3>
+          <span id="templatePickerModalSubtitle" class="modal-subtitle">Bấm vào mẫu bạn ưng ý để xem chi tiết và xác nhận</span>
+        </div>
+        <button class="modal-close" onclick="closeModal('templatePickerModal')">&times;</button>
+      </div>
+      <div class="modal-body" style="overflow-y: auto; flex: 1; padding: 16px 20px;">
+        <!-- Picker Control Bar -->
+        <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; justify-content: space-between;">
+          <div class="filter-tabs" id="pickerFilterTabs" style="margin-bottom: 0;">
+            <button class="filter-tab active" data-brand="all">Tất Cả (<span id="pickerCountAll">34</span>)</button>
+            <button class="filter-tab" data-brand="GG88">🟢 GG88 (<span id="pickerCountGG88">19</span>)</button>
+            <button class="filter-tab" data-brand="LLWIN">🔵 LLWIN (<span id="pickerCountLLWIN">8</span>)</button>
+            <button class="filter-tab" data-brand="MM88">🟠 MM88 (<span id="pickerCountMM88">7</span>)</button>
+            <button class="filter-tab" data-brand="XX88">👑 XX88 (<span id="pickerCountXX88">0</span>)</button>
+          </div>
+          <div class="search-box" style="max-width: 320px; margin-bottom: 0;">
+            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input type="text" id="pickerSearchInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Tìm tên mẫu...">
+          </div>
+        </div>
+
+        <!-- Picker Grid -->
+        <div id="pickerTemplatesGrid" class="templates-grid" style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px;">
+          <!-- Render động qua app.js -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Popup Xác Nhận Chọn Mẫu (Confirmation Popup Modal) -->
+  <div id="confirmSelectTemplateModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('confirmSelectTemplateModal')"></div>
+    <div class="modal-content" style="max-width: 520px; text-align: center;">
+      <div class="modal-header" style="justify-content: center; position: relative;">
+        <h3>❓ Xác Nhận Lựa Chọn Giao Diện</h3>
+        <button class="modal-close" style="position: absolute; right: 16px;" onclick="closeModal('confirmSelectTemplateModal')">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 20px 24px;">
+        <div id="confirmTplPreviewImgWrapper" style="width: 100%; height: 200px; border-radius: 12px; overflow: hidden; margin-bottom: 16px; border: 1px solid var(--border-subtle); background: #000;">
+          <img id="confirmTplPreviewImg" src="" alt="Template Preview" style="width: 100%; height: 100%; object-fit: cover;">
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <span id="confirmTplBrandBadge" class="brand-badge" style="position: static; display: inline-block; margin-bottom: 6px;">GG88</span>
+          <h4 id="confirmTplName" style="font-size: 17px; font-weight: 700; color: #fff; margin-bottom: 4px;">Tên mẫu</h4>
+          <p id="confirmTplCname" style="font-size: 12px; color: var(--accent-cyan); font-family: var(--font-mono);"></p>
+        </div>
+
+        <div id="confirmTplContextBox" style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); padding: 12px; border-radius: 8px; font-size: 13px; color: #fff; margin-bottom: 16px; text-align: left;">
+          <!-- Dynamic message based on action -->
+        </div>
+
+        <div style="display: flex; gap: 10px; justify-content: center;">
+          <a id="confirmTplLiveDemoBtn" href="#" target="_blank" class="btn btn-secondary btn-sm" style="flex: 1;">
+            🔗 Xem Live Demo
+          </a>
+          <button type="button" id="btnConfirmSelectTpl" class="btn btn-primary btn-sm" style="flex: 2; font-size: 14px; font-weight: 600;">
+            ✅ Xác Nhận Chọn Mẫu Này
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 4: Cập Nhật Link Hàng Loạt (Batch Set Link Modal) -->
+  <div id="batchSetLinkModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('batchSetLinkModal')"></div>
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <div>
+          <h3>📦 Cập Nhật Link Hàng Loạt</h3>
+          <span class="modal-subtitle">Đổi link cùng lúc cho nhiều tên miền</span>
+        </div>
+        <button class="modal-close" onclick="closeModal('batchSetLinkModal')">&times;</button>
+      </div>
+      <form id="batchSetLinkForm">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="batchDomainsTextarea">Danh sách tên miền (Mỗi dòng 1 tên miền) <span class="required">*</span></label>
+            <textarea id="batchDomainsTextarea" rows="6" class="form-control font-mono" placeholder="gg88tt.com&#10;gg88zz.com&#10;gg88fifa.com&#10;gg88yy.com" required></textarea>
+          </div>
+          <div class="form-group">
+            <label for="batchLinkInput">Link đích mới chung <span class="required">*</span></label>
+            <input type="url" id="batchLinkInput" class="form-control" placeholder="https://gg8830.com/?id=..." required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('batchSetLinkModal')">Huỷ</button>
+          <button type="submit" id="btnSubmitBatchSetLink" class="btn btn-primary">
+            ⚡ Cập Nhật Tất Cả Ngay
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 5: Tiến Trình Thực Thi Real-Time (Live Execution Progress Modal) -->
+  <div id="progressModal" class="modal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h3 id="progressModalTitle">⏳ Đang Xử Lý Cài Đặt...</h3>
+          <span id="progressModalSubtitle" class="modal-subtitle"></span>
+        </div>
+        <button class="modal-close" id="progressCloseBtn" style="display: none;" onclick="closeModal('progressModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span style="font-size: 12px; font-weight: 600; color: var(--accent-cyan);" id="progressStatusText">Đang khởi tạo...</span>
+          <span class="progress-step-badge" id="progressTimerBadge">⏱️ 0.0s</span>
+        </div>
+        <div class="deploy-progress-bar-wrap">
+          <div class="deploy-progress-bar-fill" id="deployProgressBar" style="width: 5%;"></div>
+        </div>
+        <div class="progress-steps-list" id="progressStepsList">
+          <!-- Render động các bước -->
+        </div>
+        <div id="progressResultBox" class="progress-result-box" style="display: none;">
+          <!-- Kết quả hoàn tất -->
+        </div>
+      </div>
+      <div class="modal-footer" id="progressModalFooter" style="display: none;">
+        <button type="button" class="btn btn-primary" onclick="closeModal('progressModal')">
+          Đóng cửa sổ
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Modal 7: Chi Tiết Nhật Ký Tự Động Khắc Phục (Auto-Repair & Rebuild Logs Modal) -->
+  <div id="repairLogsModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('repairLogsModal')"></div>
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 22px;">🛠️</span>
+          <div>
+            <h3 id="repairLogsDomainTitle">Nhật Ký Giám Sát & Tự Sửa Lỗi</h3>
+            <span id="repairLogsSubtitle" class="modal-subtitle">Chi tiết các bước Watchdog 2.0 đã tự động can thiệp</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('repairLogsModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="repairLogsContent" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 16px; font-family: var(--font-mono); font-size: 13px; line-height: 1.6; max-height: 380px; overflow-y: auto;">
+          <!-- Render logs -->
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between;">
+        <button type="button" class="btn btn-secondary btn-sm" id="btnTriggerForceRebuildFromModal">
+          🔥 Ép Tái Sinh Lại Ngay (Force Rebuild)
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="closeModal('repairLogsModal')">
+          Đóng
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 8: Thông Báo Tên Miền Đang Được Xử Lý (Processing Notification Modal) -->
+  <div id="domainProcessingModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('domainProcessingModal')"></div>
+    <div class="modal-content" style="max-width: 540px; border-color: rgba(6, 182, 212, 0.4); box-shadow: 0 20px 50px rgba(0,0,0,0.8), 0 0 30px rgba(6,182,212,0.2);">
+      <div class="modal-header" style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%); border-bottom: 1px solid rgba(6, 182, 212, 0.3);">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="width: 40px; height: 40px; border-radius: 50%; background: rgba(6, 182, 212, 0.2); border: 1px solid var(--accent-cyan); display: flex; align-items: center; justify-content: center; font-size: 20px;">
+            ⏳
+          </div>
+          <div>
+            <h3 style="margin: 0; color: #fff; font-size: 17px;">Tên Miền Đang Được Xử Lý</h3>
+            <span class="modal-subtitle" style="color: var(--accent-cyan);">Hệ thống đang tiến hành tự động</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('domainProcessingModal')">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 24px; text-align: center;">
+        <div style="margin-bottom: 16px;">
+          <div class="spinner" style="width: 48px; height: 48px; border-width: 3px; border-top-color: var(--accent-cyan); margin: 0 auto 16px auto;"></div>
+          <p style="font-size: 15px; font-weight: 600; color: #fff; line-height: 1.5; margin-bottom: 12px;">
+            Tên miền <span id="processingModalDomainName" style="color: var(--accent-cyan); font-family: var(--font-mono); font-weight: 800;">domain.com</span> đang được xử lý!
+          </p>
+          <div style="background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.25); border-radius: 10px; padding: 14px 16px; text-align: left; font-size: 13px; color: #cbd5e1; line-height: 1.6;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+              <span style="color: var(--text-dim);">Chế độ:</span>
+              <span id="processingModalActionType" style="font-weight: 700; color: var(--accent-emerald);">Mua Mới & Kích Hoạt Landing Page</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+              <span style="color: var(--text-dim);">Link đích:</span>
+              <span id="processingModalTargetUrl" style="font-family: var(--font-mono); color: #fff; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">https://...</span>
+            </div>
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(255,255,255,0.1); color: var(--accent-amber); font-weight: 600;">
+              👉 Vui lòng vào mục <b>Lịch Sử</b> để kiểm tra tiến độ chi tiết và nhận thông báo khi hoàn tất!
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 16px 20px; display: flex; justify-content: space-between; gap: 10px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('domainProcessingModal')">
+          Đóng
+        </button>
+        <button type="button" class="btn btn-primary" onclick="goToHistoryFromProcessingModal()" style="background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%); border-color: #06b6d4; font-weight: 700; box-shadow: 0 4px 15px rgba(6, 182, 212, 0.4);">
+          📜 Vào Lịch Sử Kiểm Tra Tiến Độ
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 9: Thông Báo Tên Miền Đã Hoàn Tất 200 OK (Domain Ready 200 OK Modal) -->
+  <div id="domainReady200Modal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('domainReady200Modal')"></div>
+    <div class="modal-content" style="max-width: 580px; border-color: rgba(16, 185, 129, 0.5); box-shadow: 0 20px 60px rgba(0,0,0,0.9), 0 0 35px rgba(16, 185, 129, 0.25);">
+      <div class="modal-header" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%); border-bottom: 1px solid rgba(16, 185, 129, 0.4);">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="width: 42px; height: 42px; border-radius: 50%; background: rgba(16, 185, 129, 0.25); border: 1px solid var(--accent-emerald); display: flex; align-items: center; justify-content: center; font-size: 22px;">
+            🎉
+          </div>
+          <div>
+            <h3 style="margin: 0; color: #fff; font-size: 18px; font-weight: 800;">Tên Miền Đã Hoàn Tất (200 OK)!</h3>
+            <span class="modal-subtitle" style="color: var(--accent-emerald);">🟢 Đã kích hoạt SSL & sẵn sàng hoạt động 100%</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('domainReady200Modal')">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 24px; text-align: center;">
+        <div style="margin-bottom: 16px;">
+          <!-- Live Screenshot Preview if available -->
+          <div id="ready200ScreenshotWrap" style="display: none; margin-bottom: 16px; border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.15); box-shadow: 0 10px 25px rgba(0,0,0,0.6);">
+            <img id="ready200ScreenshotImg" src="" alt="Screenshot" style="width: 100%; max-height: 200px; object-fit: cover; display: block;">
+          </div>
+
+          <div style="font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 12px;">
+            Tên miền của bạn <span id="ready200DomainName" style="color: var(--accent-emerald); font-family: var(--font-mono); font-size: 18px;">domain.com</span> đã hoàn tất thành công!
+          </div>
+
+          <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 10px; padding: 14px 18px; text-align: left; font-size: 13px; color: #cbd5e1; line-height: 1.6;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+              <span style="color: var(--text-dim);">Trạng thái HTTP:</span>
+              <span style="font-weight: 800; color: var(--accent-emerald);">🟢 200 OK (LIVE)</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+              <span style="color: var(--text-dim);">Mẫu Giao Diện:</span>
+              <span id="ready200TemplateName" style="font-weight: 600; color: #fff;">Landing Page</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+              <span style="color: var(--text-dim);">Link đích chuyển hướng:</span>
+              <span id="ready200TargetUrl" style="font-family: var(--font-mono); color: var(--accent-cyan); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">https://...</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span style="color: var(--text-dim);">Thời gian hoàn tất:</span>
+              <span id="ready200CompletedTime" style="font-family: var(--font-mono); color: var(--text-muted);">Vừa xong</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 16px 20px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('domainReady200Modal')">
+            Đóng
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="goToHistoryFromReadyModal()">
+            📜 Xem Trong Lịch Sử
+          </button>
+        </div>
+        <a id="ready200VisitBtn" href="#" target="_blank" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-color: #10b981; font-weight: 700; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);">
+          🌐 Truy Cập Website Ngay
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 10: Cảnh Báo Lỗi Tên Miền Quá 15 Phút (Domain Error Alert 15m Modal) -->
+  <div id="domainErrorAlertModal" class="modal">
+    <div class="modal-backdrop" onclick="closeDomainErrorAlertModal()"></div>
+    <div class="modal-content" style="max-width: 580px; border-color: rgba(244, 63, 94, 0.6); box-shadow: 0 20px 60px rgba(0,0,0,0.9), 0 0 35px rgba(244, 63, 94, 0.3);">
+      <div class="modal-header" style="background: linear-gradient(135deg, rgba(244, 63, 94, 0.25) 0%, rgba(245, 158, 11, 0.2) 100%); border-bottom: 1px solid rgba(244, 63, 94, 0.4);">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="width: 42px; height: 42px; border-radius: 50%; background: rgba(244, 63, 94, 0.25); border: 1px solid var(--accent-rose); display: flex; align-items: center; justify-content: center; font-size: 22px;">
+            ⚠️
+          </div>
+          <div>
+            <h3 style="margin: 0; color: #fff; font-size: 18px; font-weight: 800;">Cảnh Báo: Tên Miền Chưa Sẵn Sàng</h3>
+            <span class="modal-subtitle" style="color: #fda4af;">Đã quá 15 phút chưa phản hồi HTTP 200</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeDomainErrorAlertModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 24px;">
+        <div style="margin-bottom: 16px;">
+          <div style="font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 12px; text-align: center;">
+            Tên miền <span id="errorAlertDomainName" style="color: var(--accent-rose); font-family: var(--font-mono); font-size: 18px;">domain.com</span>
+          </div>
+
+          <div style="background: rgba(244, 63, 94, 0.1); border: 1px solid rgba(244, 63, 94, 0.35); border-radius: 10px; padding: 16px; font-size: 14px; color: #fecdd3; line-height: 1.6; margin-bottom: 14px;">
+            <div style="display: flex; gap: 10px; align-items: flex-start;">
+              <span style="font-size: 20px; line-height: 1;">📢</span>
+              <div>
+                <strong style="color: #fff; font-size: 14px;">Vui lòng truy cập vào tên miền để kiểm tra!</strong>
+                <p style="margin: 4px 0 0 0; color: #fecdd3; font-size: 13px;">
+                  Nếu phát hiện lỗi kết nối hoặc chưa hoạt động, vui lòng liên hệ trực tiếp Quản trị viên:
+                  <a href="https://t.me/frezeit" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; font-weight: 800; text-decoration: underline; margin-left: 4px;">
+                    admin @frezeit
+                  </a>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px 16px; font-size: 12px; color: #94a3b8; line-height: 1.6;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+              <span>Link đích cấu hình:</span>
+              <span id="errorAlertTargetUrl" style="color: var(--accent-cyan); font-family: var(--font-mono); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">-</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>Ghi chú hệ thống:</span>
+              <span id="errorAlertDetails" style="color: var(--accent-rose); font-family: var(--font-mono);">-</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 16px 20px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="closeDomainErrorAlertModal()">
+          Đóng
+        </button>
+        <div style="display: flex; gap: 10px;">
+          <a id="errorAlertVisitBtn" href="#" target="_blank" class="btn btn-secondary" style="border-color: rgba(255, 255, 255, 0.3); font-weight: 600;">
+            🌐 Mở Tên Miền Kiểm Tra
+          </a>
+          <a href="https://t.me/frezeit" target="_blank" class="btn btn-primary" style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); border-color: #0ea5e9; font-weight: 700; box-shadow: 0 4px 15px rgba(14, 165, 233, 0.4);">
+            💬 Liên Hệ Admin @frezeit
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Kết Quả Thao Tác Chi Tiết (Action Result Detailed Modal) -->
+  <div id="actionResultModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('actionResultModal')"></div>
+    <div class="modal-content" style="max-width: 540px; border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.15); box-shadow: 0 25px 60px rgba(0,0,0,0.8); overflow: hidden;">
+      <div id="actionResultHeader" class="modal-header" style="padding: 20px 24px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 14px;">
+          <div id="actionResultIconBox" style="width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3);">
+            ✅
+          </div>
+          <div>
+            <h3 id="actionResultTitle" style="margin: 0; font-size: 18px; font-weight: 800; color: #fff;">Thao Tác Thành Công!</h3>
+            <span id="actionResultSubtitle" class="modal-subtitle" style="font-size: 12px; color: var(--text-dim);">Chi tiết trạng thái tên miền & cấu hình</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('actionResultModal')">&times;</button>
+      </div>
+
+      <div class="modal-body" style="padding: 20px 24px;">
+        <!-- Banner Message -->
+        <div id="actionResultBanner" style="padding: 12px 16px; border-radius: 10px; font-size: 13px; line-height: 1.5; margin-bottom: 16px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); color: #e2e8f0;">
+          <!-- Message text -->
+        </div>
+
+        <!-- Details Info Card -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; font-size: 13px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="color: var(--text-dim); min-width: 110px;">🌐 Tên Miền:</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span id="actionResultDomain" style="font-family: var(--font-mono); font-weight: 700; color: #fff; font-size: 14px;">-</span>
+              <button id="btnCopyResultDomain" class="btn-copy" onclick="copyActionResultDomain()" title="Sao chép tên miền">📋</button>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="color: var(--text-dim); min-width: 110px;">⚡ Loại Hình:</span>
+            <span id="actionResultTypeBadge" class="dom-tag" style="background: rgba(99, 102, 241, 0.15); color: var(--accent-cyan); border: 1px solid rgba(99, 102, 241, 0.3);">-</span>
+          </div>
+
+          <div id="actionResultLinkRow" style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <span style="color: var(--text-dim); min-width: 110px;">🔗 Link Đích:</span>
+            <div style="display: flex; align-items: center; gap: 6px; max-width: 320px;">
+              <span id="actionResultLink" style="font-family: var(--font-mono); color: var(--accent-cyan); word-break: break-all; font-size: 12px;">-</span>
+              <button id="btnCopyResultLink" class="btn-copy" onclick="copyActionResultLink()" title="Sao chép link đích">📋</button>
+            </div>
+          </div>
+
+          <div id="actionResultTeleRow" style="display: none; justify-content: space-between; align-items: center;">
+            <span style="color: var(--accent-amber); min-width: 110px;">✈️ Telegram:</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span id="actionResultTele" style="font-family: var(--font-mono); color: var(--accent-amber); font-size: 12px;">-</span>
+              <button class="btn-copy" onclick="copyActionResultTele()" title="Sao chép link Telegram">📋</button>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="color: var(--text-dim); min-width: 110px;">☁️ Tài Khoản CF:</span>
+            <span id="actionResultCfAccount" style="color: #cbd5e1; font-weight: 500;">-</span>
+          </div>
+
+          <div id="actionResultReposRow" style="display: none; justify-content: space-between; align-items: center;">
+            <span style="color: var(--text-dim); min-width: 110px;">📂 Mã Nguồn:</span>
+            <span id="actionResultRepos" style="font-family: var(--font-mono); color: #94a3b8; font-size: 11px;">-</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; background: rgba(0, 0, 0, 0.2); border-top: 1px solid rgba(255, 255, 255, 0.06);">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('actionResultModal')">
+          Đóng
+        </button>
+        <div style="display: flex; gap: 8px;">
+          <a id="actionResultVisitBtn" href="#" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.35);">
+            🌐 Mở Website Thử Nghiệm
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Tiến Độ Cập Nhật Hàng Loạt (Batch Progress Modal) -->
+  <div id="batchProgressModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('batchProgressModal')"></div>
+    <div class="modal-content modal-lg" style="max-height: 85vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="font-size: 24px;">⚡</div>
+          <div>
+            <h3 id="batchProgressModalTitle">Tiến Độ Cập Nhật Hàng Loạt</h3>
+            <span id="batchProgressModalSubtitle" class="modal-subtitle">Đang xử lý đồng loạt danh sách tên miền...</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('batchProgressModal')">&times;</button>
+      </div>
+      <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 20px 24px;">
+        <!-- Progress Bar Card -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 16px; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; margin-bottom: 8px;">
+            <span id="batchProgressStatusText" style="color: var(--accent-cyan);">Đang bắt đầu...</span>
+            <span id="batchProgressPercentText" style="font-family: var(--font-mono); color: #fff;">0%</span>
+          </div>
+          <div style="width: 100%; height: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; overflow: hidden;">
+            <div id="batchProgressBarFill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #6366f1, #06b6d4); transition: width 0.3s ease; border-radius: 5px;"></div>
+          </div>
+          <div style="display: flex; gap: 16px; margin-top: 12px; font-size: 12px;">
+            <span style="color: var(--accent-emerald);">🟢 Thành công: <b id="batchSuccessCount">0</b></span>
+            <span style="color: var(--accent-red);">🔴 Lỗi: <b id="batchErrorCount">0</b></span>
+            <span style="color: var(--text-dim);">Tổng số: <b id="batchTotalCount">0</b></span>
+          </div>
+        </div>
+
+        <!-- Results Table -->
+        <div class="table-container" style="max-height: 320px; overflow-y: auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 40px;">#</th>
+                <th>Tên Miền</th>
+                <th>Trạng Thái</th>
+                <th>Loại Cấu Hình</th>
+                <th>Chi Tiết</th>
+              </tr>
+            </thead>
+            <tbody id="batchResultsTableBody">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 16px 24px; display: flex; justify-content: space-between;">
+        <span id="batchFooterNote" style="font-size: 12px; color: var(--text-dim);">Hệ thống đang tự động tối ưu hóa và purge cache Cloudflare...</span>
+        <button type="button" class="btn btn-secondary" onclick="closeModal('batchProgressModal')">
+          Đóng
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       MODAL: TEMPLATE CODE EDITOR & RE-DEPLOY
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div id="templateCodeEditorModal" class="modal-overlay" style="display: none;">
+    <div class="modal-container" style="max-width: 1100px; width: 95vw; height: 88vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="border-bottom: 1px solid rgba(255,255,255,0.08); padding: 16px 20px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="font-size: 22px;">💻</div>
+          <div>
+            <h3 id="editorModalTitle" style="font-size: 16px; margin: 0; color: #fff;">Chỉnh Sửa Mã Nguồn Landing Page</h3>
+            <span id="editorModalSubtitle" class="modal-subtitle" style="font-size: 12px; color: var(--text-dim);">Tùy biến trực tiếp HTML, JS, CSS, domains.json và re-deploy tức thì</span>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button type="button" class="btn btn-secondary btn-sm" id="btnEditorDownloadZip" title="Tải toàn bộ mã nguồn dạng ZIP">
+            📥 Tải ZIP
+          </button>
+          <button class="modal-close" onclick="closeModal('templateCodeEditorModal')">&times;</button>
+        </div>
+      </div>
+
+      <div class="modal-body" style="flex: 1; display: flex; padding: 0; overflow: hidden; background: #0b1120;">
+        <!-- Left Sidebar: File List -->
+        <div style="width: 260px; border-right: 1px solid rgba(255,255,255,0.08); background: #0f172a; display: flex; flex-direction: column;">
+          <div style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 12px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center;">
+            <span>📁 Danh Sách File</span>
+            <button class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="reloadTemplateFilesList()" title="Làm mới">🔄</button>
+          </div>
+          <div id="editorFileList" style="flex: 1; overflow-y: auto; padding: 8px;">
+            <div style="text-align: center; color: var(--text-dim); padding: 20px; font-size: 12px;">Đang tải danh sách file...</div>
+          </div>
+          <div style="padding: 10px 14px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 11px; color: var(--text-dim); background: rgba(0,0,0,0.2);">
+            💡 Bấm vào file để mở và sửa nội dung
+          </div>
+        </div>
+
+        <!-- Right Pane: Code Editor Area -->
+        <div style="flex: 1; display: flex; flex-direction: column; background: #080d1a;">
+          <div style="padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); background: #0d1527; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span id="editorActiveFileBadge" style="font-size: 11px; background: rgba(99,102,241,0.2); color: #818cf8; padding: 3px 8px; border-radius: 4px; font-family: var(--font-mono); font-weight: 600;">index.html</span>
+              <span id="editorActiveFilePath" style="font-size: 12px; color: var(--text-dim); font-family: var(--font-mono);">/index.html</span>
+              <span id="editorModifiedIndicator" style="display: none; font-size: 11px; color: var(--accent-amber); font-weight: 700;">● Đã chỉnh sửa</span>
+            </div>
+            <div style="font-size: 11px; color: var(--text-dim);">
+              UTF-8 • Tự động giữ định dạng
+            </div>
+          </div>
+
+          <div style="flex: 1; position: relative; display: flex;">
+            <textarea id="templateCodeTextarea" spellcheck="false" autocomplete="off" autocapitalize="off" style="width: 100%; height: 100%; background: #060a14; color: #e2e8f0; font-family: 'Fira Code', 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.6; padding: 16px; border: none; outline: none; resize: none; tab-size: 2; -moz-tab-size: 2;"></textarea>
+            <div id="editorLoadingOverlay" style="position: absolute; inset: 0; background: rgba(8, 13, 26, 0.85); display: none; align-items: center; justify-content: center; z-index: 10;">
+              <div style="text-align: center;">
+                <div class="spinner" style="margin-bottom: 10px;"></div>
+                <div style="font-size: 13px; color: var(--text-dim);" id="editorLoadingText">Đang tải nội dung file...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="padding: 12px 20px; border-top: 1px solid rgba(255,255,255,0.08); background: #0f172a; display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim);">
+          <span>Trạng thái:</span>
+          <span id="editorStatusMessage" style="color: var(--accent-emerald);">Sẵn sàng</span>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('templateCodeEditorModal')">
+            Đóng
+          </button>
+          <button type="button" class="btn btn-secondary" id="btnSaveTemplateFileOnly" onclick="saveActiveTemplateFile(false)" style="background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.15);">
+            💾 Lưu File
+          </button>
+          <button type="button" class="btn btn-primary" id="btnSaveAndDeployTemplate" onclick="saveActiveTemplateFile(true)" style="background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%); border-color: #6366f1; font-weight: 700;">
+            🚀 Lưu & Re-Deploy Cloudflare
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Xin Cấp Quyền Quản Lý Tên Miền (Domain Permission Request) -->
+  <div id="requestDomainModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('requestDomainModal')"></div>
+    <div class="modal-content modal-md" style="border-radius: 16px; border: 1px solid rgba(14, 165, 233, 0.35); box-shadow: 0 25px 60px rgba(0,0,0,0.85);">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 24px;">🔑</span>
+          <div>
+            <h3 style="margin: 0; color: #fff; font-size: 18px; font-weight: 700;">Xin Cấp Quyền Quản Lý Tên Miền</h3>
+            <span class="modal-subtitle">Gửi yêu cầu tới Admin để kích hoạt toàn quyền thao tác</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('requestDomainModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="requestDomainForm" onsubmit="handleRequestDomainSubmit(event)">
+          <!-- Domain Highlight Box -->
+          <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.3); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 13px; color: var(--text-dim);">Tên miền yêu cầu:</span>
+            <span id="reqDomainTextBadge" style="font-family: var(--font-mono); font-weight: 800; color: #38bdf8; font-size: 15px;">domain.com</span>
+            <input type="hidden" id="reqDomainInput">
+          </div>
+
+          <div class="form-group">
+            <label style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 6px;">Vui lòng nhập tên công việc <span style="color: var(--accent-rose);">*</span></label>
+            <input type="text" id="reqDomainNoteInput" class="form-input" placeholder="Vui lòng nhập tên công việc..." required autofocus style="font-size: 14px; padding: 12px 14px; border-color: rgba(14, 165, 233, 0.4);">
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('requestDomainModal')">Hủy</button>
+            <button type="submit" class="btn btn-primary" id="btnSubmitDomainRequest" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); font-weight: 700;">
+              🚀 Gửi Yêu Cầu Cấp Quyền
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  <!-- Modal: Xác Nhận Đặt Mua Tên Miền (Confirm Domain Purchase) -->
+  <div id="confirmDomainPurchaseModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('confirmDomainPurchaseModal')"></div>
+    <div class="modal-content modal-md" style="border-radius: 16px; border: 1px solid rgba(245, 158, 11, 0.4); box-shadow: 0 25px 60px rgba(0,0,0,0.85); background: #0f172a;">
+      <div class="modal-header" style="border-bottom: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 26px;">🛒</span>
+          <div>
+            <h3 style="margin: 0; color: #fff; font-size: 18px; font-weight: 800;">Xác Nhận Đơn Đặt Mua Tên Miền</h3>
+            <span class="modal-subtitle" style="color: #f59e0b;">Kiểm tra thông tin định giá & gửi yêu cầu duyệt tới Admin</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('confirmDomainPurchaseModal')">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        <form id="confirmDomainPurchaseForm" onsubmit="handleConfirmDomainPurchaseSubmit(event)">
+          <input type="hidden" id="confirmOrderDomainHidden">
+
+          <!-- Domain & Price Highlight Box -->
+          <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 13px; color: var(--text-dim);">Tên miền đặt mua:</span>
+              <span id="confirmOrderDomainBadge" style="font-family: var(--font-mono); font-weight: 800; color: #fbbf24; font-size: 16px;">domain.com</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 13px; color: var(--text-dim);">Giá thanh toán (khi duyệt):</span>
+              <span id="confirmOrderPriceBadge" style="font-family: var(--font-mono); font-weight: 800; color: #10b981; font-size: 16px;">250 Xu (≈ 250k đ)</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 12px; color: var(--text-dim);">Quy tắc áp dụng:</span>
+              <span id="confirmOrderRuleBadge" style="font-size: 12px; color: #38bdf8; font-weight: 600;">.COM (350 Xu)</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px dashed rgba(255,255,255,0.1);">
+              <span style="font-size: 13px; color: var(--text-dim);">Số dư ví hiện tại:</span>
+              <span id="confirmOrderBalanceBadge" style="font-family: var(--font-mono); font-weight: 700; color: #fff; font-size: 14px;">🪙 500 Xu</span>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 6px;">Vui lòng nhập tên công việc <span style="color: var(--accent-rose);">*</span></label>
+            <input type="text" id="confirmOrderJobNote" class="form-input" placeholder="Vui lòng nhập tên công việc..." required autofocus style="font-size: 14px; padding: 12px 14px; border-color: rgba(245, 158, 11, 0.4);">
+          </div>
+
+          <!-- Confirmation Prompt -->
+          <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 10px; padding: 12px 14px; margin-bottom: 18px;">
+            <div style="font-size: 13px; font-weight: 700; color: #818cf8; margin-bottom: 4px;">❓ Bạn có xác nhận tất cả thông tin đã đúng?</div>
+            <div style="font-size: 11px; color: var(--text-dim); line-height: 1.5;">
+              ℹ️ Sau khi bạn ấn Xác Nhận, lệnh mua sẽ được gửi lên Quản trị viên (Admin). <b>Hệ thống chỉ trừ Xu khi Admin chính thức duyệt mua.</b>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('confirmDomainPurchaseModal')">Hủy</button>
+            <button type="submit" class="btn btn-primary" id="btnSubmitConfirmPurchase" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-color: #f59e0b; color: #000; font-weight: 800;">
+              ✅ Đồng Ý & Đặt Mua
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Thông Báo Gửi Đơn Đặt Mua Thành Công (Domain Order Sent Success) -->
+  <div id="domainOrderSuccessModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('domainOrderSuccessModal')"></div>
+    <div class="modal-content modal-md" style="border-radius: 16px; border: 1px solid rgba(16, 185, 129, 0.45); box-shadow: 0 25px 60px rgba(0,0,0,0.85); background: #0f172a; text-align: center; padding: 25px;">
+      <div style="font-size: 48px; margin-bottom: 12px;">🎉</div>
+      <h3 style="margin: 0 0 8px 0; color: #10b981; font-size: 20px; font-weight: 800;">Yêu Cầu Của Bạn Đã Gửi Đi Thành Công!</h3>
+      <p style="font-size: 14px; color: #e2e8f0; margin-bottom: 14px; line-height: 1.6;">
+        Vui lòng theo dõi lịch sử để theo dõi tiến độ tên miền.
+      </p>
+      
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: var(--text-dim); text-align: left;">
+        <div>📌 <b>Tên miền:</b> <span id="successOrderDomainText" style="color: #fbbf24; font-family: var(--font-mono); font-weight: 700;">-</span></div>
+        <div style="margin-top: 4px;">🪙 <b>Giá thanh toán khi duyệt:</b> <span id="successOrderPriceText" style="color: #10b981; font-weight: 700;">-</span></div>
+        <div style="margin-top: 4px;">⏳ <b>Trạng thái:</b> <span class="badge-status badge-warning" style="font-size: 11px;">🟡 Chờ Quản Trị Viên Duyệt</span></div>
+      </div>
+
+      <div style="display: flex; justify-content: center; gap: 12px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('domainOrderSuccessModal')">Đóng</button>
+        <button type="button" class="btn btn-primary" onclick="goToDomainOrdersHistory()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700;">
+          📜 Theo Dõi Tiến Độ Đơn Mua
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast">
+    <div class="toast-icon">✨</div>
+    <div class="toast-message" id="toastMessage">Thông báo</div>
+  </div>
+
+  <script src="app.js?v=1789032000001"></script>
+</body>
+</html>
+
+
+

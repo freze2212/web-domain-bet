@@ -1,0 +1,27 @@
+{
+  "name": "domain-deploy-tool",
+  "version": "1.0.0",
+  "description": "Tool tự động: mua miền Spaceship → trỏ NS Cloudflare → CF Pages → domains.json",
+  "type": "module",
+  "bin": {
+    "domain-tool": "./bin/cli.js"
+  },
+  "scripts": {
+    "check": "node bin/cli.js check",
+    "deploy": "node bin/cli.js deploy",
+    "contacts": "node bin/cli.js contacts",
+    "setup": "node bin/cli.js setup",
+    "bot": "node src/bot.js",
+    "server": "node src/server.js",
+    "web": "node src/server.js",
+    "screenshots": "node scripts/generate_screenshots.js",
+    "start": "node src/app.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "adm-zip": "^0.6.0",
+    "ssh2": "^1.17.0"
+  }
+}
