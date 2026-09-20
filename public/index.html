@@ -289,9 +289,9 @@
             </div>
 
             <div class="form-actions full-width">
-              <button type="submit" class="btn btn-primary btn-lg">
+              <button type="submit" class="btn btn-primary btn-lg" id="btnSubmitBuyLp">
                 <span class="btn-icon">🚀</span>
-                <span>Mua & Kích Hoạt Landing Page Ngay</span>
+                <span id="btnSubmitBuyLpLabel">Mua & Kích Hoạt Landing Page Ngay</span>
               </button>
             </div>
           </form>
@@ -329,9 +329,9 @@
             </div>
 
             <div class="form-actions full-width">
-              <button type="submit" class="btn btn-primary btn-lg">
+              <button type="submit" class="btn btn-primary btn-lg" id="btnSubmitBuy302">
                 <span class="btn-icon">⚡</span>
-                <span>Mua & Trỏ 302 Ngay</span>
+                <span id="btnSubmitBuy302Label">Mua & Trỏ 302 Ngay</span>
               </button>
             </div>
           </form>
@@ -2693,6 +2693,23 @@
             </div>
           </div>
 
+          <!-- Cấu hình LP / 302 kèm đơn (user chọn khi mua) -->
+          <div id="confirmOrderDeployBox" style="background: rgba(56, 189, 248, 0.06); border: 1px solid rgba(56, 189, 248, 0.28); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px;">
+            <div style="font-size: 13px; font-weight: 700; color: #7dd3fc; margin-bottom: 10px;">Cấu hình kích hoạt sau khi Admin duyệt</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 8px;">
+              <span style="font-size: 12px; color: var(--text-dim);">Chế độ:</span>
+              <span id="confirmOrderModeBadge" style="font-size: 13px; font-weight: 800; color: #fbbf24;">🎨 Landing Page</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 8px;">
+              <span style="font-size: 12px; color: var(--text-dim); flex-shrink: 0;">Link đích:</span>
+              <span id="confirmOrderLinkBadge" style="font-size: 12px; color: #e2e8f0; text-align: right; word-break: break-all;">—</span>
+            </div>
+            <div id="confirmOrderTemplateRow" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+              <span style="font-size: 12px; color: var(--text-dim);">Mẫu LP:</span>
+              <span id="confirmOrderTemplateBadge" style="font-size: 12px; font-weight: 700; color: #a78bfa;">—</span>
+            </div>
+          </div>
+
           <!-- Confirmation Prompt -->
           <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 10px; padding: 14px 16px; margin-bottom: 18px;">
             <div id="confirmOrderSummaryText" style="font-size: 15px; font-weight: 700; color: #e2e8f0; line-height: 1.55; margin-bottom: 8px;">
@@ -2745,7 +2762,7 @@
     <div class="toast-message" id="toastMessage">Thông báo</div>
   </div>
 
-  <script src="app.js?v=20260919-history-smooth"></script>
+  <script src="app.js?v=20260920-user-buy-lp302"></script>
 </body>
 </html>
 

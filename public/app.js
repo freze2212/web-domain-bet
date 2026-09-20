@@ -850,7 +850,13 @@ function setupForms() {
         return;
       }
       if (!isAdminUser()) {
-        openConfirmDomainPurchaseModal(domain, 250, "", { link, tele, templateId, deployMode: "LP" });
+        const priceInfo = await fetchDomainOrderPrice(domain);
+        openConfirmDomainPurchaseModal(domain, priceInfo.priceXu, priceInfo.ruleApplied, {
+          link,
+          tele,
+          templateId,
+          deployMode: "LP",
+        });
         return;
       }
 
@@ -872,7 +878,11 @@ function setupForms() {
         return;
       }
       if (!isAdminUser()) {
-        openConfirmDomainPurchaseModal(domain, 250, "", { link, deployMode: "302" });
+        const priceInfo = await fetchDomainOrderPrice(domain);
+        openConfirmDomainPurchaseModal(domain, priceInfo.priceXu, priceInfo.ruleApplied, {
+          link,
+          deployMode: "302",
+        });
         return;
       }
 
@@ -1137,7 +1147,16 @@ async function checkDomainAvailabilityLive(domain, statusEl) {
                 ✅ Tên miền còn trống! Báo giá: <b style="color: #10b981; font-size: 14px;">${formatted}</b>
                 <span style="font-size: 11px; color: #38bdf8; margin-left: 6px;">[${ruleLabel}]</span>
               </div>
-              ${buildOrderDomainButtonHtml({ domain: data.domain || domain, priceXu: data.priceXu || 250, ruleApplied: data.ruleApplied || "Quy chuẩn" })}
+              ${
+                isAdminUser()
+                  ? ""
+                  : buildOrderDomainButtonHtml({
+                      domain: data.domain || domain,
+                      priceXu: data.priceXu || 250,
+                      ruleApplied: data.ruleApplied || "Quy chuẩn",
+                      extra: collectBuyFormExtraFromUi(),
+                    })
+              }
             </div>
           `;
         }
@@ -1162,6 +1181,25 @@ async function checkDomainAvailabilityLive(domain, statusEl) {
 // ── 5. REAL-TIME DEPLOY EXECUTION (PROGRESS MODAL & PROCESSING POPUP) ───────
 function isAdminUser() {
   return !!(authReady && currentUser && currentUser.role === "admin");
+}
+
+async function fetchDomainOrderPrice(domain) {
+  try {
+    const res = await fetch("/api/check-domain", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ domain }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      return {
+        priceXu: data.priceXu || 250,
+        ruleApplied: data.ruleApplied || "Quy chuẩn",
+        available: !!(data.isAvailable && !data.isPremium),
+      };
+    }
+  } catch {}
+  return { priceXu: 250, ruleApplied: "Quy chuẩn", available: true };
 }
 
 function showOrderSubmittingModal(domain) {
@@ -4111,26 +4149,41 @@ function updateUserUI() {
   if (buySectionDesc) {
     buySectionDesc.textContent = isAdmin
       ? "Mua tên miền và tự động kết nối Cloudflare DNS, SSL, Landing Page hoặc 302."
-      : "Tra cứu tên miền còn trống, xem báo giá và gửi yêu cầu mua. Theo dõi đơn tại tab Ví.";
+      : "Chọn gắn Landing Page hoặc trỏ 302, điền link/mẫu rồi gửi đơn — Admin duyệt mới trừ Xu & kích hoạt.";
   }
 
   const buyTab = document.getElementById("tab-buy");
   if (buyTab) {
-    buyTab.querySelectorAll('.sub-pill[data-sub="buy-lp"], .sub-pill[data-sub="buy-302"]').forEach((el) => {
-      el.style.display = isAdmin ? "inline-flex" : "none";
+    // User cũng được chọn LP / 302 khi mua (vẫn gửi đơn chờ Admin duyệt)
+    buyTab.querySelectorAll('.sub-pill[data-sub="buy-lp"], .sub-pill[data-sub="buy-302"], .sub-pill[data-sub="check-batch"]').forEach((el) => {
+      el.style.display = "inline-flex";
     });
     document.querySelectorAll(".admin-buy-target-group").forEach((g) => {
       g.style.display = isAdmin ? "block" : "none";
     });
-    if (!isAdmin) {
-      const checkPill = buyTab.querySelector('.sub-pill[data-sub="check-batch"]');
-      if (checkPill && !checkPill.classList.contains("active")) checkPill.click();
-      ["form-buy-lp", "form-buy-302"].forEach((id) => {
-        const el = document.getElementById(id);
-        if (el) el.style.display = "none";
-      });
-    } else {
+
+    const lpLabel = document.getElementById("btnSubmitBuyLpLabel");
+    const o302Label = document.getElementById("btnSubmitBuy302Label");
+    if (lpLabel) {
+      lpLabel.textContent = isAdmin
+        ? "Mua & Kích Hoạt Landing Page Ngay"
+        : "Gửi Yêu Cầu Mua & Gắn Landing Page";
+    }
+    if (o302Label) {
+      o302Label.textContent = isAdmin
+        ? "Mua & Trỏ 302 Ngay"
+        : "Gửi Yêu Cầu Mua & Trỏ 302";
+    }
+
+    if (isAdmin) {
       loadAdminTargetUserOptions();
+    } else {
+      // Mặc định mở form Mua & Gắn LP (không ép chỉ tra cứu)
+      const lpPill = buyTab.querySelector('.sub-pill[data-sub="buy-lp"]');
+      if (lpPill && !lpPill.classList.contains("active")) {
+        const activeSub = buyTab.querySelector(".sub-pill.active");
+        if (!activeSub || activeSub.dataset.sub === "check-batch") lpPill.click();
+      }
     }
   }
 
@@ -4231,19 +4284,15 @@ function renderBatchCheckResultsTable(data) {
 
     const isAdmin = isAdminUser();
     const actionButtons = isAvail
-      ? isAdmin
-        ? `
-        <div style="display: flex; gap: 6px; justify-content: flex-end;">
-          <button class="btn btn-primary btn-sm" onclick="quickSelectBuyFromBatch('${r.domain}', 'lp')" title="Mua và gán vào Landing Page">
-            🎨 Mua & Gán LP
+      ? `
+        <div style="display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap;">
+          <button class="btn btn-primary btn-sm" onclick="quickSelectBuyFromBatch('${r.domain}', 'lp')" title="${isAdmin ? "Mua và gán Landing Page" : "Điền form LP rồi gửi đơn chờ duyệt"}">
+            🎨 ${isAdmin ? "Mua & Gán LP" : "Chọn LP"}
           </button>
-          <button class="btn btn-secondary btn-sm" onclick="quickSelectBuyFromBatch('${r.domain}', '302')" title="Mua và trỏ chuyển hướng 302">
-            ⚡ Mua 302
+          <button class="btn btn-secondary btn-sm" onclick="quickSelectBuyFromBatch('${r.domain}', '302')" title="${isAdmin ? "Mua và trỏ 302" : "Điền form 302 rồi gửi đơn chờ duyệt"}">
+            ⚡ ${isAdmin ? "Mua 302" : "Chọn 302"}
           </button>
         </div>
-      `
-        : `
-        ${buildOrderDomainButtonHtml({ domain: r.domain, priceXu: r.priceXu || 250, ruleApplied: r.ruleApplied || "Quy chuẩn" })}
       `
       : `<span style="color: var(--text-dim); font-size: 12px;">🔒 Không thể mua</span>`;
 
@@ -4283,10 +4332,7 @@ function clearBatchDomainCheck() {
 }
 
 function quickSelectBuyFromBatch(domain, mode = "lp") {
-  if (!isAdminUser()) {
-    openConfirmDomainPurchaseModal(domain, 250, "", { deployMode: mode === "302" ? "302" : "LP" });
-    return;
-  }
+  // Cả admin & user: điền sẵn form LP/302 để chọn mẫu/link rồi mua (user → đơn chờ duyệt)
   if (mode === "302") {
     document.querySelector('.sub-pill[data-sub="buy-302"]')?.click();
     const domInput = document.getElementById("buy302Domain");
@@ -4306,6 +4352,23 @@ function quickSelectBuyFromBatch(domain, mode = "lp") {
     const statusEl = document.getElementById("buyLpDomainStatus");
     checkDomainAvailabilityLive(domain, statusEl);
   }
+}
+
+function collectBuyFormExtraFromUi() {
+  const form302 = document.getElementById("form-buy-302");
+  const on302 = form302 && form302.style.display !== "none";
+  if (on302) {
+    return {
+      link: document.getElementById("buy302Link")?.value?.trim() || "",
+      deployMode: "302",
+    };
+  }
+  return {
+    link: document.getElementById("buyLpLink")?.value?.trim() || "",
+    tele: document.getElementById("buyLpTele")?.value?.trim() || "",
+    templateId: document.getElementById("buyLpTemplate")?.value || "",
+    deployMode: "LP",
+  };
 }
 
 function openLoginModal() {
@@ -6379,6 +6442,17 @@ function orderDomainClick(btn, e) {
   try {
     extra = JSON.parse(btn.getAttribute("data-extra") || "{}");
   } catch {}
+  // Lấy lại từ form hiện tại (user có thể điền link/mẫu sau khi check giá)
+  const formExtra = collectBuyFormExtraFromUi();
+  extra = { ...extra, ...formExtra };
+  if (!extra.link) {
+    showToast("⚠️ Điền link đích trên form trước khi đặt mua");
+    return;
+  }
+  if (extra.deployMode !== "302" && !extra.templateId) {
+    showToast("⚠️ Chọn mẫu Landing Page trước khi đặt mua");
+    return;
+  }
   btn.disabled = true;
   btn.dataset.origLabel = btn.innerHTML;
   btn.innerHTML = "⏳ Đang mở...";
@@ -6406,6 +6480,14 @@ function openConfirmDomainPurchaseModal(domain, priceXu = 250, ruleApplied = "",
   const badgeRule = document.getElementById("confirmOrderRuleBadge");
   const badgeBalance = document.getElementById("confirmOrderBalanceBadge");
   const summaryEl = document.getElementById("confirmOrderSummaryText");
+  const modeBadge = document.getElementById("confirmOrderModeBadge");
+  const linkBadge = document.getElementById("confirmOrderLinkBadge");
+  const tplBadge = document.getElementById("confirmOrderTemplateBadge");
+  const tplRow = document.getElementById("confirmOrderTemplateRow");
+
+  const deployMode = extra.deployMode === "302" ? "302" : "LP";
+  const templateId = extra.templateId || "";
+  const tpl = templateId ? allTemplates.find((t) => t.id === templateId) : null;
 
   currentPurchaseOrderData = {
     domain: norm,
@@ -6413,24 +6495,34 @@ function openConfirmDomainPurchaseModal(domain, priceXu = 250, ruleApplied = "",
     ruleApplied,
     link: extra.link || "",
     tele: extra.tele || "",
-    templateId: extra.templateId || "",
-    deployMode: extra.deployMode || "LP",
+    templateId,
+    deployMode,
   };
 
   if (hiddenInput) hiddenInput.value = norm;
   if (linkHidden) linkHidden.value = extra.link || "";
   if (teleHidden) teleHidden.value = extra.tele || "";
-  if (tplHidden) tplHidden.value = extra.templateId || "";
-  if (modeHidden) modeHidden.value = extra.deployMode === "302" ? "302" : "LP";
+  if (tplHidden) tplHidden.value = templateId;
+  if (modeHidden) modeHidden.value = deployMode;
   if (badgeDomain) badgeDomain.textContent = norm;
   if (badgePrice) badgePrice.textContent = `${priceXu} Xu (≈ ${(priceXu).toLocaleString("vi-VN")}k đ)`;
   if (badgeRule) badgeRule.textContent = ruleApplied || "Quy chuẩn định giá";
-  
+
   const userBalance = currentUser ? (currentUser.balance || 0) : 0;
   if (badgeBalance) badgeBalance.textContent = `🪙 ${userBalance.toLocaleString("vi-VN")} Xu`;
 
+  if (modeBadge) {
+    modeBadge.textContent = deployMode === "302" ? "⚡ Trỏ 302 trực tiếp" : "🎨 Landing Page";
+  }
+  if (linkBadge) linkBadge.textContent = extra.link || "— (chưa có link)";
+  if (tplRow) tplRow.style.display = deployMode === "302" ? "none" : "flex";
+  if (tplBadge) {
+    tplBadge.textContent = deployMode === "302" ? "—" : tpl ? tpl.name || templateId : templateId || "— (chưa chọn mẫu)";
+  }
+
   if (summaryEl) {
-    summaryEl.innerHTML = `Bạn xác nhận sẽ sử dụng <span style="color: #10b981;">${priceXu.toLocaleString("vi-VN")} Xu</span> để mua tên miền <span style="color: #fbbf24; font-family: var(--font-mono);">${norm}</span>?`;
+    const modeTxt = deployMode === "302" ? "trỏ 302" : "gắn Landing Page";
+    summaryEl.innerHTML = `Bạn xác nhận dùng <span style="color: #10b981;">${priceXu.toLocaleString("vi-VN")} Xu</span> đặt mua <span style="color: #fbbf24; font-family: var(--font-mono);">${norm}</span> và ${modeTxt}? Đơn sẽ chờ Admin duyệt.`;
   }
 
   openModal("confirmDomainPurchaseModal");
