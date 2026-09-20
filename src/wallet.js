@@ -27,7 +27,9 @@ const DEFAULT_PRICING = {
   currency: "USD",
   vndRate: 25400,
   defaultPrice: 4.98,
-  maxAutoBuyPriceUsd: 12.00,
+  maxAutoBuyPriceUsd: 12.0,
+  /** Phụ phí privacy high trên Spaceship (USD/năm) — 0 khi mặc định public */
+  spaceshipPrivacyHighUsd: 0,
   tldPrices: {
     ".top": { reg: 1.40, renew: 3.85 },
     ".com": { reg: 8.88, renew: 9.98 },

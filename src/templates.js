@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { updateJsConfigFile } from "./repo-scanner.js";
-import { deployToAllPagesInstances } from "./cloudflare.js";
+import { stripDomainsJsonFallbacks } from "./lp-link-patch.js";
+import { deployToAllPagesInstances, ensureLiveDomainLink } from "./cloudflare.js";
 
 const execAsync = promisify(exec);
 
@@ -17,8 +18,8 @@ export const ACTIVE_TEMPLATES = [
     "folder": "landingpage-5uae-mm88",
     "path": "C:\\Landingpages\\MM88\\landingpage-5uae-mm88",
     "gitRepo": "freze2212/lp-mm88-5uae",
-    "pagesProject": "lp-mm88-5uae",
-    "cnameTarget": "lp-mm88-5uae.pages.dev",
+    "pagesProject": "lp-mm88-5uae-git2",
+    "cnameTarget": "lp-mm88-5uae-git2.pages.dev",
     "sampleDomain": "mm88.online",
     "sampleUrl": "https://mm88.online",
     "totalDomains": 1,
@@ -32,8 +33,8 @@ export const ACTIVE_TEMPLATES = [
     "folder": "lp-gg88-mx",
     "path": "C:\\Landingpages\\GG88\\lp-gg88-mx",
     "gitRepo": "freze2212/lp-gg88-mx",
-    "pagesProject": "lp-gg88-mx",
-    "cnameTarget": "lp-gg88-mx.pages.dev",
+    "pagesProject": "lp-gg88-mx-git2",
+    "cnameTarget": "lp-gg88-mx-git2.pages.dev",
     "sampleDomain": "gg88mx.com",
     "sampleUrl": "https://gg88mx.com",
     "totalDomains": 1,
@@ -47,10 +48,10 @@ export const ACTIVE_TEMPLATES = [
     "folder": "lp-gg88-gt9",
     "path": "C:\\Landingpages\\GG88\\lp-gg88-gt9",
     "gitRepo": "freze2212/lp-gg88-gt9",
-    "pagesProject": "lp-gg88-gt9",
-    "cnameTarget": "lp-gg88-gt9.pages.dev",
-    "sampleDomain": "lp-gg88-gt9.pages.dev",
-    "sampleUrl": "https://lp-gg88-gt9.pages.dev",
+    "pagesProject": "lp-gg88-gt9-git2",
+    "cnameTarget": "lp-gg88-gt9-git2.pages.dev",
+    "sampleDomain": "lp-gg88-gt9-git2.pages.dev",
+    "sampleUrl": "https://lp-gg88-gt9-git2.pages.dev",
     "totalDomains": 0,
     "brand": "GG88",
     "brandLabel": "GG88"
@@ -61,26 +62,12 @@ export const ACTIVE_TEMPLATES = [
     "title": "GG88 CỔNG QUỐC TẾ UY TÍN HÀNG ĐẦU",
     "folder": "ldpape_4d",
     "path": "C:\\Landingpages\\GG88\\ldpape_4d",
+    "gitRepo": "freze2212/lp-gg88-vip",
     "pagesProject": "lp-gg88-vip-2",
     "cnameTarget": "lp-gg88-vip-2.pages.dev",
     "sampleDomain": "gg88us.live",
     "sampleUrl": "https://gg88us.live",
     "totalDomains": 463,
-    "brand": "GG88",
-    "brandLabel": "GG88"
-  },
-  {
-    "id": "ladpage_3f_nhannhan",
-    "name": "Welcome to ⭐ Cổng chính thức năm 2026",
-    "title": "Welcome to ⭐ Cổng chính thức năm 2026",
-    "folder": "3f-thanhnhan",
-    "path": "C:\\Landingpages\\GG88\\3f-thanhnhan",
-    "gitRepo": "freze2212/landingpage-5f-g",
-    "pagesProject": "landingpage-5f-g",
-    "cnameTarget": "landingpage-5f-g.pages.dev",
-    "sampleDomain": "ggtong.me",
-    "sampleUrl": "https://ggtong.me",
-    "totalDomains": 1,
     "brand": "GG88",
     "brandLabel": "GG88"
   },
@@ -91,9 +78,10 @@ export const ACTIVE_TEMPLATES = [
     "folder": "landingpage-5h-gg",
     "path": "C:\\Landingpages\\GG88\\landingpage-5h-gg",
     "pagesProject": "lp-5h-gg88",
-    "cnameTarget": "lp-5h-gg88-d6b.pages.dev",
-    "sampleDomain": "lp-5h-gg88-d6b.pages.dev",
-    "sampleUrl": "https://lp-5h-gg88-d6b.pages.dev",
+    "cnameTarget": "lp-5h-gg88.pages.dev",
+    "pagesAccountId": "ddead9accc534c1eb074d2a46fffe748",
+    "sampleDomain": "lp-5h-gg88.pages.dev",
+    "sampleUrl": "https://lp-5h-gg88.pages.dev",
     "totalDomains": 0,
     "brand": "GG88",
     "brandLabel": "GG88"
@@ -104,8 +92,8 @@ export const ACTIVE_TEMPLATES = [
     "title": "Welcome to cổng chính thức ☀️ 2026",
     "folder": "ld-gg882pro",
     "path": "C:\\Landingpages\\GG88\\ld-gg882pro",
-    "pagesProject": "lp-gg882pro",
-    "cnameTarget": "lp-gg882pro.pages.dev",
+    "pagesProject": "lp-gg882pro-git2",
+    "cnameTarget": "lp-gg882pro-git2.pages.dev",
     "sampleDomain": "gg8858.com",
     "sampleUrl": "https://www.gg8858.com",
     "totalDomains": 0,
@@ -123,6 +111,36 @@ export const ACTIVE_TEMPLATES = [
     "sampleDomain": "g8fun.live",
     "sampleUrl": "https://g8fun.live",
     "totalDomains": 31,
+    "brand": "GG88",
+    "brandLabel": "GG88"
+  },
+  {
+    "id": "lp_gg88pr",
+    "name": "GG88 PR — lp-gg88pr",
+    "title": "GG88 PR Landing Page (lp-gg88pr-git2)",
+    "folder": "lp-gg88pr",
+    "path": "C:\\Landingpages\\GG88\\lp-gg88pr",
+    "gitRepo": "freze2212/lp-gg88pr",
+    "pagesProject": "lp-gg88pr-git2",
+    "cnameTarget": "lp-gg88pr-git2.pages.dev",
+    "sampleDomain": "gg88pr.com",
+    "sampleUrl": "https://gg88pr.com",
+    "totalDomains": 1,
+    "brand": "GG88",
+    "brandLabel": "GG88"
+  },
+  {
+    "id": "lp_gg88_gt9_sk",
+    "name": "GG88 GT9 — Video SK (gg88sk.com)",
+    "title": "GG88 GT9 — Video SK (gg88sk.com)",
+    "folder": "lp-gg88-gt9-sk",
+    "path": "C:\\Landingpages\\GG88\\lp-gg88-gt9-sk",
+    "gitRepo": "freze2212/lp-gg88-gt9-sk",
+    "pagesProject": "lp-gg88-gt9-sk",
+    "cnameTarget": "lp-gg88-gt9-sk.pages.dev",
+    "sampleDomain": "gg88sk.com",
+    "sampleUrl": "https://gg88sk.com",
+    "totalDomains": 1,
     "brand": "GG88",
     "brandLabel": "GG88"
   },
@@ -160,8 +178,8 @@ export const ACTIVE_TEMPLATES = [
     "title": "Welcome to ⭐ Cổng chính thức năm 2026",
     "folder": "lp-7f-xx88-games",
     "path": "C:\\Landingpages\\XX88\\lp-7f-xx88-games",
-    "pagesProject": "lp-7f-xx88-games",
-    "cnameTarget": "lp-7f-xx88-games.pages.dev",
+    "pagesProject": "lp-7f-xx88-games-git2",
+    "cnameTarget": "lp-7f-xx88-games-git2.pages.dev",
     "sampleDomain": "xx88pro.us",
     "sampleUrl": "https://xx88pro.us",
     "totalDomains": 1,
@@ -232,6 +250,7 @@ export const ACTIVE_TEMPLATES = [
     "path": "C:\\Landingpages\\MM88\\lp-fly88-mm88",
     "pagesProject": "lp-mm88-fly88",
     "cnameTarget": "lp-mm88-fly88.pages.dev",
+    "pagesAccountId": "ddead9accc534c1eb074d2a46fffe748",
     "sampleDomain": "mm88top.cc",
     "sampleUrl": "https://mm88top.cc",
     "totalDomains": 16,
@@ -258,11 +277,27 @@ export const ACTIVE_TEMPLATES = [
     "title": "Welcome to ⭐ Cổng chính thức năm 2026",
     "folder": "lp-llwin-info",
     "path": "C:\\Landingpages\\LLWIN\\lp-llwin-info",
+    "gitRepo": "freze2212/lp-7f-llwin-games",
     "pagesProject": "lp-7f-llwin-games",
     "cnameTarget": "lp-7f-llwin-games.pages.dev",
     "sampleDomain": "lltong86.com",
     "sampleUrl": "https://lltong86.com",
     "totalDomains": 11,
+    "brand": "LLWIN",
+    "brandLabel": "LLWIN"
+  },
+  {
+    "id": "lp_7f_llwin_defr",
+    "name": "LLWIN 7F · ĐỨC · PHÁP (Marina Bay)",
+    "title": "Welcome to ⭐ Cổng LLWIN chính thức năm 2026",
+    "folder": "lp-7f-llwin-defr",
+    "path": "C:\\Landingpages\\LLWIN\\lp-7f-llwin-defr",
+    "gitRepo": "freze2212/lp-7f-llwin-defr",
+    "pagesProject": "lp-7f-llwin-defr",
+    "cnameTarget": "lp-7f-llwin-defr.pages.dev",
+    "sampleDomain": "appllwin.com",
+    "sampleUrl": "https://appllwin.com",
+    "totalDomains": 1,
     "brand": "LLWIN",
     "brandLabel": "LLWIN"
   },
@@ -315,9 +350,10 @@ export const ACTIVE_TEMPLATES = [
     "folder": "lp-xoaipan-9d-g",
     "path": "C:\\Landingpages\\GG88\\lp-xoaipan-9d-g",
     "pagesProject": "lp-9d-xoaip-gg88",
-    "cnameTarget": "lp-9d-xoaip-gg88-4va.pages.dev",
-    "sampleDomain": "lp-9d-xoaip-gg88-4va.pages.dev",
-    "sampleUrl": "https://lp-9d-xoaip-gg88-4va.pages.dev",
+    "cnameTarget": "lp-9d-xoaip-gg88.pages.dev",
+    "pagesAccountId": "ddead9accc534c1eb074d2a46fffe748",
+    "sampleDomain": "lp-9d-xoaip-gg88.pages.dev",
+    "sampleUrl": "https://lp-9d-xoaip-gg88.pages.dev",
     "totalDomains": 0,
     "brand": "GG88",
     "brandLabel": "GG88"
@@ -328,6 +364,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "BLACKSITE CONSOLE - XÓA ID BẨN & KÍCH HOẠT MAXWIN",
     "folder": "LP-XOATONG.NET",
     "path": "C:\\Landingpages\\GG88\\LP-XOATONG.NET",
+    "gitRepo": "freze2212/lp-xoatong.net",
     "pagesProject": "lp-xoatong-net",
     "cnameTarget": "lp-xoatong-net.pages.dev",
     "sampleDomain": "g88tong.net",
@@ -345,6 +382,7 @@ export const ACTIVE_TEMPLATES = [
     "gitRepo": "freze2212/landingpage-5f-g",
     "pagesProject": "landingpage-5f-g",
     "cnameTarget": "landingpage-5f-g.pages.dev",
+    "pagesAccountId": "ddead9accc534c1eb074d2a46fffe748",
     "sampleDomain": "gg88am.com",
     "sampleUrl": "https://gg88am.com",
     "totalDomains": 20,
@@ -423,6 +461,37 @@ export const ACTIVE_TEMPLATES = [
     "totalDomains": 0,
     "brand": "XX88",
     "brandLabel": "XX88"
+  },
+  {
+    "id": "lp_gg88_cong_gg88k",
+    "name": "GG88 - CỔNG CHÍNH THỨC GG88K (Dubai · SG · TR)",
+    "title": "GG88 - CỔNG CHÍNH THỨC GG88K (Dubai · SG · TR)",
+    "folder": "lp-gg88-cong-gg88k",
+    "path": "C:\\Landingpages\\GG88\\lp-gg88-cong-gg88k",
+    "gitRepo": "freze2212/lp-gg88-cong-gg88k",
+    "pagesProject": "lp-gg88-cong-gg88k",
+    "cnameTarget": "lp-gg88-cong-gg88k.pages.dev",
+    "sampleDomain": "gg88k.us",
+    "sampleUrl": "https://gg88k.us",
+    "totalDomains": 1,
+    "brand": "GG88",
+    "brandLabel": "GG88"
+  },
+  {
+    "id": "landing_page_uae",
+    "name": "GG88 - LANDING PAGE UAE (Admin Pages · Git)",
+    "title": "GG88 - LANDING PAGE UAE (Admin Pages · Git)",
+    "folder": "landing-page-uae",
+    "path": "C:\\Landingpages\\GG88\\landing-page-uae",
+    "gitRepo": "freze2212/landing-page-uae",
+    "pagesProject": "landing-page-uae",
+    "cnameTarget": "landing-page-uae.pages.dev",
+    "pagesAccountId": "ddead9accc534c1eb074d2a46fffe748",
+    "sampleDomain": "dangky88k.vip",
+    "sampleUrl": "https://dangky88k.vip",
+    "totalDomains": 158,
+    "brand": "GG88",
+    "brandLabel": "GG88"
   }
 ];
 
@@ -499,13 +568,68 @@ function withTemplateLock(tplPath, fn) {
   return nextLock;
 }
 
-export async function updateTemplateDomainsJson(template, domain, mainUrl, messengerUrl = "") {
+export async function updateTemplateDomainsJson(template, domain, mainUrl, messengerUrl = "", opts = {}) {
   const tplObj = typeof template === "string" ? (getTemplate(template) || { path: template }) : template;
   if (!tplObj?.path) throw new Error("Template không có đường dẫn thư mục nguồn");
 
   return withTemplateLock(tplObj.path, async () => {
     const djPath = path.join(tplObj.path, "domains.json");
     const norm = domain.trim().toLowerCase().replace(/^www\./, "");
+    const teleUrl = messengerUrl || "";
+    const entry = {
+      main_url: mainUrl,
+      messenger_url: teleUrl || mainUrl,
+      telegram_url: teleUrl || undefined,
+    };
+
+    const gitDir = path.join(tplObj.path, ".git");
+    if (!fs.existsSync(gitDir)) {
+      throw new Error(
+        `Template path thiếu .git — không push được GitHub/Pages. Path: ${tplObj.path}. Cần git clone đúng repo trước khi mua/đổi link.`
+      );
+    }
+
+    // Đồng bộ domains.json với origin — KHÔNG bao giờ git reset --hard
+    // (reset --hard sẽ mất domain khác / thay đổi local chưa push)
+    try {
+      const rebaseMerge = path.join(tplObj.path, ".git", "rebase-merge");
+      const rebaseApply = path.join(tplObj.path, ".git", "rebase-apply");
+      if (fs.existsSync(rebaseMerge) || fs.existsSync(rebaseApply)) {
+        await execAsync(`git rebase --abort`, { cwd: tplObj.path }).catch(() => {});
+      }
+      await execAsync(`git fetch origin`, { cwd: tplObj.path });
+      const showRef = await execAsync(`git show-ref`, { cwd: tplObj.path }).catch(() => ({ stdout: "" }));
+      const refs = String(showRef.stdout || "");
+      const pick = refs.includes("refs/remotes/origin/main")
+        ? "origin/main"
+        : refs.includes("refs/remotes/origin/master")
+          ? "origin/master"
+          : null;
+      if (pick) {
+        // Merge key từ remote domains.json vào file local (giữ hết domain 2 phía)
+        let remoteObj = {};
+        let localObj = {};
+        try {
+          const remoteDj = await execAsync(`git show ${pick}:domains.json`, { cwd: tplObj.path });
+          remoteObj = JSON.parse(remoteDj.stdout || "{}");
+        } catch {}
+        if (fs.existsSync(djPath)) {
+          try {
+            localObj = JSON.parse(fs.readFileSync(djPath, "utf8"));
+          } catch {}
+        }
+        const merged = { ...remoteObj, ...localObj };
+        fs.writeFileSync(djPath, JSON.stringify(merged, null, 2), "utf8");
+        // Cập nhật nhánh local với commit remote (merge, không hard reset)
+        await execAsync(`git merge --no-edit -X ours ${pick}`, { cwd: tplObj.path }).catch(async () => {
+          await execAsync(`git merge --abort`, { cwd: tplObj.path }).catch(() => {});
+        });
+      }
+    } catch (syncErr) {
+      throw new Error(`Không sync được origin trước khi ghi link: ${syncErr.message}`);
+    }
+
+    // Đọc domains.json SAU sync rồi ghi entry domain
     let dj = {};
     let isExisting = false;
     if (fs.existsSync(djPath)) {
@@ -514,45 +638,59 @@ export async function updateTemplateDomainsJson(template, domain, mainUrl, messe
         if (norm in dj) isExisting = true;
       } catch {}
     }
-
-    const teleUrl = messengerUrl || "";
-    const entry = {
-      main_url: mainUrl,
-      messenger_url: teleUrl || mainUrl,
-      telegram_url: teleUrl || undefined,
-    };
     dj[norm] = entry;
     dj[`www.${norm}`] = entry;
+    stripDomainsJsonFallbacks(dj);
     fs.writeFileSync(djPath, JSON.stringify(dj, null, 2), "utf8");
 
-    // Đồng bộ js/config.js hoặc config.js nếu template có file cấu hình
     const jsConfigRel = updateJsConfigFile(tplObj.path, norm, mainUrl, teleUrl);
     updateJsConfigFile(tplObj.path, `www.${norm}`, mainUrl, teleUrl);
 
-    const gitDir = path.join(tplObj.path, ".git");
-    let gitPush = { ok: false, errors: [] };
-    if (fs.existsSync(gitDir)) {
-      try {
-        const commitMsg = isExisting ? `Update link & telegram for domain ${norm}` : `Auto add domain ${norm}`;
-        const filesToAdd = jsConfigRel ? `domains.json ${jsConfigRel}` : "domains.json";
-        await execAsync(`git add ${filesToAdd}`, { cwd: tplObj.path });
-        await execAsync(`git commit -m "${commitMsg}"`, { cwd: tplObj.path }).catch(() => {});
-        gitPush = await pushTemplateRemotes(tplObj.path);
-      } catch (err) {
-        gitPush.errors.push(err.message);
-        console.warn(`[Template] Git sync lỗi ${norm}:`, err.message);
-      }
+    let gitPush = { ok: false, originOk: false, errors: [] };
+    try {
+      const commitMsg = isExisting ? `Update link & telegram for domain ${norm}` : `Auto add domain ${norm}`;
+      const files = new Set(["domains.json"]);
+      if (jsConfigRel) files.add(jsConfigRel);
+      if (fs.existsSync(path.join(tplObj.path, "index.html"))) files.add("index.html");
+      await execAsync(`git add ${[...files].join(" ")}`, { cwd: tplObj.path });
+      await execAsync(`git commit -m "${commitMsg}"`, { cwd: tplObj.path }).catch(() => {});
+      gitPush = await pushTemplateRemotes(tplObj.path);
+    } catch (err) {
+      gitPush.errors.push(err.message);
+      throw new Error(`Git sync lỗi [${norm}]: ${err.message}`);
     }
 
-    // Sync live = git push ở trên. Wrangler folder chỉ khi ALLOW_WRANGLER_DEPLOY=true.
+    if (!gitPush.originOk) {
+      throw new Error(
+        `git push origin thất bại — live Pages chưa nhận [${norm}]. ${gitPush.errors.join(" | ")}`
+      );
+    }
+
     if (tplObj.pagesProject) {
       await deployToAllPagesInstances(tplObj.pagesProject, tplObj.path).catch((err) => {
         console.warn(`[Template] Deploy Pages lỗi:`, err.message);
       });
     }
 
-    if (gitPush.errors?.length && !gitPush.originOk) {
-      console.warn(`[Template] ⚠️ origin push thất bại — live Git Pages có thể chưa có ${norm}:`, gitPush.errors);
+    // Force deploy đúng project CNAME + verify live — tránh báo xong khi Pages queue kẹt
+    let liveEnsure = null;
+    if (opts.skipLiveEnsure !== true) {
+      try {
+        liveEnsure = await ensureLiveDomainLink(norm, mainUrl, {
+          templatePath: tplObj.path,
+          projectName: opts.pagesProject || null,
+          cnameTarget: opts.cnameTarget || null,
+          fallbackProject: tplObj.pagesProject || null,
+          accountId: opts.accountId || tplObj.pagesAccountId || undefined,
+          timeoutMs: opts.liveTimeoutMs ?? 90000,
+        });
+        if (!liveEnsure.ok) {
+          console.warn(`[Template] Live chưa khớp sau force deploy [${norm}]:`, liveEnsure.error);
+        }
+      } catch (err) {
+        liveEnsure = { ok: false, error: err.message };
+        console.warn(`[Template] ensureLiveDomainLink lỗi [${norm}]:`, err.message);
+      }
     }
 
     return {
@@ -561,12 +699,36 @@ export async function updateTemplateDomainsJson(template, domain, mainUrl, messe
       isExisting,
       jsConfigUpdated: !!jsConfigRel,
       gitPush,
+      liveEnsure,
     };
   });
 }
 
 /** Push theo thứ tự origin trước (Pages Git), rồi remote phụ. Thử rebase 1 lần nếu rejected. */
 async function pushTemplateRemotes(cwd) {
+  // Clear stuck rebase state if any
+  const rebaseMerge = path.join(cwd, ".git", "rebase-merge");
+  const rebaseApply = path.join(cwd, ".git", "rebase-apply");
+  if (fs.existsSync(rebaseMerge) || fs.existsSync(rebaseApply)) {
+    await execAsync(`git rebase --abort`, { cwd }).catch(() => {});
+  }
+
+  // Detect nhánh remote thật (master|main) — KHÔNG hardcode main
+  let branch = "main";
+  try {
+    const showRef = await execAsync(`git show-ref`, { cwd });
+    const refs = String(showRef.stdout || "");
+    if (refs.includes("refs/remotes/origin/master")) branch = "master";
+    else if (refs.includes("refs/remotes/origin/main")) branch = "main";
+    else {
+      branch = (await execAsync(`git rev-parse --abbrev-ref HEAD`, { cwd })).stdout.trim() || "main";
+    }
+  } catch {
+    try {
+      branch = (await execAsync(`git rev-parse --abbrev-ref HEAD`, { cwd })).stdout.trim() || "main";
+    } catch {}
+  }
+
   const remotes = await execAsync(`git remote`, { cwd }).catch(() => ({ stdout: "origin" }));
   const remoteList = remotes.stdout.trim().split(/\s+/).filter(Boolean);
   const ordered = [
@@ -579,21 +741,22 @@ async function pushTemplateRemotes(cwd) {
   let originOk = false;
   for (const r of ordered) {
     try {
-      await execAsync(`git push ${r} HEAD:main`, { cwd });
+      await execAsync(`git push ${r} HEAD:${branch}`, { cwd });
       if (r === "origin") originOk = true;
     } catch (e1) {
       try {
-        await execAsync(`git pull --rebase ${r} main`, { cwd });
-        await execAsync(`git push ${r} HEAD:main`, { cwd });
+        await execAsync(`git pull --rebase ${r} ${branch}`, { cwd });
+        await execAsync(`git push ${r} HEAD:${branch}`, { cwd });
         if (r === "origin") originOk = true;
       } catch (e2) {
-        const msg = `${r}: ${(e2.stderr || e2.message || "").toString().slice(0, 300)}`;
+        const msg = `${r}/${branch}: ${(e2.stderr || e2.message || "").toString().slice(0, 300)}`;
         errors.push(msg);
-        console.warn(`[Template] git push ${r} thất bại:`, msg);
+        console.warn(`[Template] git push ${r} ${branch} thất bại:`, msg);
+        await execAsync(`git rebase --abort`, { cwd }).catch(() => {});
       }
     }
   }
-  return { ok: errors.length === 0 || originOk, originOk, errors };
+  return { ok: errors.length === 0 || originOk, originOk, errors, branch };
 }
 
 export async function updateTemplateBatchDomains(template, domainEntries) {
@@ -636,16 +799,23 @@ export async function updateTemplateBatchDomains(template, domainEntries) {
     fs.writeFileSync(djPath, JSON.stringify(dj, null, 2), "utf8");
 
     const gitDir = path.join(tplObj.path, ".git");
-    if (fs.existsSync(gitDir)) {
-      try {
-        const commitMsg = `Auto batch add ${domainEntries.length} domains [${domainEntries.map((d) => d.domain).slice(0, 3).join(", ")}...]`;
-        const filesToAdd = hasJsConfig && jsConfigRel ? `domains.json ${jsConfigRel}` : "domains.json";
-        await execAsync(`git add ${filesToAdd}`, { cwd: tplObj.path });
-        await execAsync(`git commit -m "${commitMsg}"`, { cwd: tplObj.path }).catch(() => {});
-        await pushTemplateRemotes(tplObj.path);
-      } catch (err) {
-        console.warn(`[Template] Batch git sync lỗi:`, err.message);
+    if (!fs.existsSync(gitDir)) {
+      throw new Error(
+        `Template path thiếu .git — không batch push được. Path: ${tplObj.path}`
+      );
+    }
+
+    try {
+      const commitMsg = `Auto batch add ${domainEntries.length} domains [${domainEntries.map((d) => d.domain).slice(0, 3).join(", ")}...]`;
+      const filesToAdd = hasJsConfig && jsConfigRel ? `domains.json ${jsConfigRel}` : "domains.json";
+      await execAsync(`git add ${filesToAdd}`, { cwd: tplObj.path });
+      await execAsync(`git commit -m "${commitMsg}"`, { cwd: tplObj.path }).catch(() => {});
+      const gitPush = await pushTemplateRemotes(tplObj.path);
+      if (!gitPush.originOk) {
+        throw new Error(`git push origin thất bại (batch). ${gitPush.errors.join(" | ")}`);
       }
+    } catch (err) {
+      throw new Error(`Batch git sync lỗi: ${err.message}`);
     }
 
     if (tplObj.pagesProject) {

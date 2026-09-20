@@ -116,7 +116,7 @@ export const PointDomainTab: React.FC = () => {
               >
                 {templates.map((t) => (
                   <option key={t.id} value={t.id}>
-                    [{t.brand}] {t.name} (CNAME: {t.cnameTarget})
+                    [{t.brand}] {t.name} ({t.pagesProject || String(t.cnameTarget || '').replace(/\.pages\.dev$/i, '')})
                   </option>
                 ))}
               </select>

@@ -11,11 +11,10 @@
     "deploy": "node bin/cli.js deploy",
     "contacts": "node bin/cli.js contacts",
     "setup": "node bin/cli.js setup",
-    "bot": "node src/bot.js",
     "server": "node src/server.js",
     "web": "node src/server.js",
     "screenshots": "node scripts/generate_screenshots.js",
-    "start": "node src/app.js"
+    "start": "node src/server.js"
   },
   "engines": {
     "node": ">=18"

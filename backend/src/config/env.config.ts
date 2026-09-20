@@ -8,8 +8,6 @@ export interface AppConfig {
   cfAccountId: string;
   spaceshipApiKey: string;
   spaceshipApiSecret: string;
-  telegramBotToken: string;
-  telegramChatId: string;
   dataDir: string;
   rootDir: string;
   publicDir: string;
@@ -42,8 +40,6 @@ export const appConfig: AppConfig = {
   cfAccountId: process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID || '',
   spaceshipApiKey: process.env.SPACESHIP_API_KEY || '',
   spaceshipApiSecret: process.env.SPACESHIP_API_SECRET || '',
-  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
-  telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
   dataDir: path.resolve(rootDir, 'data'),
   rootDir: rootDir,
   publicDir: path.resolve(rootDir, 'public'),

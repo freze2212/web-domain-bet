@@ -31,7 +31,7 @@ function saveOrders(data) {
 /**
  * Tạo đơn đặt mua tên miền mới (Chờ Admin duyệt - CHƯA trừ xu lúc này)
  */
-export function createDomainOrder({ userId, username, fullName, domain, note = "" }) {
+export function createDomainOrder({ userId, username, fullName, domain, note = "", link = "", tele = "", templateId = "", deployMode = "LP" }) {
   const normDomain = domain.trim().toLowerCase().replace(/^www\./, "");
   if (!normDomain) {
     throw new Error("Vui lòng cung cấp tên miền hợp lệ");
@@ -62,6 +62,10 @@ export function createDomainOrder({ userId, username, fullName, domain, note = "
     fullName: fullName || username || userId,
     domain: normDomain,
     note: note.trim(),
+    link: String(link || "").trim(),
+    tele: String(tele || "").trim(),
+    templateId: String(templateId || "").trim(),
+    deployMode: deployMode === "302" ? "302" : "LP",
     priceXu: pricing.priceXu,
     priceVnd: pricing.priceVnd,
     priceUsd: pricing.priceUsd,
@@ -198,4 +202,19 @@ export function rejectDomainOrder(orderId, adminUser, reason = "Admin từ chố
     order,
     message: "Đã từ chối đơn đặt mua thành công. Không trừ Xu của người dùng.",
   };
+}
+
+/** Admin đánh dấu đơn đã mua Spaceship + cài xong */
+export function markDomainOrderFulfilled(orderId, adminUser, { deployMode } = {}) {
+  const orders = loadOrders();
+  const order = orders.find((o) => o.id === orderId);
+  if (!order) throw new Error("Không tìm thấy đơn đặt mua này");
+  if (order.status !== "approved") {
+    throw new Error(`Chỉ fulfill đơn đã duyệt (hiện: ${order.status})`);
+  }
+  order.fulfilledAt = new Date().toISOString();
+  order.fulfilledBy = adminUser.username || adminUser.id || "admin";
+  if (deployMode) order.deployMode = deployMode === "302" ? "302" : "LP";
+  saveOrders(orders);
+  return { order };
 }

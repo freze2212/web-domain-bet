@@ -12,7 +12,6 @@ import { HealthModule } from './health/health.module.js';
 import { TasksModule } from './tasks/tasks.module.js';
 import { HistoryModule } from './history/history.module.js';
 import { ClonerModule } from './cloner/cloner.module.js';
-import { TelegramModule } from './telegram/telegram.module.js';
 
 @Module({
   imports: [
@@ -29,7 +28,6 @@ import { TelegramModule } from './telegram/telegram.module.js';
     TasksModule,
     HistoryModule,
     ClonerModule,
-    TelegramModule,
   ],
 })
 export class AppModule {}

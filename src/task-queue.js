@@ -41,6 +41,36 @@ function saveTasks() {
 }
 
 loadTasks();
+reconcileStaleTasks();
+
+/** Đóng task RUNNING/PENDING treo quá lâu (PM2 restart, worker chết…). */
+export function reconcileStaleTasks(maxAgeMs = 2 * 60 * 60 * 1000) {
+  const now = Date.now();
+  let n = 0;
+  for (const task of tasksMap.values()) {
+    if (task.status !== "RUNNING" && task.status !== "PENDING") continue;
+    const lastStep = Array.isArray(task.steps) && task.steps.length
+      ? task.steps[task.steps.length - 1]?.time
+      : null;
+    const anchor = lastStep || task.startedAt || task.createdAt;
+    const ts = anchor ? new Date(anchor).getTime() : 0;
+    if (!ts || now - ts < maxAgeMs) continue;
+    task.status = "FAILED";
+    task.currentStep = "Đã đóng tiến trình treo";
+    task.error =
+      "Tác vụ treo quá lâu (thường do restart server / worker chết giữa chừng). Xem Lịch sử hoặc Thử lại nếu cần.";
+    task.finishedAt = new Date().toISOString();
+    task.steps = task.steps || [];
+    task.steps.push({
+      time: task.finishedAt,
+      message: `❌ ${task.error}`,
+      status: "error",
+    });
+    n++;
+  }
+  if (n > 0) saveTasks();
+  return n;
+}
 
 export function createTask({ type, domain = "", userId = "admin", params = {}, title = "" }) {
   const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -144,6 +174,7 @@ export function getTask(id) {
 }
 
 export function listTasks({ userId = null, limit = 50 } = {}) {
+  reconcileStaleTasks();
   let list = Array.from(tasksMap.values()).sort(
     (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
   );

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getUserById } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, "..", "data");
@@ -10,20 +11,39 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+let ownershipCache = { mtime: -1, data: null };
+
+export function invalidateOwnershipCache() {
+  ownershipCache = { mtime: -1, data: null };
+}
+
 function loadOwnership() {
-  if (!fs.existsSync(OWNERSHIP_FILE)) {
-    fs.writeFileSync(OWNERSHIP_FILE, JSON.stringify({}, null, 2), "utf8");
-    return {};
-  }
   try {
-    return JSON.parse(fs.readFileSync(OWNERSHIP_FILE, "utf8"));
+    if (!fs.existsSync(OWNERSHIP_FILE)) {
+      fs.writeFileSync(OWNERSHIP_FILE, JSON.stringify({}, null, 2), "utf8");
+      ownershipCache = { mtime: Date.now(), data: {} };
+      return ownershipCache.data;
+    }
+    const mtime = fs.statSync(OWNERSHIP_FILE).mtimeMs;
+    if (ownershipCache.data && ownershipCache.mtime === mtime) {
+      return ownershipCache.data;
+    }
+    const data = JSON.parse(fs.readFileSync(OWNERSHIP_FILE, "utf8"));
+    ownershipCache = { mtime, data: data && typeof data === "object" ? data : {} };
+    return ownershipCache.data;
   } catch {
-    return {};
+    ownershipCache = { mtime: Date.now(), data: {} };
+    return ownershipCache.data;
   }
 }
 
 function saveOwnership(data) {
   fs.writeFileSync(OWNERSHIP_FILE, JSON.stringify(data, null, 2), "utf8");
+  try {
+    ownershipCache = { mtime: fs.statSync(OWNERSHIP_FILE).mtimeMs, data };
+  } catch {
+    ownershipCache = { mtime: Date.now(), data };
+  }
 }
 
 export function assignDomain(domain, userId, meta = {}) {
@@ -87,4 +107,44 @@ export function getUserDomainsDetails(userId) {
 
 export function listAllAssignments() {
   return loadOwnership();
+}
+
+/** Admin có thể gán miền cho khách qua targetUserId; user thường = chính họ */
+export function resolveDeployOwnerUserId(currentUser, body = {}) {
+  const selfId = currentUser?.userId || currentUser?.id;
+  if (!selfId) throw new Error("Thiếu thông tin user đăng nhập");
+  const target = String(body.targetUserId || body.ownerUserId || "").trim();
+  if (currentUser?.role === "admin" && target) {
+    const u = getUserById(target);
+    if (!u) throw new Error(`Không tìm thấy user [${target}] để gán quyền miền`);
+    return u.id;
+  }
+  return selfId;
+}
+
+/** Gán/cập nhật ownership sau deploy thành công */
+export function syncDeployOwnership(domain, currentUser, body, meta = {}) {
+  const ownerId = resolveDeployOwnerUserId(currentUser, body);
+  const owner = getUserById(ownerId);
+  return assignDomain(domain, ownerId, {
+    username: owner?.username,
+    fullName: owner?.fullName,
+    assignedBy: currentUser?.userId || currentUser?.username || "system",
+    ...meta,
+  });
+}
+
+/** Giữ chủ cũ khi admin sửa miền của khách (set-link / switch) */
+export function syncDeployOwnershipPreserve(domain, currentUser, body, meta = {}) {
+  const existing = getDomainOwner(domain);
+  if (existing?.userId && currentUser?.role === "admin") {
+    const owner = getUserById(existing.userId);
+    return assignDomain(domain, existing.userId, {
+      username: owner?.username || existing.username,
+      fullName: owner?.fullName || existing.fullName,
+      assignedBy: currentUser?.userId || currentUser?.username || "admin",
+      ...meta,
+    });
+  }
+  return syncDeployOwnership(domain, currentUser, body, meta);
 }

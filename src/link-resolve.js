@@ -1,4 +1,4 @@
-import { findZoneByName, findActiveForwardingRule, findAnyForwardingRule } from "./cloudflare.js";
+import { findZoneByName, findActiveForwardingRule, findAnyForwardingRule, tokenForZone } from "./cloudflare.js";
 import { getLastDomainHistoryMeta } from "./history.js";
 import { getDomainOwner } from "./ownership.js";
 import { normalizeUrl } from "./utils.js";
@@ -53,7 +53,8 @@ export async function resolveInheritedLink(domain, opts = {}) {
 
   const zone = await findZoneByName(domain).catch(() => null);
   if (zone) {
-    const active = await findActiveForwardingRule(zone.id).catch(() => null);
+    const zOpts = { token: tokenForZone(zone) };
+    const active = await findActiveForwardingRule(zone.id, zOpts).catch(() => null);
     if (active?.targetUrl) {
       return {
         link: normalizeUrl(active.targetUrl),
@@ -61,7 +62,7 @@ export async function resolveInheritedLink(domain, opts = {}) {
         source: "page_rule_active",
       };
     }
-    const anyRule = await findAnyForwardingRule(zone.id).catch(() => null);
+    const anyRule = await findAnyForwardingRule(zone.id, zOpts).catch(() => null);
     if (anyRule?.targetUrl) {
       return {
         link: normalizeUrl(anyRule.targetUrl),

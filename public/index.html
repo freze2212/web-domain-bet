@@ -2,20 +2,27 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>BET DOMAIN PRO • Hệ Thống Quản Trị Tên Miền Quốc Tế</title>
   <meta name="description" content="Trung tâm phân quyền, mua tên miền, trỏ 302, đổi link affiliate và cài đặt Landing Page tự động cực nhanh.">
+  <meta name="theme-color" content="#07090e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20260910-live-name">
-  <!-- Telegram WebApp Script (nếu mở trong Telegram) -->
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css?v=20260915-mobile">
+  <script>document.documentElement.classList.add("auth-pending");</script>
 </head>
-<body>
+<body class="auth-pending">
+  <div id="authBootScreen" class="auth-boot-screen" aria-live="polite" aria-busy="true">
+    <div class="auth-boot-inner">
+      <div class="spinner"></div>
+      <p>Đang xác thực phiên đăng nhập...</p>
+    </div>
+  </div>
   <div class="bg-glow-1"></div>
   <div class="bg-glow-2"></div>
   <div class="bg-glow-3"></div>
@@ -40,9 +47,9 @@
           <span class="pulse-dot"></span>
           <span id="serverStatusText">Trực Tuyến</span>
         </div>
-        <div class="task-indicator-pill" id="headerTaskIndicator" onclick="switchToTab('tab-tasks')" style="cursor: pointer;" title="Xem các tác vụ đang chạy ngầm">
+        <div class="task-indicator-pill" id="headerTaskIndicator" onclick="switchToTab('tab-tasks')" style="cursor: pointer;" title="Xem các tác vụ trong Tiến trình">
           <span>⏳</span>
-          <span id="headerTaskCount">0 tác vụ ngầm</span>
+          <span id="headerTaskCount">0 tác vụ</span>
         </div>
       </div>
 
@@ -52,7 +59,7 @@
           <span class="wallet-icon">💰</span>
           <div class="wallet-text-group">
             <span class="wallet-label">Số Dư Ví</span>
-            <span class="wallet-amount" id="userBalanceText">0.00$</span>
+            <span class="wallet-amount" id="userBalanceText">— Xu</span>
           </div>
           <span class="wallet-add-btn">+ Nạp</span>
         </div>
@@ -61,8 +68,8 @@
         <div class="user-badge-pill" id="userBadgeBtn" onclick="switchToTab('tab-wallet')" title="Xem thông tin tài khoản">
           <span class="user-avatar-icon">👤</span>
           <div class="user-text-group">
-            <span class="user-name" id="userNameText">admin</span>
-            <span class="user-role-tag admin" id="userRoleTag">ADMIN</span>
+            <span class="user-name" id="userNameText">...</span>
+            <span class="user-role-tag user" id="userRoleTag">...</span>
           </div>
         </div>
 
@@ -116,7 +123,7 @@
         </button>
         <button class="nav-tab" data-tab="tab-tasks">
           <span class="nav-tab-icon">⏳</span>
-          <span id="navTabTasksLabel">Tiến Trình Ngầm</span>
+          <span id="navTabTasksLabel">Tiến Trình</span>
           <span class="tab-badge" id="badgeTasksCount">0</span>
         </button>
         <button class="nav-tab" data-tab="tab-check" data-role="admin">
@@ -126,6 +133,11 @@
         <button class="nav-tab" data-tab="tab-wallet">
           <span class="nav-tab-icon">💳</span>
           <span id="navTabWalletLabel">Ví & Thành Viên</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-orders" data-role="admin" id="navTabOrders">
+          <span class="nav-tab-icon">📥</span>
+          <span>Yêu Cầu Mua Miền</span>
+          <span class="tab-badge" id="badgeOrdersPending">0</span>
         </button>
         <button class="nav-tab" data-tab="tab-history">
           <span class="nav-tab-icon">📜</span>
@@ -203,7 +215,7 @@
       <div class="section-header">
         <div>
           <h2>Đăng Ký & Cài Đặt Tên Miền Tự Động</h2>
-          <p class="section-desc">Mua tên miền giá rẻ qua Spaceship và tự động kết nối Cloudflare DNS, SSL, Landing Page hoặc 302 trong 1 phút.</p>
+          <p class="section-desc" id="tabBuySectionDesc">Tra cứu tên miền còn trống, xem báo giá và gửi yêu cầu mua. Theo dõi đơn tại tab Ví.</p>
         </div>
       </div>
 
@@ -232,6 +244,14 @@
           </div>
 
           <form id="buyLpForm" class="form-grid">
+            <div class="form-group full-width admin-buy-target-group" style="display: none;">
+              <label for="buyLpTargetUser">Gán quyền miền cho khách hàng (Admin)</label>
+              <select id="buyLpTargetUser" class="form-select">
+                <option value="">— Gán cho chính Admin —</option>
+              </select>
+              <span class="field-hint">💡 Chọn thành viên sở hữu miền sau khi mua & cài xong</span>
+            </div>
+
             <div class="form-group full-width">
               <label for="buyLpDomain">Tên miền muốn mua <span class="required">*</span></label>
               <div class="input-with-button">
@@ -285,6 +305,13 @@
           </div>
 
           <form id="buy302Form" class="form-grid">
+            <div class="form-group full-width admin-buy-target-group" style="display: none;">
+              <label for="buy302TargetUser">Gán quyền miền cho khách hàng (Admin)</label>
+              <select id="buy302TargetUser" class="form-select">
+                <option value="">— Gán cho chính Admin —</option>
+              </select>
+            </div>
+
             <div class="form-group full-width">
               <label for="buy302Domain">Tên miền muốn mua <span class="required">*</span></label>
               <div class="input-with-button">
@@ -645,9 +672,9 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
             Đồng bộ CF (1250+)
           </button>
-          <button id="refreshDomainsBtn" class="btn btn-secondary btn-icon" title="Quét lại toàn bộ thư mục">
+          <button id="refreshDomainsBtn" class="btn btn-secondary btn-icon" title="Tải lại danh sách tên miền">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-            Quét lại
+            Tải lại
           </button>
         </div>
       </div>
@@ -676,7 +703,7 @@
       <div class="domains-table-wrapper">
         <div id="domainsLoading" class="state-container">
           <div class="spinner"></div>
-          <p>Đang quét toàn bộ các thư mục Landing Page trên máy...</p>
+          <p>Đang tải danh sách tên miền...</p>
         </div>
 
         <table class="domains-table" id="domainsTable" style="display: none;">
@@ -698,8 +725,9 @@
         <div id="domainsEmpty" class="state-container" style="display: none;">
           <div class="empty-icon">🔍</div>
           <h3>Không tìm thấy tên miền phù hợp</h3>
-          <p>Thử tìm kiếm từ khoá khác hoặc nhấn nút Quét Lại.</p>
+          <p>Thử từ khoá khác, hoặc bấm <b>Đồng bộ CF</b> rồi <b>Tải lại</b> — danh sách gồm cả zone CF chưa gắn LP.</p>
         </div>
+        <div id="domainsPagination" class="pagination-host"></div>
       </div>
     </section>
 
@@ -1037,7 +1065,7 @@
       <div class="section-header">
         <div>
           <h2>📜 Lịch Sử Vận Hành & Tiến Độ Tên Miền</h2>
-          <p class="section-desc">Theo dõi tiến trình kiểm tra HTTP 200 tự động, trạng thái xử lý ngầm và lịch sử giao dịch chi tiết.</p>
+          <p class="section-desc">Theo dõi tiến trình kiểm tra HTTP 200 tự động, trạng thái xử lý và lịch sử giao dịch chi tiết.</p>
         </div>
         <div class="header-tools">
           <button class="btn btn-primary btn-sm" id="verifyAllHistoryBtn" title="Kiểm tra HTTP 200 toàn bộ các miền đang chờ">
@@ -1112,6 +1140,7 @@
           <h3>Chưa có bản ghi lịch sử nào</h3>
           <p>Các thao tác mua miền, đổi mẫu và trỏ link sẽ tự động được ghi lại tại đây.</p>
         </div>
+        <div id="historyPagination" class="pagination-host"></div>
       </div>
     </section>
 
@@ -1357,17 +1386,22 @@
     </section>
 
     <!-- ══════════════════════════════════════════════════════════════════════
-         TAB: TIẾN TRÌNH CHẠY NGẦM (TASK QUEUE)
+         TAB: TIẾN TRÌNH (TASK QUEUE)
          ══════════════════════════════════════════════════════════════════════ -->
     <section id="tab-tasks" class="tab-pane">
       <div class="section-header">
         <div>
-          <h2>⏳ Hàng Đợi & Tiến Trình Chạy Ngầm</h2>
-          <p class="section-desc">Theo dõi thời gian thực tất cả tác vụ mua domain, trỏ DNS, deploy Pages và clone web mà không lo bị đơ trình duyệt.</p>
+          <h2>⏳ Hàng Đợi & Tiến Trình</h2>
+          <p class="section-desc">Chỉ hiện việc đang chạy + vừa xong. Treo/zombie tự đóng. Chi tiết lâu dài xem tab Lịch sử.</p>
         </div>
-        <div class="header-tools">
+        <div class="header-tools" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <div class="btn-group" style="display:flex;gap:4px;">
+            <button type="button" class="btn btn-secondary btn-sm" id="tasksFilterActive" onclick="setTasksQueueFilter('active')">Đang chạy</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="tasksFilterDone" onclick="setTasksQueueFilter('done')">Vừa xong</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="tasksFilterAll" onclick="setTasksQueueFilter('all')">Tất cả</button>
+          </div>
           <button class="btn btn-secondary btn-sm" onclick="loadTasksList()">
-            🔄 Làm mới hàng đợi
+            🔄 Làm mới
           </button>
         </div>
       </div>
@@ -1379,6 +1413,7 @@
           <p>Hiện tại không có tác vụ nào đang chờ xử lý.</p>
         </div>
       </div>
+      <div id="tasksPagination" style="margin-top: 14px;"></div>
     </section>
 
     <!-- ══════════════════════════════════════════════════════════════════════
@@ -1425,6 +1460,9 @@
               <span style="font-size: 12px; color: var(--text-dim);">Thêm, sửa, xóa tài khoản, nạp tiền và gán tên miền cho từng đại lý</span>
             </div>
             <div style="display: flex; gap: 8px;">
+              <a class="btn btn-secondary btn-sm" href="/admin-audit.html" target="_blank" rel="noopener" title="Nhật ký tạo/sửa/xóa user, Xu, quyền miền">
+                📜 Lịch Sử Quản Trị
+              </a>
               <button class="btn btn-primary btn-sm" onclick="openCreateUserModal()">
                 ➕ Thêm Thành Viên
               </button>
@@ -1454,15 +1492,15 @@
         </div>
       </div>
 
-      <!-- Domain Purchase Orders (Đơn Mua Tên Miền & Duyệt Trừ Xu) -->
-      <div class="card" style="padding: 20px; margin-bottom: 24px; border-left: 4px solid var(--accent-amber);">
+      <!-- Domain Purchase Orders (User — đơn của mình) -->
+      <div id="userDomainOrdersPanel" class="card" style="padding: 20px; margin-bottom: 24px; border-left: 4px solid var(--accent-amber);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
           <div>
-            <h3 style="font-size: 16px; font-weight: 700; color: #fff;">🛒 Quản Lý Đơn Đặt Mua Tên Miền (Duyệt & Trừ Xu)</h3>
-            <span style="font-size: 12px; color: var(--text-dim);">Theo dõi tiến trình duyệt đơn mua miền, số dư thanh toán và trạng thái kích hoạt</span>
+            <h3 style="font-size: 16px; font-weight: 700; color: #fff;">🛒 Đơn Đặt Mua Tên Miền Của Tôi</h3>
+            <span style="font-size: 12px; color: var(--text-dim);">Theo dõi trạng thái duyệt — Xu chỉ trừ khi Admin chấp thuận</span>
           </div>
           <button type="button" class="btn btn-secondary btn-sm" onclick="loadDomainOrdersList()">
-            🔄 Làm Mới Đơn
+            🔄 Làm Mới
           </button>
         </div>
         <div class="table-wrapper">
@@ -1471,23 +1509,18 @@
               <tr>
                 <th>#</th>
                 <th>Thời Gian</th>
-                <th>Người Đặt Mua</th>
                 <th>Tên Miền</th>
-                <th>Giá Thanh Toán</th>
-                <th>Số Dư Ví Lúc Duyệt</th>
-                <th>Ghi Chú / Công Việc</th>
+                <th>Giá (khi duyệt)</th>
+                <th>Ghi Chú</th>
                 <th>Trạng Thái</th>
-                <th style="text-align: right;">Thao Tác</th>
               </tr>
             </thead>
-            <tbody id="domainOrdersTableBody">
-              <!-- Rendered by JS -->
-            </tbody>
+            <tbody id="userDomainOrdersTableBody"></tbody>
           </table>
-          <div id="domainOrdersEmpty" class="state-container" style="display: none; padding: 25px;">
+          <div id="userDomainOrdersEmpty" class="state-container" style="display: none; padding: 25px;">
             <div style="font-size: 28px;">🛒</div>
-            <h4 style="margin: 6px 0 2px 0; color: #fff;">Chưa có đơn đặt mua tên miền nào</h4>
-            <p style="font-size: 12px; color: var(--text-dim);">Khi bạn hoặc thành viên đặt mua tên miền, đơn sẽ hiển thị tại đây để Admin duyệt và trừ Xu.</p>
+            <h4 style="margin: 6px 0 2px 0; color: #fff;">Chưa có đơn đặt mua nào</h4>
+            <p style="font-size: 12px; color: var(--text-dim);">Vào tab Tra Cứu & Mua Miền → Check giá → Đặt Mua Ngay.</p>
           </div>
         </div>
       </div>
@@ -1510,6 +1543,49 @@
               <!-- Rendered by JS -->
             </tbody>
           </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TAB: YÊU CẦU MUA MIỀN (ADMIN)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section id="tab-orders" class="tab-pane" data-role="admin">
+      <div class="section-header">
+        <div>
+          <h2>📥 Yêu Cầu Mua Tên Miền Từ Thành Viên</h2>
+          <p class="section-desc">Duyệt đơn, trừ Xu khách hàng và xác nhận mua trên Spaceship trước khi cài đặt tự động.</p>
+        </div>
+        <div class="header-tools">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="loadDomainOrdersList()">
+            🔄 Làm Mới Danh Sách
+          </button>
+        </div>
+      </div>
+
+      <div class="card" style="padding: 20px; border-left: 4px solid var(--accent-amber);">
+        <div class="table-wrapper">
+          <table class="domains-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Thời Gian</th>
+                <th>Người Đặt Mua</th>
+                <th>Tên Miền</th>
+                <th>Giá Xu / Link / Mẫu</th>
+                <th>Số Dư Ví</th>
+                <th>Ghi Chú</th>
+                <th>Trạng Thái</th>
+                <th style="text-align: right;">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody id="adminDomainOrdersTableBody"></tbody>
+          </table>
+          <div id="adminDomainOrdersEmpty" class="state-container" style="display: none; padding: 25px;">
+            <div style="font-size: 28px;">📭</div>
+            <h4 style="margin: 6px 0 2px 0; color: #fff;">Chưa có yêu cầu nào</h4>
+            <p style="font-size: 12px; color: var(--text-dim);">Khi thành viên bấm Đặt Mua Ngay, đơn sẽ hiện tại đây.</p>
+          </div>
         </div>
       </div>
     </section>
@@ -1711,16 +1787,36 @@
       <div class="modal-body">
         <form id="domainAssignForm" onsubmit="handleDomainAssignSubmit(event)">
           <div class="form-group">
-            <label>Chọn Tên Miền Cần Gán</label>
-            <select id="assignDomainSelect" class="form-input" required></select>
+            <label for="assignDomainList">Danh sách tên miền cần gán <span class="required">*</span></label>
+            <textarea
+              id="assignDomainList"
+              class="form-input font-mono"
+              rows="8"
+              placeholder="Dán list dài, mỗi dòng 1 miền:&#10;trangchugg88.fit&#10;trangchugg88.ink&#10;trangchugg88.xyz&#10;..."
+              required
+            ></textarea>
+            <div id="assignDomainParseHint" style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">
+              Đã nhận: <strong id="assignDomainParsedCount" style="color: var(--accent-cyan);">0</strong> tên miền
+            </div>
           </div>
           <div class="form-group">
-            <label>Gán Cho Thành Viên</label>
+            <label for="assignDomainSelect">Hoặc thêm nhanh 1 miền từ hệ thống</label>
+            <div style="display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap;">
+              <select id="assignDomainSelect" class="form-input" style="flex: 1; min-width: 180px;">
+                <option value="">-- Chọn để thêm vào list --</option>
+              </select>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnAssignAddSelectedDomain" onclick="addSelectedDomainToAssignList()">
+                ➕ Thêm vào list
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="assignUserSelect">Gán Cho Thành Viên <span class="required">*</span></label>
             <select id="assignUserSelect" class="form-input" required></select>
           </div>
-          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; flex-wrap: wrap;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('domainAssignModal')">Hủy</button>
-            <button type="submit" class="btn btn-primary">Xác Nhận Gán Domain</button>
+            <button type="submit" class="btn btn-primary" id="btnConfirmAssignDomains">Xác Nhận Gán Domain</button>
           </div>
         </form>
       </div>
@@ -1762,14 +1858,14 @@
           </div>
           <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('switchModeModal')">Hủy</button>
-            <button type="submit" class="btn btn-primary">Bắt Đầu Chuyển Đổi Ngầm</button>
+            <button type="submit" class="btn btn-primary">Bắt Đầu Chuyển Đổi</button>
           </div>
         </form>
       </div>
     </div>
   </div>
 
-  <!-- Modal: Chi Tiết Tiến Trình Tác Vụ Ngầm -->
+  <!-- Modal: Chi Tiết Tiến Trình Tác Vụ -->
   <div id="taskDetailModal" class="modal">
     <div class="modal-backdrop" onclick="closeModal('taskDetailModal')"></div>
     <div class="modal-content modal-lg">
@@ -1778,7 +1874,7 @@
           <span style="font-size: 22px;">📜</span>
           <div>
             <h3 id="taskDetailTitle">Chi Tiết Tác Vụ</h3>
-            <span class="modal-subtitle" id="taskDetailSubtitle">Đang xử lý ngầm</span>
+            <span class="modal-subtitle" id="taskDetailSubtitle">Đang xử lý</span>
           </div>
         </div>
         <button class="modal-close" onclick="closeModal('taskDetailModal')">&times;</button>
@@ -1812,13 +1908,13 @@
         </div>
       </div>
       <div class="modal-footer">
-        <a id="modalLiveDemo" href="#" target="_blank" class="btn btn-secondary">
+        <a id="modalLiveDemo" href="#" target="_blank" class="btn btn-ghost">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          🌐 Mở Trang Web
+          Mở web
         </a>
         <button id="modalSelectBtn" class="btn btn-primary">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
-          🚀 Áp Dụng Mẫu Này
+          Áp dụng mẫu
         </button>
       </div>
     </div>
@@ -2073,39 +2169,88 @@
     </div>
   </div>
 
+  <!-- Modal: Xác nhận mua Spaceship (báo giá trước khi trừ tiền) -->
+  <div id="spaceshipBuyConfirmModal" class="modal">
+    <div class="modal-backdrop" onclick="closeSpaceshipBuyConfirmModal(false)"></div>
+    <div class="modal-content modal-md" style="border-radius: 16px; border: 1px solid rgba(239, 68, 68, 0.45); box-shadow: 0 25px 60px rgba(0,0,0,0.85); background: #0f172a;">
+      <div class="modal-header" style="border-bottom: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 26px;">💳</span>
+          <div>
+            <h3 style="margin: 0; color: #fff; font-size: 18px; font-weight: 800;">Xác Nhận Mua Trên Spaceship</h3>
+            <span class="modal-subtitle" style="color: #f87171;">Tiền sẽ bị trừ ngay khi bạn đồng ý</span>
+          </div>
+        </div>
+        <button type="button" class="modal-close" onclick="closeSpaceshipBuyConfirmModal(false)">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 12px; padding: 14px 18px; margin-bottom: 14px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span style="color: var(--text-dim); font-size: 13px;">Tên miền:</span>
+            <span id="ssQuoteDomain" style="font-family: var(--font-mono); font-weight: 800; color: #fbbf24;">-</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span style="color: var(--text-dim); font-size: 13px;">Đăng ký 1 năm:</span>
+            <span id="ssQuoteReg" style="font-family: var(--font-mono); font-weight: 700; color: #e2e8f0;">-</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span style="color: var(--text-dim); font-size: 13px;">Privacy:</span>
+            <span id="ssQuotePrivacy" style="font-size: 12px; font-weight: 600; color: #94a3b8; text-align: right; max-width: 62%;">-</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.12);">
+            <span style="color: #fff; font-size: 14px; font-weight: 700;">Tổng trừ Spaceship:</span>
+            <span id="ssQuoteTotal" style="font-family: var(--font-mono); font-weight: 900; color: #ef4444; font-size: 20px;">-</span>
+          </div>
+        </div>
+        <p id="ssQuoteNote" style="font-size: 11px; color: var(--text-dim); line-height: 1.5; margin: 0 0 14px 0;"></p>
+        <div id="ssQuoteBatchWrap" style="display: none; max-height: 180px; overflow: auto; margin-bottom: 12px; font-size: 12px; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;"></div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button type="button" class="btn btn-secondary" onclick="closeSpaceshipBuyConfirmModal(false)">Hủy</button>
+          <button type="button" class="btn btn-primary" id="btnConfirmSpaceshipBuy" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border-color: #ef4444; color: #fff; font-weight: 800;">
+            ✅ Đồng Ý — Trừ Tiền &amp; Mua
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal 8: Thông Báo Tên Miền Đang Được Xử Lý (Processing Notification Modal) -->
   <div id="domainProcessingModal" class="modal">
     <div class="modal-backdrop" onclick="closeModal('domainProcessingModal')"></div>
-    <div class="modal-content" style="max-width: 540px; border-color: rgba(6, 182, 212, 0.4); box-shadow: 0 20px 50px rgba(0,0,0,0.8), 0 0 30px rgba(6,182,212,0.2);">
-      <div class="modal-header" style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%); border-bottom: 1px solid rgba(6, 182, 212, 0.3);">
+    <div class="modal-content" style="max-width: 540px; border-color: rgba(245, 158, 11, 0.55); box-shadow: 0 20px 50px rgba(0,0,0,0.8), 0 0 28px rgba(245,158,11,0.22); background: linear-gradient(180deg, #2a1f0a 0%, #1a1408 100%);">
+      <div class="modal-header" style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.28) 0%, rgba(217, 119, 6, 0.18) 100%); border-bottom: 1px solid rgba(251, 191, 36, 0.35);">
         <div style="display: flex; align-items: center; gap: 12px;">
-          <div style="width: 40px; height: 40px; border-radius: 50%; background: rgba(6, 182, 212, 0.2); border: 1px solid var(--accent-cyan); display: flex; align-items: center; justify-content: center; font-size: 20px;">
+          <div style="width: 40px; height: 40px; border-radius: 50%; background: rgba(245, 158, 11, 0.25); border: 1px solid #fbbf24; display: flex; align-items: center; justify-content: center; font-size: 20px;">
             ⏳
           </div>
           <div>
-            <h3 style="margin: 0; color: #fff; font-size: 17px;">Tên Miền Đang Được Xử Lý</h3>
-            <span class="modal-subtitle" style="color: var(--accent-cyan);">Hệ thống đang tiến hành tự động</span>
+            <h3 style="margin: 0; color: #fff7d6; font-size: 17px;">Yêu Cầu Đang Được Xử Lý</h3>
+            <span class="modal-subtitle" style="color: #fbbf24;">Vui lòng theo dõi ở Tiến trình</span>
           </div>
         </div>
         <button class="modal-close" onclick="closeModal('domainProcessingModal')">&times;</button>
       </div>
       <div class="modal-body" style="padding: 24px; text-align: center;">
         <div style="margin-bottom: 16px;">
-          <div class="spinner" style="width: 48px; height: 48px; border-width: 3px; border-top-color: var(--accent-cyan); margin: 0 auto 16px auto;"></div>
-          <p style="font-size: 15px; font-weight: 600; color: #fff; line-height: 1.5; margin-bottom: 12px;">
-            Tên miền <span id="processingModalDomainName" style="color: var(--accent-cyan); font-family: var(--font-mono); font-weight: 800;">domain.com</span> đang được xử lý!
+          <div class="spinner" style="width: 48px; height: 48px; border-width: 3px; border-top-color: #fbbf24; margin: 0 auto 16px auto;"></div>
+          <p style="font-size: 15px; font-weight: 600; color: #fff7d6; line-height: 1.5; margin-bottom: 12px;">
+            Yêu cầu của bạn đang được xử lý<span id="processingModalDomainSuffix"></span>.
           </p>
-          <div style="background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.25); border-radius: 10px; padding: 14px 16px; text-align: left; font-size: 13px; color: #cbd5e1; line-height: 1.6;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-              <span style="color: var(--text-dim);">Chế độ:</span>
-              <span id="processingModalActionType" style="font-weight: 700; color: var(--accent-emerald);">Mua Mới & Kích Hoạt Landing Page</span>
+          <p style="font-size: 13px; color: #fde68a; margin: 0 0 14px 0; line-height: 1.5;">
+            Vui lòng theo dõi ở tab <b>Tiến trình</b> để xem trạng thái realtime.
+          </p>
+          <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 10px; padding: 14px 16px; text-align: left; font-size: 13px; color: #fef3c7; line-height: 1.6;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px; gap: 12px;">
+              <span style="color: #d6b15a;">Tên miền:</span>
+              <span id="processingModalDomainName" style="font-family: var(--font-mono); font-weight: 800; color: #fff;">domain.com</span>
             </div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-              <span style="color: var(--text-dim);">Link đích:</span>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px; gap: 12px;">
+              <span style="color: #d6b15a;">Chế độ:</span>
+              <span id="processingModalActionType" style="font-weight: 700; color: #fde68a; text-align: right;">Mua Mới & Kích Hoạt Landing Page</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px; gap: 12px;">
+              <span style="color: #d6b15a;">Link đích:</span>
               <span id="processingModalTargetUrl" style="font-family: var(--font-mono); color: #fff; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">https://...</span>
-            </div>
-            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(255,255,255,0.1); color: var(--accent-amber); font-weight: 600;">
-              👉 Vui lòng vào mục <b>Lịch Sử</b> để kiểm tra tiến độ chi tiết và nhận thông báo khi hoàn tất!
             </div>
           </div>
         </div>
@@ -2114,8 +2259,8 @@
         <button type="button" class="btn btn-secondary" onclick="closeModal('domainProcessingModal')">
           Đóng
         </button>
-        <button type="button" class="btn btn-primary" onclick="goToHistoryFromProcessingModal()" style="background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%); border-color: #06b6d4; font-weight: 700; box-shadow: 0 4px 15px rgba(6, 182, 212, 0.4);">
-          📜 Vào Lịch Sử Kiểm Tra Tiến Độ
+        <button type="button" class="btn btn-primary" onclick="goToTasksFromProcessingModal()" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-color: #fbbf24; color: #111; font-weight: 800; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);">
+          Vào Tiến Trình
         </button>
       </div>
     </div>
@@ -2504,6 +2649,8 @@
         </form>
       </div>
     </div>
+  </div>
+
   <!-- Modal: Xác Nhận Đặt Mua Tên Miền (Confirm Domain Purchase) -->
   <div id="confirmDomainPurchaseModal" class="modal">
     <div class="modal-backdrop" onclick="closeModal('confirmDomainPurchaseModal')"></div>
@@ -2513,7 +2660,7 @@
           <span style="font-size: 26px;">🛒</span>
           <div>
             <h3 style="margin: 0; color: #fff; font-size: 18px; font-weight: 800;">Xác Nhận Đơn Đặt Mua Tên Miền</h3>
-            <span class="modal-subtitle" style="color: #f59e0b;">Kiểm tra thông tin định giá & gửi yêu cầu duyệt tới Admin</span>
+            <span class="modal-subtitle" style="color: #f59e0b;">Xem giá và xác nhận gửi yêu cầu mua</span>
           </div>
         </div>
         <button class="modal-close" onclick="closeModal('confirmDomainPurchaseModal')">&times;</button>
@@ -2521,6 +2668,10 @@
       <div class="modal-body" style="padding: 20px;">
         <form id="confirmDomainPurchaseForm" onsubmit="handleConfirmDomainPurchaseSubmit(event)">
           <input type="hidden" id="confirmOrderDomainHidden">
+          <input type="hidden" id="confirmOrderLinkHidden">
+          <input type="hidden" id="confirmOrderTeleHidden">
+          <input type="hidden" id="confirmOrderTemplateHidden">
+          <input type="hidden" id="confirmOrderDeployModeHidden" value="LP">
 
           <!-- Domain & Price Highlight Box -->
           <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;">
@@ -2542,23 +2693,20 @@
             </div>
           </div>
 
-          <div class="form-group" style="margin-bottom: 16px;">
-            <label style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 6px;">Vui lòng nhập tên công việc <span style="color: var(--accent-rose);">*</span></label>
-            <input type="text" id="confirmOrderJobNote" class="form-input" placeholder="Vui lòng nhập tên công việc..." required autofocus style="font-size: 14px; padding: 12px 14px; border-color: rgba(245, 158, 11, 0.4);">
-          </div>
-
           <!-- Confirmation Prompt -->
-          <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 10px; padding: 12px 14px; margin-bottom: 18px;">
-            <div style="font-size: 13px; font-weight: 700; color: #818cf8; margin-bottom: 4px;">❓ Bạn có xác nhận tất cả thông tin đã đúng?</div>
-            <div style="font-size: 11px; color: var(--text-dim); line-height: 1.5;">
-              ℹ️ Sau khi bạn ấn Xác Nhận, lệnh mua sẽ được gửi lên Quản trị viên (Admin). <b>Hệ thống chỉ trừ Xu khi Admin chính thức duyệt mua.</b>
+          <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 10px; padding: 14px 16px; margin-bottom: 18px;">
+            <div id="confirmOrderSummaryText" style="font-size: 15px; font-weight: 700; color: #e2e8f0; line-height: 1.55; margin-bottom: 8px;">
+              Bạn xác nhận sẽ sử dụng <span style="color: #10b981;">350 Xu</span> để mua tên miền <span style="color: #fbbf24; font-family: var(--font-mono);">domain.com</span>?
+            </div>
+            <div style="font-size: 12px; color: var(--text-dim); line-height: 1.5;">
+              Xu chỉ bị trừ khi quản trị viên duyệt đơn. Bạn có thể theo dõi trạng thái tại tab Ví.
             </div>
           </div>
 
           <div style="display: flex; justify-content: flex-end; gap: 10px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('confirmDomainPurchaseModal')">Hủy</button>
             <button type="submit" class="btn btn-primary" id="btnSubmitConfirmPurchase" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-color: #f59e0b; color: #000; font-weight: 800;">
-              ✅ Đồng Ý & Đặt Mua
+              ✅ Xác Nhận Đặt Mua
             </button>
           </div>
         </form>
@@ -2592,12 +2740,12 @@
   </div>
 
   <!-- Toast Notification -->
-  <div id="toast" class="toast">
-    <div class="toast-icon">✨</div>
+  <div id="toast" class="toast toast-info">
+    <div class="toast-icon" id="toastIcon">✨</div>
     <div class="toast-message" id="toastMessage">Thông báo</div>
   </div>
 
-  <script src="app.js?v=20260910-live-name"></script>
+  <script src="app.js?v=20260919-history-smooth"></script>
 </body>
 </html>
 

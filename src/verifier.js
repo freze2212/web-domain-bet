@@ -67,7 +67,14 @@ export async function checkDomainHttp(domain) {
           return { is200: false, status: 200, isCfError: true, error: "Cloudflare Edge Error Page (1014/522/etc)" };
         }
       } else {
-        return { is200: false, status, error: `HTTP ${status}` };
+        let bodyHint = "";
+        try {
+          const text = await res.text();
+          if (/1014|CNAME Cross-User Banned/i.test(text)) bodyHint = " (Error 1014 CNAME Cross-User Banned)";
+          else if (/522/i.test(text)) bodyHint = " (Error 522)";
+          else if (/521/i.test(text)) bodyHint = " (Error 521)";
+        } catch {}
+        return { is200: false, status, isCfError: /1014|522|521/.test(bodyHint), error: `HTTP ${status}${bodyHint}` };
       }
     } catch (err) {
       // Tiếp tục thử fallback
@@ -158,6 +165,12 @@ export async function autoRepairDomain(item, isFullRebuild = false) {
   logs.push(`[${actionLabel}] Bắt đầu quy trình tự động cho [${domain}] lúc ${new Date().toLocaleTimeString()}...`);
 
   try {
+    const { isAdminManagedDomain } = await import("./cf-account-guard.js");
+    if (isAdminManagedDomain(domain)) {
+      logs.push(`⏭️ Bỏ qua — miền thuộc Cloudflare Admin, hub Freze không can thiệp.`);
+      return { repaired: false, skipped: true, reason: "CF_ADMIN_SKIP", logs };
+    }
+
     // 1. Kiểm tra Zone Cloudflare
     const zone = await getOrCreateZone(domain);
     const ns = getZoneNameservers(zone);
@@ -211,7 +224,7 @@ export async function autoRepairDomain(item, isFullRebuild = false) {
         // Gắn Custom Domain vào Cloudflare Pages
         if (tpl.pagesProject) {
           logs.push(`🔧 [Bước 3/5] Kích hoạt Custom Domain trên Pages Project [${tpl.pagesProject}]...`);
-          const pagesRes = await addPagesDomain(domain, tpl.pagesProject, tpl.path).catch(() => {});
+          const pagesRes = await addPagesDomain(domain, tpl.pagesProject, tpl.path, tpl.pagesAccountId ? { accountId: tpl.pagesAccountId } : {}).catch(() => {});
           if (pagesRes?.canonicalSubdomain) {
             finalTarget = pagesRes.canonicalSubdomain;
           }
@@ -258,9 +271,198 @@ export async function autoRepairDomain(item, isFullRebuild = false) {
 
 /**
  * 4. Kiểm tra trạng thái HTTP cho 1 bản ghi lịch sử
- * (Đã TẮT tính năng tự động sửa lỗi - Nếu sau 15p vẫn lỗi sẽ báo cảnh báo liên hệ admin @frezeit)
+ * LP: HTTP 200 chưa đủ — domains.json live phải khớp link claimed (+ defaultLink)
  */
-export async function verifyHistoryItem(item, force = false) {
+export function normVerifyLink(u) {
+  return String(u || "")
+    .trim()
+    .replace(/\/$/, "");
+}
+
+function linkFromDomainsEntry(e) {
+  if (!e) return "";
+  if (typeof e === "string") return e;
+  return e.main_url || e.url || e.link || e.register_url || "";
+}
+
+function readLiveLinksFromDomainsJson(j, domain) {
+  const norm = domain.trim().toLowerCase().replace(/^www\./, "");
+  const entryLink = linkFromDomainsEntry(j[norm] || j[`www.${norm}`]);
+  const defaultLink =
+    typeof j?.defaultLink === "string"
+      ? j.defaultLink
+      : typeof j?.default_link === "string"
+        ? j.default_link
+        : "";
+  return { entryLink, defaultLink, norm };
+}
+
+function liveLinksMatchClaimed(j, domain, claimedLink) {
+  const claimed = normVerifyLink(claimedLink);
+  const { entryLink, defaultLink } = readLiveLinksFromDomainsJson(j, domain);
+  const gotEntry = normVerifyLink(entryLink);
+  const gotDefault = normVerifyLink(defaultLink);
+  if (!gotEntry || gotEntry !== claimed) {
+    return {
+      ok: false,
+      error: !gotEntry
+        ? `Live chưa có entry domains.json cho [${domain}]`
+        : `Entry live lệch: live=${gotEntry} | claimed=${claimed}`,
+      entryLink: gotEntry || null,
+      defaultLink: gotDefault || null,
+    };
+  }
+  if (gotDefault && gotDefault !== claimed) {
+    return {
+      ok: false,
+      error: `defaultLink live vẫn lệch: defaultLink=${gotDefault} | claimed=${claimed} (LP hay dùng fallback này)`,
+      entryLink: gotEntry,
+      defaultLink: gotDefault,
+    };
+  }
+  if (gotDefault && Object.prototype.hasOwnProperty.call(j, "defaultLink")) {
+    return {
+      ok: false,
+      error: `Live vẫn còn defaultLink fallback (${gotDefault}) — cần xóa khỏi domains.json`,
+      entryLink: gotEntry,
+      defaultLink: gotDefault,
+    };
+  }
+  return { ok: true, entryLink: gotEntry, defaultLink: gotDefault || null };
+}
+
+async function probeLiveDomainsLink(domain, claimedLink) {
+  const norm = domain.trim().toLowerCase().replace(/^www\./, "");
+  const urls = [
+    `https://${norm}/domains.json?v=${Date.now()}`,
+    `https://www.${norm}/domains.json?v=${Date.now()}`,
+  ];
+  let lastFail = { ok: false, link: "", defaultLink: "", source: null, error: "" };
+  for (const url of urls) {
+    try {
+      const r = await fetch(url, {
+        signal: AbortSignal.timeout(12000),
+        headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+      });
+      if (!r.ok) continue;
+      const j = await r.json();
+      const check = liveLinksMatchClaimed(j, domain, claimedLink);
+      if (check.ok) {
+        return {
+          ok: true,
+          link: check.entryLink,
+          defaultLink: check.defaultLink,
+          source: url,
+        };
+      }
+      lastFail = {
+        ok: false,
+        link: check.entryLink || check.defaultLink || "",
+        defaultLink: check.defaultLink,
+        source: url,
+        error: check.error,
+      };
+    } catch {}
+  }
+  return lastFail;
+}
+
+/**
+ * Chờ live domains.json khớp link claimed (LP) — không coi push Git = thành công.
+ */
+export async function waitForLiveLinkMatch(domain, claimedLink, opts = {}) {
+  const maxAttempts = opts.maxAttempts ?? 15;
+  const delayMs = opts.delayMs ?? 8000;
+  const claimed = normVerifyLink(claimedLink);
+  if (!claimed) {
+    return { ok: false, link: null, claimed: "", error: "Thiếu link đích để verify live" };
+  }
+
+  let last = { ok: false, link: "", defaultLink: "", error: "" };
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    last = await probeLiveDomainsLink(domain, claimedLink);
+    if (last.ok) {
+      return {
+        ok: true,
+        link: last.link,
+        defaultLink: last.defaultLink,
+        source: last.source,
+        attempts: attempt + 1,
+        claimed,
+      };
+    }
+    if (attempt < maxAttempts - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+
+  return {
+    ok: false,
+    link: last.link || null,
+    defaultLink: last.defaultLink || null,
+    claimed,
+    source: last.source,
+    error: last.error || `Live chưa khớp link đích (${claimed})`,
+  };
+}
+
+/**
+ * Chờ 302 redirect khớp link claimed.
+ */
+export async function waitFor302RedirectMatch(domain, claimedLink, opts = {}) {
+  const maxAttempts = opts.maxAttempts ?? 10;
+  const delayMs = opts.delayMs ?? 5000;
+  const claimed = normVerifyLink(claimedLink);
+  const norm = domain.trim().toLowerCase().replace(/^www\./, "");
+  const hosts = [...new Set([norm, `www.${norm}`])];
+  let lastLoc = "";
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    for (const host of hosts) {
+      try {
+        const r = await fetch(`https://${host}/`, {
+          redirect: "manual",
+          signal: AbortSignal.timeout(12000),
+          headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+        });
+        if ([301, 302, 307, 308].includes(r.status)) {
+          lastLoc = r.headers.get("location") || "";
+          if (lastLoc && normVerifyLink(lastLoc) === claimed) {
+            return { ok: true, link: normVerifyLink(lastLoc), host, attempts: attempt + 1, claimed };
+          }
+        }
+      } catch {}
+    }
+    if (attempt < maxAttempts - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+
+  return {
+    ok: false,
+    link: lastLoc ? normVerifyLink(lastLoc) : null,
+    claimed,
+    error: lastLoc
+      ? `302 chưa khớp: live=${normVerifyLink(lastLoc)} | claimed=${claimed}`
+      : `Chưa thấy 302 redirect tới link đích (${claimed})`,
+  };
+}
+
+function shouldVerifyClaimedLink(item) {
+  if (!item?.link) return false;
+  const mode = item.details?.mode || "";
+  if (mode === "redirect_302") return false;
+  const t = item.actionType || "";
+  if (["SET_LINK", "SWITCH_TPL", "BUY_LP", "POINT_LP", "DEPLOY", "SWITCH_LP"].includes(t)) return true;
+  const label = item.actionLabel || "";
+  return /Landing Page|Đổi Mẫu|Cập Nhật Link Đích/i.test(label);
+}
+
+export async function verifyHistoryItem(itemOrId, force = false) {
+  let item = itemOrId;
+  if (typeof itemOrId === "string") {
+    item = getHistory().find((h) => h.id === itemOrId) || null;
+  }
   if (!item || !item.domain || item.domain === "N/A") return null;
 
   const domain = item.domain.trim().toLowerCase();
@@ -277,12 +479,80 @@ export async function verifyHistoryItem(item, force = false) {
   console.log(`🔍 [Verifier] Đang kiểm tra HTTP cho [${domain}]...`);
   const checkResult = await checkDomainHttp(domain);
 
-  const createdAt = item.timestamp ? new Date(item.timestamp).getTime() : Date.now();
+  const createdAt = item.timestamp || item.createdAt ? new Date(item.timestamp || item.createdAt).getTime() : Date.now();
   const ageMinutes = (Date.now() - createdAt) / 60000;
   const currentCount = (item.checkCount || 0) + 1;
 
   if (checkResult.is200) {
-    console.log(`✅ [${domain}] Đã phản hồi HTTP 200 OK!`);
+    if (shouldVerifyClaimedLink(item)) {
+      const claimed = normVerifyLink(item.link);
+      let live = { ok: false, link: "", error: "" };
+      for (let attempt = 0; attempt < 6; attempt++) {
+        live = await probeLiveDomainsLink(domain, item.link);
+        if (live.ok) break;
+        if (attempt < 5) await new Promise((r) => setTimeout(r, 8000));
+      }
+      if (!live.ok) {
+        // Tự force-deploy đúng project CNAME 1 lần (Pages queue kẹt → LP không có link)
+        if (!item.details?.autoRepairedLinkDeploy && item.link) {
+          try {
+            const { ensureLiveDomainLink } = await import("./cloudflare.js");
+            const { getTemplate } = await import("./templates.js");
+            const tpl = item.templateId ? getTemplate(item.templateId) : null;
+            console.warn(`🛠️ [${domain}] LINK_MISMATCH — force deploy live domains.json...`);
+            updateHistoryItem(item.id || domain, {
+              details: {
+                ...(item.details || {}),
+                autoRepairedLinkDeploy: true,
+                autoRepairLinkAt: new Date().toISOString(),
+              },
+              lastCheckError: "Đang tự force-deploy Pages để đồng bộ domains.json...",
+            });
+            const fixed = await ensureLiveDomainLink(domain, item.link, {
+              templatePath: tpl?.path || null,
+              cnameTarget: item.cnameTarget || null,
+              fallbackProject: tpl?.pagesProject || null,
+              accountId: tpl?.pagesAccountId || undefined,
+              timeoutMs: 90000,
+            });
+            if (fixed.ok) {
+              return verifyHistoryItem(item.id || item, true);
+            }
+            console.warn(`[Verifier] Auto force-deploy chưa khớp:`, fixed.error);
+          } catch (e) {
+            console.warn(`[Verifier] Auto force-deploy fail:`, e.message);
+          }
+        }
+
+        const mismatchMsg =
+          live.error ||
+          (!live.link
+            ? `HTTP 200 nhưng chưa đọc được domains.json / chưa có entry [${domain}]`
+            : `HTTP 200 nhưng live link lệch claimed. live=${normVerifyLink(live.link)} | claimed=${claimed}`);
+        console.warn(`⚠️ [${domain}] ${mismatchMsg}`);
+        const isOverdue15m = ageMinutes >= 15;
+        const got = live.link || null;
+        const updated = updateHistoryItem(item.id || domain, {
+          liveStatus: isOverdue15m ? "ERROR_15M_ALERT" : "LINK_MISMATCH",
+          lastCheckedAt: new Date().toISOString(),
+          lastCheckError: mismatchMsg,
+          checkCount: currentCount,
+          ageMinutes: Math.round(ageMinutes * 10) / 10,
+          isOverdue15m,
+          liveLinkObserved: got || null,
+        });
+        return {
+          success: true,
+          verified: false,
+          domain,
+          status: "LINK_MISMATCH",
+          error: mismatchMsg,
+          updated,
+        };
+      }
+    }
+
+    console.log(`✅ [${domain}] Đã phản hồi HTTP 200 OK` + (shouldVerifyClaimedLink(item) ? " + live link khớp!" : "!"));
 
     const updated = updateHistoryItem(item.id || domain, {
       liveStatus: "200_OK",
@@ -292,6 +562,7 @@ export async function verifyHistoryItem(item, force = false) {
       lastCheckError: null,
       checkCount: currentCount,
       ageMinutes: Math.round(ageMinutes * 10) / 10,
+      liveLinkObserved: shouldVerifyClaimedLink(item) ? normVerifyLink(item.link) : undefined,
     });
 
     return {
@@ -301,7 +572,28 @@ export async function verifyHistoryItem(item, force = false) {
       updated,
     };
   } else {
-    // KHÔNG TỰ ĐỘNG SỬA LỖI - Chờ đủ 15 phút, nếu vẫn lỗi thì gán trạng thái ERROR_15M_ALERT
+    // 1014 = CNAME trỏ Pages project không còn / chưa gắn custom domain → tự sửa 1 lần
+    const errText = String(checkResult.error || "");
+    const looks1014 = /1014|Cross-User Banned/i.test(errText) || (checkResult.status === 403 && checkResult.isCfError);
+    if (looks1014 && !item.details?.autoRepaired1014 && !item.actionType?.includes("302")) {
+      console.warn(`🛠️ [${domain}] Phát hiện 1014 — tự gắn lại Pages + CNAME...`);
+      try {
+        updateHistoryItem(item.id || domain, {
+          details: { ...(item.details || {}), autoRepaired1014: true, autoRepairAt: new Date().toISOString() },
+          lastCheckError: "Đang tự sửa Error 1014 (gắn lại Pages/CNAME)...",
+        });
+        await autoRepairDomain(item, false).catch(() => {});
+        // Kiểm tra lại ngay sau sửa
+        const retry = await checkDomainHttp(domain);
+        if (retry.is200) {
+          return verifyHistoryItem(item.id || item, true);
+        }
+      } catch (e) {
+        console.warn(`[Verifier] Auto-repair 1014 fail:`, e.message);
+      }
+    }
+
+    // Chờ đủ 15 phút, nếu vẫn lỗi thì gán trạng thái ERROR_15M_ALERT
     const isOverdue15m = ageMinutes >= 15;
     const alertMessage = isOverdue15m
       ? "Quá 15 phút chưa phản hồi. Vui lòng truy cập vào tên miền để kiểm tra, nếu phát hiện lỗi vui lòng liên hệ admin @frezeit"

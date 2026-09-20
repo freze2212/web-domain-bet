@@ -82,7 +82,11 @@ export class SpaceshipService {
     const contactId = await this.resolveContactId(explicitContactId);
 
     const noPrivacyTlds = ['.uk', '.co.uk', '.me.uk', '.org.uk', '.us', '.in', '.ca', '.de', '.nl', '.eu'];
-    const isNoPrivacy = noPrivacyTlds.some((tld) => norm.endsWith(tld));
+    const privacyLevel = (() => {
+      if (noPrivacyTlds.some((tld) => norm.endsWith(tld))) return 'public';
+      const fromEnv = (process.env.SPACESHIP_PRIVACY_LEVEL || 'public').trim().toLowerCase();
+      return fromEnv === 'high' ? 'high' : 'public';
+    })();
 
     let contactAttributes: string[] = [];
     if (norm.endsWith('.us')) {
@@ -106,7 +110,7 @@ export class SpaceshipService {
       }
     }
 
-    const createBody = (usePrivacy: boolean) => {
+    const createBody = () => {
       const b: any = {
         autoRenew: false,
         years: 1,
@@ -116,25 +120,18 @@ export class SpaceshipService {
           tech: contactId,
           billing: contactId,
         },
+        privacyProtection: {
+          level: privacyLevel,
+          userConsent: true,
+        },
       };
       if (contactAttributes.length > 0) {
         b.contacts.attributes = contactAttributes;
       }
-      if (usePrivacy) {
-        b.privacyProtection = {
-          level: 'high',
-          userConsent: true,
-        };
-      } else {
-        b.privacyProtection = {
-          level: 'public',
-          userConsent: true,
-        };
-      }
       return b;
     };
 
-    const reqBody = createBody(!isNoPrivacy);
+    const reqBody = createBody();
 
     try {
       const { response, asyncId } = await this.spaceshipRequest(

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lịch Sử Quản Trị User · Freze Hub</title>
+  <link rel="stylesheet" href="style.css?v=20260911-admin-audit" />
+  <style>
+    .audit-page { max-width: 1100px; margin: 0 auto; padding: 28px 18px 60px; }
+    .audit-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between; margin-bottom: 18px; }
+    .audit-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .audit-filters input, .audit-filters select {
+      background: rgba(8,12,22,.85); border: 1px solid rgba(255,255,255,.12); color: #e8eefc;
+      border-radius: 8px; padding: 8px 10px; font-size: 13px; min-width: 160px;
+    }
+    .audit-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .audit-table th, .audit-table td { padding: 10px 8px; border-bottom: 1px solid rgba(255,255,255,.08); text-align: left; vertical-align: top; }
+    .audit-table th { color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .audit-action { font-family: ui-monospace, monospace; font-size: 11px; color: #67e8f9; }
+    .audit-muted { color: #94a3b8; font-size: 12px; }
+    .audit-chip {
+      display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+      background: rgba(99,102,241,.18); color: #c7d2fe; border: 1px solid rgba(165,180,252,.25);
+    }
+  </style>
+</head>
+<body>
+  <div class="audit-page">
+    <div class="audit-head">
+      <div>
+        <div class="audit-muted"><a href="/" style="color:#67e8f9;text-decoration:none">← Hub</a> · Path riêng quản trị</div>
+        <h1 style="margin:6px 0 4px;font-size:22px;">Lịch Sử Quản Trị User</h1>
+        <p class="audit-muted">Tạo/sửa/xóa thành viên · đổi role/pass/status · nạp Xu · gán/thu hồi miền · duyệt đơn/quyền</p>
+      </div>
+      <div class="audit-filters">
+        <select id="filterAction">
+          <option value="">Tất cả action</option>
+          <option value="USER_CREATE">USER_CREATE</option>
+          <option value="USER_UPDATE">USER_UPDATE</option>
+          <option value="USER_DELETE">USER_DELETE</option>
+          <option value="PASSWORD_RESET">PASSWORD_RESET</option>
+          <option value="ROLE_CHANGE">ROLE_CHANGE</option>
+          <option value="STATUS_CHANGE">STATUS_CHANGE</option>
+          <option value="USER_TOPUP">USER_TOPUP</option>
+          <option value="DOMAIN_ASSIGN">DOMAIN_ASSIGN</option>
+          <option value="DOMAIN_UNASSIGN">DOMAIN_UNASSIGN</option>
+          <option value="DOMAIN_REQUEST_APPROVE">DOMAIN_REQUEST_APPROVE</option>
+          <option value="DOMAIN_REQUEST_REJECT">DOMAIN_REQUEST_REJECT</option>
+          <option value="DOMAIN_ORDER_APPROVE">DOMAIN_ORDER_APPROVE</option>
+          <option value="DOMAIN_ORDER_REJECT">DOMAIN_ORDER_REJECT</option>
+        </select>
+        <input id="filterQ" type="search" placeholder="Tìm username / miền / ghi chú…" />
+        <button class="btn btn-primary btn-sm" id="btnReload">Làm mới</button>
+      </div>
+    </div>
+
+    <div class="card" style="padding:14px; overflow:auto;">
+      <div class="audit-muted" id="auditMeta" style="margin-bottom:10px;">Đang tải…</div>
+      <table class="audit-table">
+        <thead>
+          <tr>
+            <th>Thời gian</th>
+            <th>Action</th>
+            <th>Admin</th>
+            <th>Đối tượng</th>
+            <th>Tóm tắt</th>
+            <th>Chi tiết</th>
+          </tr>
+        </thead>
+        <tbody id="auditBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    function token() {
+      return localStorage.getItem("freze_auth_token") || localStorage.getItem("token") || "";
+    }
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    }
+    function fmt(iso) {
+      try { return new Date(iso).toLocaleString("vi-VN"); } catch { return iso; }
+    }
+    async function load() {
+      const t = token();
+      if (!t) {
+        document.getElementById("auditMeta").textContent = "Chưa đăng nhập hub — mở trang chủ đăng nhập Admin rồi quay lại /admin-audit.html";
+        return;
+      }
+      const action = document.getElementById("filterAction").value;
+      const q = document.getElementById("filterQ").value.trim();
+      const params = new URLSearchParams({ limit: "200" });
+      if (action) params.set("action", action);
+      if (q) params.set("q", q);
+      const r = await fetch("/api/admin/audit-log?" + params.toString(), {
+        headers: { Authorization: "Bearer " + t, Accept: "application/json" },
+      });
+      const j = await r.json();
+      if (!r.ok || !j.success) {
+        document.getElementById("auditMeta").textContent = j.error || ("Lỗi " + r.status);
+        document.getElementById("auditBody").innerHTML = "";
+        return;
+      }
+      document.getElementById("auditMeta").textContent = `Hiển thị ${j.items.length} / tổng khớp ${j.total}`;
+      document.getElementById("auditBody").innerHTML = (j.items || []).map((x) => `
+        <tr>
+          <td class="audit-muted">${esc(fmt(x.at))}</td>
+          <td><span class="audit-chip">${esc(x.action)}</span></td>
+          <td>@${esc(x.actor?.username || "—")}</td>
+          <td>
+            ${x.target?.username ? "@" + esc(x.target.username) : "—"}
+            ${x.target?.domain ? `<div class="audit-muted">${esc(x.target.domain)}</div>` : ""}
+          </td>
+          <td>${esc(x.summary || "")}</td>
+          <td class="audit-action">${esc(JSON.stringify(x.details || {}))}</td>
+        </tr>
+      `).join("") || `<tr><td colspan="6" class="audit-muted">Chưa có nhật ký (sẽ ghi từ các thao tác admin tiếp theo).</td></tr>`;
+    }
+    document.getElementById("btnReload").onclick = load;
+    document.getElementById("filterAction").onchange = load;
+    document.getElementById("filterQ").onkeydown = (e) => { if (e.key === "Enter") load(); };
+    load();
+  </script>
+</body>
+</html>

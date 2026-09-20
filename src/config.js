@@ -38,12 +38,18 @@ export const config = {
     apiKey: () => optionalEnv("SPACESHIP_API_KEY"),
     apiSecret: () => optionalEnv("SPACESHIP_API_SECRET"),
     contactId: () => optionalEnv("SPACESHIP_CONTACT_ID"),
+    /** public (mặc định, rẻ) | high — chỉ bật high khi set SPACESHIP_PRIVACY_LEVEL=high */
+    privacyLevel: () => optionalEnv("SPACESHIP_PRIVACY_LEVEL", "public").toLowerCase(),
   },
   cloudflare: {
     baseUrl: "https://api.cloudflare.com/client/v4",
     token: () => optionalEnv("CLOUDFLARE_API_TOKEN"),
     accountId: () => optionalEnv("CLOUDFLARE_ACCOUNT_ID"),
     pagesProject: () => optionalEnv("CLOUDFLARE_PAGES_PROJECT"),
+    /** Zone DNS Admin@itkjc — dùng tìm domain Admin + sửa DNS, Pages vẫn Freze */
+    adminToken: () => optionalEnv("CLOUDFLARE_ADMIN_API_TOKEN"),
+    adminAccountId: () =>
+      optionalEnv("CLOUDFLARE_ADMIN_ACCOUNT_ID", "ddead9accc534c1eb074d2a46fffe748"),
   },
   github: {
     token: () => optionalEnv("GITHUB_TOKEN"),

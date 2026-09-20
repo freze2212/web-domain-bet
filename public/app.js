@@ -48,10 +48,24 @@ window.fetch = async function (url, options = {}) {
 let allTemplates = [];
 let allDomains = [];
 let allHistory = [];
+let currentUser = null;
+let authReady = false;
 let currentFilter = "all";
 let currentSearch = "";
 let currentDomainSearch = "";
 let currentHistorySearch = "";
+let domainsPage = 1;
+let domainsLimit = 50;
+let domainsTotal = 0;
+let domainsTotalPages = 1;
+let domainsSearchTimer = null;
+let historyPage = 1;
+let historyLimit = 50;
+let historyTotal = 0;
+let historyTotalPages = 1;
+let historySearchTimer = null;
+let historyFetchSeq = 0;
+let historyRenderFingerprint = "";
 let selectedTemplate = null;
 let activeDomainToEdit = null;
 
@@ -123,7 +137,9 @@ const statLpHistory = document.getElementById("statLpHistory");
 
 
 // ── 1. INITIALIZATION & NAVIGATION ─────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  document.body.classList.add("auth-pending");
+
   // Clear any unwanted browser autofill from search inputs
   const searchInputs = [
     document.getElementById("searchInput"),
@@ -148,20 +164,81 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }, 250);
 
-  checkAuth();
+  const authed = await checkAuth();
+  if (!authed) return;
+
+  bootHubApp();
+});
+
+async function fetchHistoryBadgeCount() {
+  try {
+    const res = await fetch("/api/history?page=1&limit=1", { headers: authHeaders() });
+    const data = await res.json();
+    if (data.success && data.stats) updateHistoryStats(data.stats);
+  } catch (err) {
+    console.warn("fetchHistoryBadgeCount:", err);
+  }
+}
+
+function bootHubApp() {
   setupNavigation();
   setupSubPills();
   setupBatchTab();
   fetchTemplates();
-  fetchDomains();
-  fetchHistory();
+  fetchDomainBadgeCount();
+  fetchHistoryBadgeCount();
   loadCurrentCfToken();
   setupForms();
   setupPickerListeners();
   loadTasksList();
   if (typeof startTaskPolling === "function") startTaskPolling();
   if (typeof startHistoryPolling === "function") startHistoryPolling();
-});
+}
+
+function renderPaginationBar(containerEl, { page, totalPages, total, limit, onPage, label = "mục" }) {
+  if (!containerEl) return;
+  if (!total) {
+    containerEl.innerHTML = "";
+    return;
+  }
+  const start = (page - 1) * limit + 1;
+  const end = Math.min(page * limit, total);
+  const prevDisabled = page <= 1 ? "disabled" : "";
+  const nextDisabled = page >= totalPages ? "disabled" : "";
+  containerEl.innerHTML = `
+    <div class="pagination-bar">
+      <span class="pagination-info">${start}–${end} / ${total} ${label}</span>
+      <div class="pagination-controls">
+        <button type="button" class="btn btn-sm btn-secondary pagination-btn" data-page="1" ${prevDisabled}>«</button>
+        <button type="button" class="btn btn-sm btn-secondary pagination-btn" data-page="${page - 1}" ${prevDisabled}>‹</button>
+        <span class="pagination-page">${page} / ${totalPages}</span>
+        <button type="button" class="btn btn-sm btn-secondary pagination-btn" data-page="${page + 1}" ${nextDisabled}>›</button>
+        <button type="button" class="btn btn-sm btn-secondary pagination-btn" data-page="${totalPages}" ${nextDisabled}>»</button>
+      </div>
+    </div>
+  `;
+  containerEl.querySelectorAll(".pagination-btn").forEach((btn) => {
+    if (btn.hasAttribute("disabled")) return;
+    btn.addEventListener("click", () => {
+      const target = parseInt(btn.dataset.page, 10);
+      if (target >= 1 && target <= totalPages) onPage(target);
+    });
+  });
+}
+
+async function fetchDomainBadgeCount() {
+  try {
+    const res = await fetch("/api/domains-list?page=1&limit=1", { headers: authHeaders() });
+    const data = await res.json();
+    if (data.success) {
+      const total = data.total ?? data.count ?? 0;
+      if (badgeDomainsCount) badgeDomainsCount.textContent = total;
+      if (statTotalDomains) statTotalDomains.textContent = total;
+    }
+  } catch (err) {
+    console.warn("fetchDomainBadgeCount:", err);
+  }
+}
 
 function setupNavigation() {
   navTabs.forEach((tab) => {
@@ -175,14 +252,17 @@ function setupNavigation() {
       if (activePane) activePane.classList.add("active");
 
       if (targetTabId === "tab-domains" && allDomains.length === 0) {
-        fetchDomains();
+        fetchDomains(1);
       }
-      if (targetTabId === "tab-history") {
-        fetchHistory();
+      if (targetTabId === "tab-history" && allHistory.length === 0) {
+        fetchHistory(1);
       }
       if (targetTabId === "tab-wallet") {
         loadWalletData();
         loadDomainOrdersList();
+      }
+      if (targetTabId === "tab-tasks") {
+        loadTasksList();
       }
       if (targetTabId === "tab-domain-perms") {
         loadPermsData();
@@ -192,9 +272,12 @@ function setupNavigation() {
 
   globalRefreshBtn.addEventListener("click", () => {
     fetchTemplates();
-    fetchDomains();
-    fetchHistory();
-    showToast("🔄 Đã làm mới toàn bộ dữ liệu hệ thống!");
+    fetchDomainBadgeCount();
+    const domainsTabActive = document.querySelector('.nav-tab[data-tab="tab-domains"]')?.classList.contains("active");
+    const historyTabActive = document.querySelector('.nav-tab[data-tab="tab-history"]')?.classList.contains("active");
+    if (domainsTabActive) fetchDomains(domainsPage);
+    if (historyTabActive) fetchHistory(historyPage);
+    showToast("🔄 Đã làm mới dữ liệu hệ thống!");
   });
 }
 
@@ -360,32 +443,20 @@ function renderTemplates() {
       <div class="card-preview">
         <img src="${screenshotSrc}" alt="${t.title || t.name}" class="preview-img" onerror="this.src='${getFallbackPlaceholder(t.name)}'" loading="lazy">
         <div class="card-overlay">
-          <button class="btn btn-sm btn-secondary btn-preview" data-id="${t.id}">
-            🔍 Xem trước
-          </button>
-          <a href="${previewUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-secondary">
-            🌐 Mở Trang Web
-          </a>
+          <button class="btn btn-sm btn-secondary btn-preview" data-id="${t.id}">Xem trước</button>
         </div>
         <span class="brand-badge ${brandBadgeClass}">${brandLabel}</span>
       </div>
       <div class="card-body">
         <h4 class="card-title" title="${t.title || t.name}">${t.title || t.name}</h4>
         <div class="card-meta">
-          <a class="cname-box cname-link" href="${previewUrl}" target="_blank" rel="noopener noreferrer" title="Mở trang mẫu live">
-            <span class="cname-label">Mẫu live:</span>
-            <span class="cname-val">${liveName}</span>
-            <span class="cname-open">↗</span>
-          </a>
+          <span class="tpl-chip">Mẫu</span>
+          <a class="tpl-live-name" href="${previewUrl}" target="_blank" rel="noopener noreferrer" title="Mở trang mẫu live">${liveName}</a>
         </div>
-      </div>
-      <div class="card-footer" style="display: flex; gap: 8px;">
-        <button class="btn btn-primary btn-apply" data-id="${t.id}" style="flex: 1.2;">
-          🚀 Áp Dụng Mẫu
-        </button>
-        <a href="${previewUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="padding: 0 14px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none;">
-          🌐 Mở Trang Web
-        </a>
+        <div class="card-actions">
+          <button type="button" class="btn btn-primary btn-apply" data-id="${t.id}">Áp dụng</button>
+          <a href="${previewUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-open-live">Mở web</a>
+        </div>
       </div>
     `;
 
@@ -422,7 +493,7 @@ function attachTemplateCardEvents() {
     };
   });
 
-  document.querySelectorAll(".cname-link").forEach((link) => {
+  document.querySelectorAll(".cname-link, .tpl-live-name, .btn-open-live").forEach((link) => {
     link.onclick = (e) => e.stopPropagation();
   });
 }
@@ -576,19 +647,43 @@ if (clearSearch) {
 }
 
 // ── 3. DOMAIN MANAGER (TAB 4) ──────────────────────────────────────────────
-async function fetchDomains() {
-  if (domainsLoading) domainsLoading.style.display = "flex";
-  if (domainsTable) domainsTable.style.display = "none";
-  if (domainsEmpty) domainsEmpty.style.display = "none";
+async function fetchDomains(page = domainsPage) {
+  domainsPage = Math.max(1, page);
+  const hadRows = Array.isArray(allDomains) && allDomains.length > 0;
+  if (domainsLoading) domainsLoading.style.display = hadRows ? "none" : "flex";
+  if (!hadRows) {
+    if (domainsTable) domainsTable.style.display = "none";
+    if (domainsEmpty) domainsEmpty.style.display = "none";
+  }
 
   try {
-    const res = await fetch("/api/domains-list", { headers: authHeaders() });
+    const q = encodeURIComponent(currentDomainSearch || "");
+    const res = await fetch(`/api/domains-list?page=${domainsPage}&limit=${domainsLimit}&q=${q}`, { headers: authHeaders() });
     const data = await res.json();
     if (data.success && Array.isArray(data.domains)) {
       allDomains = data.domains;
-      if (statTotalDomains) statTotalDomains.textContent = allDomains.length;
-      if (badgeDomainsCount) badgeDomainsCount.textContent = allDomains.length;
+      domainsTotal = data.total ?? allDomains.length;
+      domainsTotalPages = data.totalPages ?? 1;
+      if (statTotalDomains) statTotalDomains.textContent = domainsTotal;
+      if (badgeDomainsCount) badgeDomainsCount.textContent = domainsTotal;
+      if (statFilteredDomains) {
+        const start = domainsTotal ? (domainsPage - 1) * domainsLimit + 1 : 0;
+        const end = Math.min(domainsPage * domainsLimit, domainsTotal);
+        statFilteredDomains.textContent = currentDomainSearch
+          ? `${domainsTotal} khớp`
+          : domainsTotal
+            ? `${start}–${end}`
+            : "0";
+      }
       renderDomainsTable();
+      renderPaginationBar(document.getElementById("domainsPagination"), {
+        page: domainsPage,
+        totalPages: domainsTotalPages,
+        total: domainsTotal,
+        limit: domainsLimit,
+        onPage: (p) => fetchDomains(p),
+        label: "miền",
+      });
     } else {
       showToast("❌ Không thể nạp danh sách domains: " + (data.error || "Lỗi máy chủ"));
     }
@@ -599,23 +694,8 @@ async function fetchDomains() {
   }
 }
 
-function filterDomainsList() {
-  if (!currentDomainSearch) return allDomains;
-  const q = currentDomainSearch.toLowerCase();
-  return allDomains.filter((d) => {
-    const matchDom = d.domain?.toLowerCase().includes(q);
-    const matchUrl = d.mainUrl?.toLowerCase().includes(q);
-    const matchBrand = d.brand?.toLowerCase().includes(q);
-    const matchTpl = d.templateName?.toLowerCase().includes(q);
-    const matchFolder = d.primaryFolder?.toLowerCase().includes(q);
-    return matchDom || matchUrl || matchBrand || matchTpl || matchFolder;
-  });
-}
-
 function renderDomainsTable() {
-  const filtered = filterDomainsList();
-  if (statFilteredDomains) statFilteredDomains.textContent = filtered.length;
-
+  const filtered = allDomains;
   if (filtered.length === 0) {
     if (domainsTable) domainsTable.style.display = "none";
     if (domainsEmpty) domainsEmpty.style.display = "flex";
@@ -626,6 +706,8 @@ function renderDomainsTable() {
   if (domainsTable) domainsTable.style.display = "table";
   if (!domainsTableBody) return;
 
+  const rowOffset = (domainsPage - 1) * domainsLimit;
+
   domainsTableBody.innerHTML = filtered
     .map((d, index) => {
       const brand = d.brand || "KHAC";
@@ -635,7 +717,7 @@ function renderDomainsTable() {
 
       return `
         <tr>
-          <td style="color: var(--text-dim); font-family: var(--font-mono);">${index + 1}</td>
+          <td style="color: var(--text-dim); font-family: var(--font-mono);">${rowOffset + index + 1}</td>
           <td>
             <a href="https://${d.domain}" target="_blank" rel="noopener noreferrer" class="dom-name-link">
               ${d.domain}
@@ -686,7 +768,8 @@ if (domainSearchInput) {
   domainSearchInput.addEventListener("input", (e) => {
     currentDomainSearch = e.target.value.trim();
     if (clearDomainSearch) clearDomainSearch.style.display = currentDomainSearch ? "block" : "none";
-    renderDomainsTable();
+    clearTimeout(domainsSearchTimer);
+    domainsSearchTimer = setTimeout(() => fetchDomains(1), 350);
   });
 }
 
@@ -695,20 +778,20 @@ if (clearDomainSearch) {
     domainSearchInput.value = "";
     currentDomainSearch = "";
     clearDomainSearch.style.display = "none";
-    renderDomainsTable();
+    fetchDomains(1);
     domainSearchInput.focus();
   });
 }
 
 if (refreshDomainsBtn) {
   refreshDomainsBtn.addEventListener("click", () => {
-    fetchDomains();
-    showToast("🔄 Đang quét lại tất cả các folder nguồn & Cloudflare...");
+    fetchDomains(domainsPage);
+    showToast("⏳ Đang tải lại danh sách tên miền...");
   });
 }
 
 window.syncCloudflareDomains = async function () {
-  showToast("⏳ Đang kết nối Cloudflare để nạp toàn bộ 1,250+ tên miền...");
+  showToast("⏳ Đang đồng bộ zone Cloudflare (Freze + Admin)...");
   try {
     const res = await fetch("/api/sync-cloudflare", {
       method: "POST",
@@ -716,8 +799,11 @@ window.syncCloudflareDomains = async function () {
     });
     const data = await res.json();
     if (data.success) {
-      showToast(`✅ ${data.message}`);
-      await fetchDomains();
+      showToast(`✅ ${data.message || "Đã đồng bộ CF"} — đang nạp lại danh sách (gồm zone CF chưa gắn LP)...`);
+      await fetchDomains(1);
+      await fetchDomainBadgeCount();
+      const hasTong = domainsTotal > 0 && currentDomainSearch.toLowerCase().includes("tong88vip");
+      console.log("[sync CF] domains total", domainsTotal, "tong88vip search?", hasTong);
     } else {
       showToast(`❌ Lỗi: ${data.error || "Không thể đồng bộ"}`);
     }
@@ -757,13 +843,18 @@ function setupForms() {
       const link = document.getElementById("buyLpLink").value.trim();
       const tele = document.getElementById("buyLpTele") ? document.getElementById("buyLpTele").value.trim() : "";
       const templateId = document.getElementById("buyLpTemplate").value;
+      const targetUserId = document.getElementById("buyLpTargetUser")?.value?.trim() || "";
 
       if (!domain || !link || !templateId) {
         showToast("⚠️ Vui lòng điền đầy đủ thông tin tên miền, link và chọn mẫu!");
         return;
       }
+      if (!isAdminUser()) {
+        openConfirmDomainPurchaseModal(domain, 250, "", { link, tele, templateId, deployMode: "LP" });
+        return;
+      }
 
-      await executeDeployFlow({ domain, link, tele, templateId, isBuy: true, type: "lp" });
+      await executeDeployFlow({ domain, link, tele, templateId, isBuy: true, type: "lp", targetUserId: targetUserId || undefined });
     };
   }
 
@@ -774,13 +865,18 @@ function setupForms() {
       e.preventDefault();
       const domain = document.getElementById("buy302Domain").value.trim();
       const link = document.getElementById("buy302Link").value.trim();
+      const targetUserId = document.getElementById("buy302TargetUser")?.value?.trim() || "";
 
       if (!domain || !link) {
         showToast("⚠️ Vui lòng điền đầy đủ tên miền và link!");
         return;
       }
+      if (!isAdminUser()) {
+        openConfirmDomainPurchaseModal(domain, 250, "", { link, deployMode: "302" });
+        return;
+      }
 
-      await executeDeployFlow({ domain, link, isBuy: true, type: "302" });
+      await executeDeployFlow({ domain, link, isBuy: true, type: "302", targetUserId: targetUserId || undefined });
     };
   }
 
@@ -832,7 +928,7 @@ function setupForms() {
 
       // Đóng modal ngay lập tức để người dùng tiếp tục thao tác khác
       closeModal("editLinkModal");
-      showToast(`🚀 Đã tiếp nhận cập nhật link cho [${domain}]! Đang xử lý ngầm trong Lịch Sử...`);
+      startHubProgressWatch({ domain, label: "Đang cập nhật link" });
 
       // Xử lý ngầm (background)
       (async () => {
@@ -843,16 +939,19 @@ function setupForms() {
             body: JSON.stringify({ domain, link: newLink, tele: newTele }),
           });
           const data = await res.json();
-          if (data.success) {
-            showToast(`✅ Đã hoàn tất cập nhật link cho [${domain}]!`);
+          if (data.success && data.verified !== false) {
+            const liveHint = data.liveLink ? ` → ${data.liveLink}` : "";
+            showToast(`✅ Live đã khớp link [${domain}]${liveHint}`, "success");
             fetchDomains();
             fetchHistory();
           } else {
-            showToast(`❌ Lỗi cập nhật [${domain}]: ${data.error || "Thất bại"}`);
+            showToast(`❌ ${data.error || "Live chưa khớp link đích"}`, "error");
             fetchHistory();
           }
         } catch (err) {
-          showToast(`❌ Lỗi kết nối khi cập nhật [${domain}]: ${err.message}`);
+          showToast(`❌ Lỗi kết nối khi cập nhật [${domain}]: ${err.message}`, "error");
+        } finally {
+          loadTasksList();
         }
       })();
     };
@@ -871,7 +970,7 @@ function setupForms() {
 
       // Đóng modal ngay lập tức để người dùng làm việc tiếp
       closeModal("switchTemplateModal");
-      showToast(`🚀 Đã tiếp nhận đổi mẫu cho [${domain}]! Đang xử lý ngầm trong Lịch Sử...`);
+      startHubProgressWatch({ domain, label: "Đang đổi mẫu LP" });
 
       // Xử lý ngầm (background)
       (async () => {
@@ -888,15 +987,17 @@ function setupForms() {
           });
           const data = await res.json();
           if (data.success) {
-            showToast(`🎉 Đã đổi mẫu thành công cho [${domain}] sang [${data.templateName || targetTemplateId}]!`);
+            showToast(`🎉 Đã đổi mẫu thành công cho [${domain}] sang [${data.templateName || targetTemplateId}]!`, "success");
             fetchDomains();
             fetchHistory();
           } else {
-            showToast(`❌ Lỗi đổi mẫu [${domain}]: ${data.error || "Thất bại"}`);
+            showToast(`❌ Lỗi đổi mẫu [${domain}]: ${data.error || "Thất bại"}`, "error");
             fetchHistory();
           }
         } catch (err) {
-          showToast(`❌ Lỗi kết nối khi đổi mẫu [${domain}]: ${err.message}`);
+          showToast(`❌ Lỗi kết nối khi đổi mẫu [${domain}]: ${err.message}`, "error");
+        } finally {
+          loadTasksList();
         }
       })();
     };
@@ -921,6 +1022,7 @@ function setupForms() {
       }
 
       closeModal("batchSetLinkModal");
+      showProcessingToast(`đổi link ${domains.length} miền`);
       openModal("batchProgressModal");
 
       const progressBar = document.getElementById("batchProgressBarFill");
@@ -938,6 +1040,7 @@ function setupForms() {
       if (progressBar) progressBar.style.width = "5%";
       if (percentText) percentText.textContent = "5%";
       if (statusText) statusText.textContent = `Đang gửi yêu cầu cập nhật ${domains.length} tên miền...`;
+      startHubProgressWatch({ label: `Đang đổi link ${domains.length} miền`, switchTab: true });
 
       try {
         const res = await fetch("/api/batch-setlink", {
@@ -996,6 +1099,14 @@ function setupForms() {
 }
 
 // Live Check Availability on Type/Button
+function escapeHtmlText(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 async function checkDomainAvailabilityLive(domain, statusEl) {
   if (!domain) {
     showToast("⚠️ Vui lòng nhập tên miền trước!");
@@ -1018,15 +1129,15 @@ async function checkDomainAvailabilityLive(domain, statusEl) {
         if (statusEl) {
           statusEl.className = "field-feedback available";
           const formatted = `${data.priceXu || 250} Xu (≈ ${((data.priceVnd || 250000) / 1000).toLocaleString("vi-VN")}k đ)`;
+          const ruleLabel = escapeHtmlText(data.ruleApplied || "Quy chuẩn");
+          const domainAttr = escapeHtmlText(data.domain || domain);
           statusEl.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
               <div>
                 ✅ Tên miền còn trống! Báo giá: <b style="color: #10b981; font-size: 14px;">${formatted}</b>
-                <span style="font-size: 11px; color: #38bdf8; margin-left: 6px;">[${data.ruleApplied || "Quy chuẩn"}]</span>
+                <span style="font-size: 11px; color: #38bdf8; margin-left: 6px;">[${ruleLabel}]</span>
               </div>
-              <button type="button" class="btn btn-primary btn-sm" onclick="openConfirmDomainPurchaseModal('${data.domain}', ${data.priceXu || 250}, '${data.ruleApplied || "Quy chuẩn"}')" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #000; font-weight: 800; border-color: #f59e0b;">
-                🛒 Đặt Mua Ngay
-              </button>
+              ${buildOrderDomainButtonHtml({ domain: data.domain || domain, priceXu: data.priceXu || 250, ruleApplied: data.ruleApplied || "Quy chuẩn" })}
             </div>
           `;
         }
@@ -1049,15 +1160,43 @@ async function checkDomainAvailabilityLive(domain, statusEl) {
 
 
 // ── 5. REAL-TIME DEPLOY EXECUTION (PROGRESS MODAL & PROCESSING POPUP) ───────
-function showDomainProcessingModal({ domain, link, tele, templateId, isBuy, type, customActionText }) {
+function isAdminUser() {
+  return !!(authReady && currentUser && currentUser.role === "admin");
+}
+
+function showOrderSubmittingModal(domain) {
+  const titleEl = document.querySelector("#domainProcessingModal h3");
+  const subtitleEl = document.querySelector("#domainProcessingModal .modal-subtitle");
+  if (titleEl) titleEl.textContent = "Đang Gửi Yêu Cầu";
+  if (subtitleEl) subtitleEl.textContent = "Hệ thống đang xử lý — vui lòng đợi vài giây";
+  showDomainProcessingModal({
+    domain,
+    link: "Chờ Admin duyệt & kích hoạt",
+    customActionText: "📤 Gửi yêu cầu đặt mua tên miền",
+    type: "lp",
+    isBuy: false,
+    skipMonitor: true,
+  });
+}
+
+function showDomainProcessingModal({ domain, link, tele, templateId, isBuy, type, customActionText, skipMonitor }) {
   const domEl = document.getElementById("processingModalDomainName");
   const actionEl = document.getElementById("processingModalActionType");
   const targetEl = document.getElementById("processingModalTargetUrl");
+  const suffixEl = document.getElementById("processingModalDomainSuffix");
+  const titleEl = document.querySelector("#domainProcessingModal h3");
+  const subtitleEl = document.querySelector("#domainProcessingModal .modal-subtitle");
+
+  if (!customActionText && !skipMonitor) {
+    if (titleEl) titleEl.textContent = "Yêu Cầu Đang Được Xử Lý";
+    if (subtitleEl) subtitleEl.textContent = "Vui lòng theo dõi ở Tiến trình";
+  }
 
   const template = allTemplates.find((t) => t.id === templateId);
   const tplName = template ? template.name : (type === "302" ? "Trỏ 302 Trực Tiếp" : "Landing Page");
 
-  if (domEl) domEl.textContent = domain;
+  if (domEl) domEl.textContent = domain || "-";
+  if (suffixEl) suffixEl.textContent = domain ? ` cho [${domain}]` : "";
   if (actionEl) {
     if (customActionText) {
       actionEl.textContent = customActionText;
@@ -1069,19 +1208,40 @@ function showDomainProcessingModal({ domain, link, tele, templateId, isBuy, type
   }
   if (targetEl) targetEl.textContent = link || "N/A";
 
-  if (domain) {
+  if (domain && !skipMonitor) {
     monitoredDomainsFor200.add(domain.toLowerCase());
   }
 
   openModal("domainProcessingModal");
+  if (!skipMonitor) showProcessingToast(domain || "");
 }
 
-function goToHistoryFromProcessingModal() {
+function goToTasksFromProcessingModal() {
   closeModal("domainProcessingModal");
   closeModal("progressModal");
-  const histTab = document.querySelector('.nav-tab[data-tab="tab-history"]');
-  if (histTab) histTab.click();
-  fetchHistory();
+  startHubProgressWatch({ switchTab: true });
+}
+
+/** Bật theo dõi tab Tiến trình — dùng cho mọi thao tác dài (mua, đổi link, LP, 302, đơn...) */
+function startHubProgressWatch({ domain, title, label, switchTab = true } = {}) {
+  if (domain) {
+    pushOptimisticHubTask({
+      domain,
+      title: title || (label ? `${label} — ${domain}` : `Đang xử lý — ${domain}`),
+      label,
+    });
+  }
+  startTaskPolling();
+  loadTasksList();
+  if (switchTab) switchToTab("tab-tasks");
+  if (domain && label) {
+    showToast(`⏳ ${label} [${domain}] — tab Tiến trình`, "info");
+  }
+}
+
+/** @deprecated dùng goToTasksFromProcessingModal */
+function goToHistoryFromProcessingModal() {
+  goToTasksFromProcessingModal();
 }
 
 function showDomainReady200Modal(item) {
@@ -1116,7 +1276,7 @@ function showDomainReady200Modal(item) {
   // Đóng modal processing nếu đang hiển thị
   closeModal("domainProcessingModal");
   openModal("domainReady200Modal");
-  showToast(`🎉 Tên miền [${item.domain}] đã 200 OK hoàn tất!`);
+  showToast(`🎉 Tên miền [${item.domain}] đã 200 OK hoàn tất!`, "success");
 }
 
 function goToHistoryFromReadyModal() {
@@ -1219,7 +1379,152 @@ function closeDomainErrorAlertModal() {
   closeModal("domainErrorAlertModal");
 }
 
-async function executeDeployFlow({ domain, link, tele, templateId, isBuy, type }) {
+let spaceshipBuyConfirmResolver = null;
+let spaceshipBuyConfirmPayload = null;
+
+async function fetchSpaceshipQuote(domain) {
+  const res = await fetch("/api/spaceship/quote", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ domain }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || `Không lấy được báo giá Spaceship (HTTP ${res.status})`);
+  }
+  return data.quote;
+}
+
+function fillSpaceshipQuoteModal(quote, { batchRows = null, batchTotal = null } = {}) {
+  const domEl = document.getElementById("ssQuoteDomain");
+  const regEl = document.getElementById("ssQuoteReg");
+  const privEl = document.getElementById("ssQuotePrivacy");
+  const totalEl = document.getElementById("ssQuoteTotal");
+  const noteEl = document.getElementById("ssQuoteNote");
+  const batchWrap = document.getElementById("ssQuoteBatchWrap");
+  const btn = document.getElementById("btnConfirmSpaceshipBuy");
+
+  if (batchRows && batchRows.length > 1) {
+    if (domEl) domEl.textContent = `${batchRows.length} miền`;
+    if (regEl) regEl.textContent = "—";
+    if (privEl) privEl.textContent = "Xem bảng bên dưới";
+    if (totalEl) totalEl.textContent = `$${Number(batchTotal || 0).toFixed(2)} USD`;
+    if (batchWrap) {
+      batchWrap.style.display = "block";
+      batchWrap.innerHTML = batchRows
+        .map(
+          (r) =>
+            `<div style="display:flex;justify-content:space-between;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.06);"><span>${r.domain}</span><span style="color:#ef4444;font-weight:700;">$${Number(r.totalUsd || 0).toFixed(2)}</span></div>`,
+        )
+        .join("");
+    }
+  } else if (quote) {
+    if (domEl) domEl.textContent = quote.domain || "-";
+    if (regEl) regEl.textContent = `$${Number(quote.regUsd || 0).toFixed(2)} USD`;
+    if (privEl) {
+      privEl.textContent =
+        quote.privacyUsd > 0
+          ? `${quote.privacyLabel || quote.privacyLevel} (+$${Number(quote.privacyUsd).toFixed(2)})`
+          : quote.privacyLabel || "Public (không phí privacy)";
+    }
+    if (totalEl) totalEl.textContent = quote.formattedTotal || `$${Number(quote.totalUsd || 0).toFixed(2)} USD`;
+    if (batchWrap) {
+      batchWrap.style.display = "none";
+      batchWrap.innerHTML = "";
+    }
+  }
+
+  if (noteEl) {
+    const q = quote || {};
+    noteEl.textContent =
+      q.message ||
+      (q.priceSource === "spaceship_catalog"
+        ? "Giá TLD thường theo bảng Spaceship trên hub. Premium lấy trực tiếp từ API."
+        : "Báo giá từ Spaceship API.");
+  }
+  if (btn) {
+    btn.textContent =
+      quote?.skipCharge || Number(quote?.totalUsd) === 0
+        ? "✅ Tiếp Tục (Không Trừ Tiền Mua)"
+        : "✅ Đồng Ý — Trừ Tiền & Mua";
+  }
+}
+
+function closeSpaceshipBuyConfirmModal(confirmed) {
+  closeModal("spaceshipBuyConfirmModal");
+  const resolver = spaceshipBuyConfirmResolver;
+  const payload = spaceshipBuyConfirmPayload;
+  spaceshipBuyConfirmResolver = null;
+  spaceshipBuyConfirmPayload = null;
+  if (resolver) resolver(confirmed ? payload : null);
+}
+
+function openSpaceshipBuyConfirmModal(quote, extra = {}) {
+  fillSpaceshipQuoteModal(quote, extra);
+  return new Promise((resolve) => {
+    spaceshipBuyConfirmResolver = resolve;
+    spaceshipBuyConfirmPayload = { quote, ...extra };
+    openModal("spaceshipBuyConfirmModal");
+  });
+}
+
+async function requireSpaceshipBuyConfirmation(deployArgs) {
+  if (!deployArgs?.isBuy || !deployArgs?.domain) return deployArgs;
+  if (!isAdminUser()) return deployArgs;
+  const quote = await fetchSpaceshipQuote(deployArgs.domain);
+  if (!quote.canPurchase) {
+    throw new Error(quote.message || `Không thể mua ${deployArgs.domain} trên Spaceship`);
+  }
+  const confirmed = await openSpaceshipBuyConfirmModal(quote);
+  if (!confirmed) return null;
+  return {
+    ...deployArgs,
+    spaceshipBuyConfirmed: true,
+    quotedTotalUsd: quote.totalUsd,
+    spaceshipQuote: quote,
+  };
+}
+
+async function requireSpaceshipBatchBuyConfirmation(domains) {
+  if (!isAdminUser()) return null;
+  const quotes = [];
+  for (const domain of domains) {
+    const quote = await fetchSpaceshipQuote(domain);
+    if (!quote.canPurchase) {
+      throw new Error(`${domain}: ${quote.message || "không mua được"}`);
+    }
+    quotes.push(quote);
+  }
+  const batchTotal = quotes.reduce((s, q) => s + Number(q.totalUsd || 0), 0);
+  const batchRows = quotes.map((q) => ({ domain: q.domain, totalUsd: q.totalUsd }));
+  const confirmed = await openSpaceshipBuyConfirmModal(quotes[0], { batchRows, batchTotal, quotes });
+  if (!confirmed) return null;
+  const byDomain = Object.fromEntries(quotes.map((q) => [q.domain, q]));
+  return byDomain;
+}
+
+async function handleDeployApiResponse(res, data, domain) {
+  const d = (domain || "").toLowerCase();
+  if (res.status === 202 || data?.queued) {
+    showToast(`⏳ [${domain}] đang xử lý ngầm — theo dõi tab Tiến trình`, "info");
+    return "queued";
+  }
+  if ([502, 503, 504, 524].includes(res.status)) {
+    showToast(`⏳ [${domain}] gateway timeout — job có thể vẫn chạy, xem tab Tiến trình`, "warning");
+    return "timeout";
+  }
+  if (data?.success) {
+    showToast(`✨ [${domain}] cài xong! Xem tab Lịch sử để theo dõi trạng thái live.`, "success");
+    return "ok";
+  }
+  if (d) monitoredDomainsFor200.delete(d);
+  const errMsg = data?.error || `HTTP ${res.status}`;
+  showToast(`❌ THẤT BẠI [${domain}]: ${errMsg}`, "error");
+  alert(`❌ Mua/cài đặt thất bại: ${domain}\n\n${errMsg}`);
+  return "fail";
+}
+
+async function executeDeployFlow({ domain, link, tele, templateId, isBuy, type, spaceshipBuyConfirmed, quotedTotalUsd, targetUserId, orderId }) {
   const submitBtns = document.querySelectorAll('button[type="submit"]');
   submitBtns.forEach((b) => {
     b.disabled = true;
@@ -1227,18 +1532,57 @@ async function executeDeployFlow({ domain, link, tele, templateId, isBuy, type }
     b.innerHTML = `<span>⏳ Đang tiếp nhận...</span>`;
   });
 
-  // Hiển thị ngay Popup Đang Xử Lý Ngầm & nút Chuyển Sang Lịch Sử
-  showDomainProcessingModal({ domain, link, tele, templateId, isBuy, type });
-  showToast(`🚀 Đã tiếp nhận yêu cầu cho [${domain}]! Đang xử lý ngầm...`);
-
-  if (domain) {
-    monitoredDomainsFor200.add(domain.toLowerCase());
+  if (isBuy && !isAdminUser()) {
+    showToast("⚠️ Thành viên gửi yêu cầu qua nút Đặt Mua Ngay sau khi tra cứu giá.", "warning");
+    openConfirmDomainPurchaseModal(domain, 250, "", { link, tele, templateId, deployMode: type === "302" ? "302" : "LP" });
+    submitBtns.forEach((b) => {
+      b.disabled = false;
+      if (b.dataset.origHtml) b.innerHTML = b.dataset.origHtml;
+    });
+    return;
   }
 
-  const endpoint = type === "lp" ? "/api/deploy-lp" : "/api/deploy-302";
-  const payload = type === "lp" ? { domain, link, tele, templateId, isBuy } : { domain, link, isBuy };
+  let deployArgs = { domain, link, tele, templateId, isBuy, type, spaceshipBuyConfirmed, quotedTotalUsd, targetUserId, orderId };
 
-  // Thực hiện gọi API xử lý ngầm
+  try {
+    if (isBuy && !spaceshipBuyConfirmed && isAdminUser()) {
+      const confirmedArgs = await requireSpaceshipBuyConfirmation(deployArgs);
+      if (!confirmedArgs) {
+        showToast("Đã hủy — chưa mua trên Spaceship.", "info");
+        return;
+      }
+      deployArgs = confirmedArgs;
+    }
+  } catch (err) {
+    showToast(`❌ ${err.message}`, "error");
+    alert(`❌ Không thể báo giá Spaceship:\n\n${err.message}`);
+    submitBtns.forEach((b) => {
+      b.disabled = false;
+      if (b.dataset.origHtml) b.innerHTML = b.dataset.origHtml;
+    });
+    return;
+  }
+
+  const { domain: d, link: l, tele: t, templateId: tpl, isBuy: buy, type: tp, spaceshipBuyConfirmed: sbc, quotedTotalUsd: qtu, targetUserId: tuid, orderId: oid } = deployArgs;
+
+  if (d) {
+    monitoredDomainsFor200.add(d.toLowerCase());
+  }
+
+  startTaskPolling();
+  loadTasksList();
+  switchToTab("tab-tasks");
+  showToast(`⏳ Đang xử lý [${d}] — tab Tiến trình`, "info");
+
+  const endpoint = tp === "lp" ? "/api/deploy-lp" : "/api/deploy-302";
+  const ownerFields = {};
+  if (tuid) ownerFields.targetUserId = tuid;
+  if (oid) ownerFields.orderId = oid;
+  const payload =
+    tp === "lp"
+      ? { domain: d, link: l, tele: t, templateId: tpl, isBuy: buy, spaceshipBuyConfirmed: sbc, quotedTotalUsd: qtu, ...ownerFields }
+      : { domain: d, link: l, isBuy: buy, spaceshipBuyConfirmed: sbc, quotedTotalUsd: qtu, ...ownerFields };
+
   (async () => {
     try {
       const res = await fetch(endpoint, {
@@ -1246,18 +1590,16 @@ async function executeDeployFlow({ domain, link, tele, templateId, isBuy, type }
         headers: authHeaders(),
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (data.success) {
-        showToast(`✨ Tên miền [${domain}] đã được cấu hình thành công! Đang đợi 200 OK.`);
-      } else {
-        showToast(`❌ Cài đặt thất bại [${domain}]: ${data.error || "Lỗi không xác định"}`);
-      }
+      const data = await res.json().catch(() => ({}));
+      await handleDeployApiResponse(res, data, d);
     } catch (err) {
-      showToast(`❌ Lỗi kết nối khi xử lý [${domain}]: ${err.message}`);
+      if (d) monitoredDomainsFor200.delete(d.toLowerCase());
+      showToast(`⏳ [${d}] lỗi kết nối — kiểm tra tab Tiến trình (job có thể vẫn chạy)`, "warning");
     } finally {
       fetchDomains();
       fetchHistory();
       if (typeof checkAuth === "function") checkAuth();
+      if (typeof loadTasksList === "function") loadTasksList();
     }
   })();
 
@@ -1515,7 +1857,7 @@ function renderInspectorResult(r) {
 }
 
 async function fixCurrentDomain(domain) {
-  showToast(`⚡ Đang kích hoạt 1-Click Auto Fix toàn diện cho [${domain}]...`);
+  showProcessingToast(domain);
   if (inspectorLoading) {
     inspectorLoading.style.display = "flex";
     inspectorLoading.querySelector("p").textContent = `Đang tự động sửa lỗi DNS, Pages & Deploy cho [${domain}]...`;
@@ -1531,7 +1873,7 @@ async function fixCurrentDomain(domain) {
     const data = await res.json();
 
     if (data.success) {
-      showToast(`🎉 ĐÃ SỬA XONG CHO [${domain}]! Đang tải lại báo cáo sức khỏe...`);
+      showToast(`🎉 ĐÃ SỬA XONG CHO [${domain}]! Đang tải lại báo cáo sức khỏe...`, "success");
       // Re-inspect domain to show updated results
       await inspectDomain();
       fetchHistory();
@@ -1552,22 +1894,16 @@ function loadAllDomainsForBatchCheck() {
   const textarea = document.getElementById("batchCheckTextarea");
   if (!textarea) return;
 
-  if (allDomains && allDomains.length > 0) {
-    const domainList = [...new Set(allDomains.map((d) => d.domain))].join("\n");
-    textarea.value = domainList;
-    showToast(`📋 Đã nạp ${allDomains.length} tên miền đang chạy vào danh sách!`);
-  } else {
-    fetch("/api/domains", { headers: authHeaders() })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success && data.domains) {
-          allDomains = data.domains;
-          const domainList = [...new Set(allDomains.map((d) => d.domain))].join("\n");
-          textarea.value = domainList;
-          showToast(`📋 Đã nạp ${allDomains.length} tên miền vào danh sách!`);
-        }
-      });
-  }
+  fetch("/api/domains-list?all=1&fields=names", { headers: authHeaders() })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.success && Array.isArray(data.domains)) {
+        const domainList = [...new Set(data.domains)].join("\n");
+        textarea.value = domainList;
+        showToast(`📋 Đã nạp ${data.domains.length} tên miền vào danh sách!`);
+      }
+    })
+    .catch(() => showToast("❌ Không thể nạp danh sách miền"));
 }
 
 async function startBatchHealthInspection() {
@@ -1722,7 +2058,7 @@ function renderBatchCheckTable() {
 }
 
 async function fixSingleDomainFromBatch(domain) {
-  showToast(`⚡ Đang tự động sửa cho [${domain}]...`);
+  showProcessingToast(domain);
   try {
     const res = await fetch("/api/fix-domain", {
       method: "POST",
@@ -1731,17 +2067,17 @@ async function fixSingleDomainFromBatch(domain) {
     });
     const data = await res.json();
     if (data.success && data.report) {
-      showToast(`🎉 Đã sửa xong cho [${domain}]!`);
+      showToast(`🎉 Đã sửa xong cho [${domain}]!`, "success");
       const idx = batchHealthReports.findIndex((r) => r.domain === domain);
       if (idx !== -1) {
         batchHealthReports[idx] = data.report;
         renderBatchCheckTable();
       }
     } else {
-      showToast(`⚠️ Lỗi sửa [${domain}]: ${data.error || "Thất bại"}`);
+      showToast(`⚠️ Lỗi sửa [${domain}]: ${data.error || "Thất bại"}`, "error");
     }
   } catch (e) {
-    showToast(`❌ Lỗi kết nối: ${e.message}`);
+    showToast(`❌ Lỗi kết nối: ${e.message}`, "error");
   }
 }
 
@@ -1767,7 +2103,7 @@ async function startFixAllFailingDomains() {
   if (progressWrapper) progressWrapper.style.display = "block";
   if (fixAllBtn) fixAllBtn.disabled = true;
 
-  showToast(`🚀 Bắt đầu tự động sửa ${failingDomains.length} tên miền...`);
+  showProcessingToast(`sửa ${failingDomains.length} miền`);
 
   let fixedCount = 0;
   for (let i = 0; i < failingDomains.length; i++) {
@@ -1952,12 +2288,38 @@ function quickPoint302(domain, link) {
 }
 
 // ── 7. MODALS HELPERS ──────────────────────────────────────────────────────
+function ensureModalPortal(modal) {
+  if (modal && modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+}
+
+function closeAllModals(exceptId = null) {
+  document.querySelectorAll(".modal").forEach((m) => {
+    if (m.id && m.id !== exceptId) {
+      m.classList.remove("active");
+      m.style.display = "none";
+    }
+  });
+  if (!exceptId) {
+    document.body.classList.remove("modal-open");
+  }
+}
+
 function openModal(modalId) {
   const modal = document.getElementById(modalId);
-  if (modal) {
-    modal.classList.add("active");
-    modal.style.display = "flex";
-  }
+  if (!modal) return;
+  closeAllModals(modalId);
+  ensureModalPortal(modal);
+  document.body.classList.add("modal-open");
+  modal.classList.add("active");
+  modal.style.display = "flex";
+  requestAnimationFrame(() => {
+    const focusable = modal.querySelector(
+      "input:not([type=hidden]):not([disabled]), textarea:not([disabled]), select:not([disabled])"
+    );
+    if (focusable) focusable.focus({ preventScroll: true });
+  });
 }
 
 function closeModal(modalId) {
@@ -1969,6 +2331,9 @@ function closeModal(modalId) {
   if (modalId === "topupModal" && typeof stopTopupBalancePoll === "function") {
     stopTopupBalancePoll();
   }
+  if (!document.querySelector(".modal.active")) {
+    document.body.classList.remove("modal-open");
+  }
 }
 
 function openPreviewModal(templateId) {
@@ -1977,7 +2342,7 @@ function openPreviewModal(templateId) {
   selectedTemplate = t;
 
   document.getElementById("modalTitle").textContent = t.title || t.name;
-  document.getElementById("modalTarget").textContent = `Mẫu live: ${getTemplateLiveName(t)}`;
+  document.getElementById("modalTarget").textContent = `Mẫu · ${getTemplateLiveName(t)}`;
   document.getElementById("modalImage").src = t.screenshotUrl || getFallbackPlaceholder(t.name);
   document.getElementById("modalLiveDemo").href = getTemplateLiveUrl(t);
 
@@ -2011,14 +2376,17 @@ function openEditLinkModal(domain, currentLink = "", currentTele = "") {
   if (teleInp) teleInp.value = currentTele || "";
 
   openModal("editLinkModal");
-  setTimeout(() => {
-    if (linkInp) linkInp.focus();
-  }, 100);
+  requestAnimationFrame(() => {
+    if (linkInp) linkInp.focus({ preventScroll: true });
+  });
 }
 
 function openBatchSetLinkModal() {
   openModal("batchSetLinkModal");
-  setTimeout(() => document.getElementById("batchDomainsTextarea").focus(), 100);
+  requestAnimationFrame(() => {
+    const ta = document.getElementById("batchDomainsTextarea");
+    if (ta) ta.focus({ preventScroll: true });
+  });
 }
 
 function openQuickDeployModal() {
@@ -2028,9 +2396,10 @@ function openQuickDeployModal() {
 // ── 8. VISUAL TEMPLATE PICKER & CONFIRMATION FLOW ───────────────────────────
 if (historySearchInput) {
   historySearchInput.addEventListener("input", (e) => {
-    currentHistorySearch = e.target.value.trim().toLowerCase();
+    currentHistorySearch = e.target.value.trim();
     if (clearHistorySearch) clearHistorySearch.style.display = currentHistorySearch ? "block" : "none";
-    renderHistoryTable();
+    clearTimeout(historySearchTimer);
+    historySearchTimer = setTimeout(() => fetchHistory(1), 350);
   });
 }
 
@@ -2039,14 +2408,14 @@ if (clearHistorySearch) {
     historySearchInput.value = "";
     currentHistorySearch = "";
     clearHistorySearch.style.display = "none";
-    renderHistoryTable();
+    fetchHistory(1);
     historySearchInput.focus();
   });
 }
 
 if (refreshHistoryBtn) {
   refreshHistoryBtn.addEventListener("click", () => {
-    fetchHistory();
+    fetchHistory(historyPage);
     showToast("🔄 Đang làm mới lịch sử...");
   });
 }
@@ -2185,7 +2554,7 @@ function openConfirmSelectTemplateModal(templateId) {
     brandEl.textContent = brand;
   }
   if (cnameEl) {
-    cnameEl.innerHTML = `<a href="${getTemplateLiveUrl(t)}" target="_blank" rel="noopener noreferrer" style="color: inherit;">Mẫu live: ${getTemplateLiveName(t)} ↗</a>`;
+    cnameEl.innerHTML = `<a href="${getTemplateLiveUrl(t)}" target="_blank" rel="noopener noreferrer" style="color: inherit;">Mẫu · ${getTemplateLiveName(t)} ↗</a>`;
   }
   if (liveDemoBtn) liveDemoBtn.href = getTemplateLiveUrl(t);
 
@@ -2711,21 +3080,21 @@ function renderBatchTable() {
       }
 
       return `
-        <tr data-index="${index}" style="${item.status === 'running' ? 'background: rgba(99, 102, 241, 0.08);' : ''}">
-          <td style="text-align: center;">
+        <tr class="batch-row-card" data-index="${index}" style="${item.status === 'running' ? 'background: rgba(99, 102, 241, 0.08);' : ''}">
+          <td class="batch-cell-check" data-label="Chọn" style="text-align: center;">
             <input type="checkbox" class="batch-row-checkbox" data-index="${index}" ${item.selected ? "checked" : ""} ${isBatchRunning ? "disabled" : ""}>
           </td>
-          <td style="color: var(--text-dim); font-family: var(--font-mono); font-size: 11px;">${index + 1}</td>
-          <td>
+          <td class="batch-cell-stt" data-label="STT" style="color: var(--text-dim); font-family: var(--font-mono); font-size: 11px;">${index + 1}</td>
+          <td class="batch-cell-domain" data-label="Tên miền">
             <input type="text" class="batch-domain-inp" data-index="${index}" value="${item.domain}" placeholder="domain.com" ${isBatchRunning ? "disabled" : ""}>
           </td>
-          <td>
+          <td class="batch-cell-link" data-label="Link đích">
             <input type="text" class="batch-link-inp" data-index="${index}" value="${item.link}" placeholder="https://gg88..." ${isBatchRunning ? "disabled" : ""}>
           </td>
-          <td>
+          <td class="batch-cell-tele" data-label="Telegram CSKH">
             <input type="text" class="batch-tele-inp" data-index="${index}" value="${item.tele}" placeholder="https://t.me/..." ${isBatchRunning ? "disabled" : ""}>
           </td>
-          <td>
+          <td class="batch-cell-tpl" data-label="Mẫu / Chế độ">
             <div class="batch-tpl-select-cell">
               <select class="batch-tpl-select" data-index="${index}" ${isBatchRunning ? "disabled" : ""}>
                 ${tplOptionsHtml}
@@ -2735,10 +3104,10 @@ function renderBatchTable() {
               </button>
             </div>
           </td>
-          <td>
+          <td class="batch-cell-status" data-label="Trạng thái">
             ${statusBadge}
           </td>
-          <td style="text-align: center;">
+          <td class="batch-cell-del" data-label="Xoá" style="text-align: center;">
             <button type="button" class="btn-clear" onclick="deleteBatchRow(${index})" title="Xoá dòng này" ${isBatchRunning ? "disabled" : ""}>&times;</button>
           </td>
         </tr>
@@ -2821,9 +3190,26 @@ async function startBatchExecution() {
   const isBuy = modeRadio ? modeRadio.value === "buy" : true;
 
   if (isBuy) {
-    if (!confirm(`❓ Bạn có chắc chắn muốn MUA và CÀI ĐẶT ${selectedList.length} tên miền này trên Spaceship không?`)) {
+    if (!isAdminUser()) {
+      showToast("⚠️ Chế độ mua hàng loạt chỉ dành cho Admin.", "warning");
       return;
     }
+    let batchQuoteMap = null;
+    try {
+      batchQuoteMap = await requireSpaceshipBatchBuyConfirmation(selectedList.map((i) => i.domain.trim().toLowerCase()));
+    } catch (err) {
+      showToast(`❌ ${err.message}`, "error");
+      alert(`❌ Báo giá Spaceship thất bại:\n\n${err.message}`);
+      return;
+    }
+    if (!batchQuoteMap) return;
+    selectedList.forEach((item) => {
+      const q = batchQuoteMap[item.domain.trim().toLowerCase()];
+      if (q) {
+        item.spaceshipBuyConfirmed = true;
+        item.quotedTotalUsd = q.totalUsd;
+      }
+    });
   } else {
     if (!confirm(`❓ Bạn có chắc chắn muốn TRỎ và CÀI ĐẶT ${selectedList.length} tên miền này không?`)) {
       return;
@@ -2832,6 +3218,7 @@ async function startBatchExecution() {
 
   isBatchRunning = true;
   isBatchStopped = false;
+  showProcessingToast(`hàng loạt ${selectedList.length} miền`);
 
   const btnStart = document.getElementById("btnStartBatchExecution");
   const btnStop = document.getElementById("btnStopBatchExecution");
@@ -2896,46 +3283,67 @@ async function startBatchExecution() {
       addLog(`👉 [${itemIdx + 1}/${selectedList.length}] Bắt đầu: ${domain} ➔ ${link} (${templateId})`, "step");
 
       try {
-        let resData;
+        let res;
+        let resData = {};
         if (templateId === "302_DIRECT") {
           item.statusText = "Cài Page Rule 302...";
           renderBatchTable();
-          const res = await fetch("/api/deploy-302", {
+          res = await fetch("/api/deploy-302", {
             method: "POST",
             headers: authHeaders(),
-            body: JSON.stringify({ domain, link, isBuy }),
+            body: JSON.stringify({
+              domain,
+              link,
+              isBuy,
+              spaceshipBuyConfirmed: item.spaceshipBuyConfirmed || false,
+              quotedTotalUsd: item.quotedTotalUsd,
+            }),
           });
-          resData = await res.json();
         } else {
           item.statusText = isBuy ? "Mua & Cài Landing Page..." : "Cài Landing Page...";
           renderBatchTable();
-          const res = await fetch("/api/deploy-lp", {
+          res = await fetch("/api/deploy-lp", {
             method: "POST",
             headers: authHeaders(),
-            body: JSON.stringify({ domain, link, tele, templateId, isBuy }),
+            body: JSON.stringify({
+              domain,
+              link,
+              tele,
+              templateId,
+              isBuy,
+              spaceshipBuyConfirmed: item.spaceshipBuyConfirmed || false,
+              quotedTotalUsd: item.quotedTotalUsd,
+            }),
           });
-          resData = await res.json();
         }
+        resData = await res.json().catch(() => ({}));
 
-        if (resData.success) {
-          item.status = "success";
-          item.statusText = "Thành công!";
-          successCount++;
+        if (res.status === 202 || resData.queued || resData.success) {
+          item.status = resData.queued || res.status === 202 ? "processing" : "success";
+          item.statusText = resData.queued || res.status === 202 ? "Đang xử lý ngầm..." : "Thành công!";
+          if (item.status === "success") successCount++;
           monitoredDomainsFor200.add(domain.toLowerCase());
-          addLog(`✅ [${domain}] CÀI ĐẶT THÀNH CÔNG! Đang theo dõi tiến trình 200 OK...`, "success");
+          addLog(
+            `⏳ [${domain}] ${resData.queued || res.status === 202 ? "ĐÃ NHẬN — xử lý ngầm" : "CÀI ĐẶT THÀNH CÔNG"} — tab Tiến trình`,
+            "success"
+          );
+        } else if ([502, 503, 504, 524].includes(res.status)) {
+          item.status = "processing";
+          item.statusText = "Timeout — xem Tiến trình";
+          monitoredDomainsFor200.add(domain.toLowerCase());
+          addLog(`⏳ [${domain}] Gateway timeout — kiểm tra tab Tiến trình`, "warning");
         } else {
           item.status = "error";
           item.statusText = "Lỗi";
-          item.error = resData.error || "Thất bại";
+          item.error = resData.error || `HTTP ${res.status}`;
           failCount++;
           addLog(`❌ [${domain}] THẤT BẠI: ${item.error}`, "error");
         }
       } catch (err) {
-        item.status = "error";
-        item.statusText = "Lỗi kết nối";
+        item.status = "processing";
+        item.statusText = "Lỗi kết nối — xem Tiến trình";
         item.error = err.message;
-        failCount++;
-        addLog(`❌ [${domain}] LỖI: ${err.message}`, "error");
+        addLog(`⏳ [${domain}] Lỗi kết nối — job có thể vẫn chạy: ${err.message}`, "warning");
       }
 
       completedCount++;
@@ -2979,7 +3387,7 @@ async function startBatchExecution() {
 
   fetchDomains();
   fetchHistory();
-  showToast(`🎉 Chạy hàng loạt hoàn tất! ${successCount} thành công, ${failCount} lỗi.`);
+  showToast(`🎉 Chạy hàng loạt hoàn tất! ${successCount} thành công, ${failCount} lỗi.`, "success");
 }
 
 function retryFailedBatchItems() {
@@ -3030,36 +3438,92 @@ function retrySingleBatchRow(index) {
 }
 
 // ── 9. HISTORY MANAGEMENT & LIVE 200 VERIFIER (TAB 6) ──────────────────────
-async function fetchHistory() {
-  if (historyLoading) historyLoading.style.display = "flex";
-  if (historyTable) historyTable.style.display = "none";
-  if (historyEmpty) historyEmpty.style.display = "none";
+function historyPageFingerprint(list, page, total, q) {
+  const ids = (list || [])
+    .map((h) => `${h.id}|${h.status}|${h.liveStatus || ""}|${h.progress || ""}|${h.updatedAt || h.timestamp || ""}`)
+    .join(";");
+  return `${page}|${total}|${q || ""}|${ids}`;
+}
+
+async function fetchHistory(page = historyPage, opts = {}) {
+  const silent = !!opts.silent;
+  historyPage = Math.max(1, page);
+  const seq = ++historyFetchSeq;
+
+  if (!silent && allHistory.length === 0) {
+    if (historyLoading) historyLoading.style.display = "flex";
+    if (historyTable) historyTable.style.display = "none";
+    if (historyEmpty) historyEmpty.style.display = "none";
+  }
 
   try {
-    const res = await fetch("/api/history", { headers: authHeaders() });
+    const q = encodeURIComponent(currentHistorySearch || "");
+    const res = await fetch(`/api/history?page=${historyPage}&limit=${historyLimit}&q=${q}`, {
+      headers: authHeaders(),
+    });
     const data = await res.json();
+    if (seq !== historyFetchSeq) return; // bỏ response cũ nếu đã đổi trang/search
+
     if (data.success && Array.isArray(data.history)) {
       allHistory = data.history;
-      updateHistoryStats();
-      renderHistoryTable();
+      historyTotal = data.total ?? allHistory.length;
+      historyTotalPages = data.totalPages ?? 1;
+      updateHistoryStats(data.stats);
 
-      // Kiểm tra xem có domain nào vừa 200 OK cần bật popup không
-      checkAndTrigger200Popups(allHistory);
+      const fp = historyPageFingerprint(allHistory, historyPage, historyTotal, currentHistorySearch);
+      if (fp !== historyRenderFingerprint) {
+        historyRenderFingerprint = fp;
+        renderHistoryTable();
+        renderPaginationBar(document.getElementById("historyPagination"), {
+          page: historyPage,
+          totalPages: historyTotalPages,
+          total: historyTotal,
+          limit: historyLimit,
+          onPage: (p) => fetchHistory(p),
+          label: "giao dịch",
+        });
+      } else if (!silent) {
+        // vẫn hiện bảng nếu lần đầu silent=false mà fingerprint trùng
+        if (historyEmpty && allHistory.length === 0) historyEmpty.style.display = "flex";
+        if (historyTable && allHistory.length > 0) historyTable.style.display = "table";
+      }
+
+      if (!silent) checkAndTrigger200Popups(allHistory);
     }
   } catch (err) {
     console.error("Lỗi fetch history:", err);
   } finally {
-    if (historyLoading) historyLoading.style.display = "none";
+    if (!silent && historyLoading) historyLoading.style.display = "none";
   }
+}
+
+async function fetchHistorySilent() {
+  try {
+    const res = await fetch("/api/history/watch", { headers: authHeaders() });
+    const data = await res.json();
+    if (data.success && Array.isArray(data.history)) {
+      checkAndTrigger200Popups(data.history);
+    }
+    const histTabActive = document
+      .querySelector('.nav-tab[data-tab="tab-history"]')
+      ?.classList.contains("active");
+    // Tab lịch sử đang mở: refresh trang hiện tại im lặng — không flash loading
+    if (histTabActive) {
+      await fetchHistory(historyPage, { silent: true });
+    }
+  } catch {}
+}
+
+function startHistoryPolling() {
+  if (historyPollingInterval) clearInterval(historyPollingInterval);
+  // 5s đủ cho popup 200; tránh giật UI mỗi 2.5s
+  historyPollingInterval = setInterval(() => {
+    fetchHistorySilent();
+  }, 5000);
 }
 
 function checkAndTrigger200Popups(historyList) {
   if (!Array.isArray(historyList)) return;
-
-  // Không xếp hàng nhiều popup 15p: tối đa 1 lần / phiên
-  if (error15mAutoPopupDone || activeErrorAlertDomain) {
-    // vẫn cho phép popup 200 OK bên dưới
-  }
 
   for (const h of historyList) {
     if (!h.domain) continue;
@@ -3080,8 +3544,7 @@ function checkAndTrigger200Popups(historyList) {
       }
     }
 
-    // 2. Cảnh báo 15p — CHỈ auto với miền đang theo dõi trong phiên (vừa mua/trỏ/đổi link).
-    // Miền lỗi cũ trong lịch sử: chỉ ⚠️ trên bảng, KHÔNG popup khi vào lại trang.
+    // 2. Cảnh báo 15p — chỉ auto với miền đang theo dõi trong phiên
     if (error15mAutoPopupDone || activeErrorAlertDomain) continue;
 
     const isMonitoredOverdue =
@@ -3098,34 +3561,17 @@ function checkAndTrigger200Popups(historyList) {
   }
 }
 
-async function fetchHistorySilent() {
-  try {
-    const res = await fetch("/api/history", { headers: authHeaders() });
-    const data = await res.json();
-    if (data.success && Array.isArray(data.history)) {
-      allHistory = data.history;
-      updateHistoryStats();
-      const histTabActive = document.querySelector('.nav-tab[data-tab="tab-history"]')?.classList.contains("active");
-      if (histTabActive) {
-        renderHistoryTable();
-      }
-      checkAndTrigger200Popups(allHistory);
-    }
-  } catch {}
-}
-
-function startHistoryPolling() {
-  if (historyPollingInterval) clearInterval(historyPollingInterval);
-  historyPollingInterval = setInterval(() => {
-    fetchHistorySilent();
-  }, 4000);
-}
-
-function updateHistoryStats() {
-  const total = allHistory.length;
-  const liveCount = allHistory.filter((h) => h.liveStatus === "200_OK").length;
-  const buyCount = allHistory.filter((h) => h.actionType && h.actionType.startsWith("BUY")).length;
-  const lpCount = allHistory.filter((h) => h.actionType && (h.actionType.includes("LP") || h.actionType.includes("TPL"))).length;
+function updateHistoryStats(statsFromApi) {
+  const completed = statsFromApi || {
+    total: allHistory.filter((h) => h.status !== "in_progress" && h.status !== "pending").length,
+    live: allHistory.filter((h) => h.liveStatus === "200_OK").length,
+    buy: allHistory.filter((h) => h.actionType && h.actionType.startsWith("BUY")).length,
+    lp: allHistory.filter((h) => h.actionType && (h.actionType.includes("LP") || h.actionType.includes("TPL"))).length,
+  };
+  const total = completed.total ?? 0;
+  const liveCount = completed.live ?? 0;
+  const buyCount = completed.buy ?? 0;
+  const lpCount = completed.lp ?? 0;
 
   if (badgeHistoryCount) badgeHistoryCount.textContent = total;
   if (statTotalHistory) statTotalHistory.textContent = total;
@@ -3167,21 +3613,8 @@ function formatHistoryActor(h) {
 function renderHistoryTable() {
   if (!historyTableBody) return;
 
-  const filtered = allHistory.filter((h) => {
-    if (!currentHistorySearch) return true;
-    const query = currentHistorySearch.toLowerCase();
-    return (
-      (h.domain && h.domain.toLowerCase().includes(query)) ||
-      (h.actionLabel && h.actionLabel.toLowerCase().includes(query)) ||
-      (h.actionType && h.actionType.toLowerCase().includes(query)) ||
-      (h.templateName && h.templateName.toLowerCase().includes(query)) ||
-      (h.link && h.link.toLowerCase().includes(query)) ||
-      (h.username && h.username.toLowerCase().includes(query)) ||
-      (h.userId && String(h.userId).toLowerCase().includes(query)) ||
-      (h.fullName && h.fullName.toLowerCase().includes(query)) ||
-      (h.id && String(h.id).toLowerCase().includes(query))
-    );
-  });
+  const filtered = allHistory;
+  const rowOffset = (historyPage - 1) * historyLimit;
 
   if (filtered.length === 0) {
     if (historyTable) historyTable.style.display = "none";
@@ -3195,7 +3628,8 @@ function renderHistoryTable() {
   historyTableBody.innerHTML = filtered
     .map((h, index) => {
       let actionBadgeColor = "var(--primary)";
-      if (h.actionType === "BUY_LP" || h.actionType === "BUY_302") actionBadgeColor = "var(--accent-emerald)";
+      if (h.status === "failed") actionBadgeColor = "var(--accent-rose)";
+      else if (h.actionType === "BUY_LP" || h.actionType === "BUY_302") actionBadgeColor = "var(--accent-emerald)";
       else if (h.actionType === "SWITCH_TPL") actionBadgeColor = "var(--accent-purple)";
       else if (h.actionType === "SET_LINK") actionBadgeColor = "var(--accent-cyan)";
 
@@ -3213,14 +3647,30 @@ function renderHistoryTable() {
       const ageMinutes = Math.round(((Date.now() - createdAt) / 60000) * 10) / 10;
 
       let liveSectionHtml = "";
-      if (h.status === "failed") {
+      if (h.status === "in_progress" || h.status === "pending") {
+        const step = h.progress || h.details?.step || "Đang chạy trên server...";
         liveSectionHtml = `
           <div style="display: flex; flex-direction: column; gap: 3px;">
             <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="spinner" style="width: 13px; height: 13px; border-width: 2px; border-top-color: #fbbf24;"></span>
+              <span style="color: #fbbf24; font-weight: 800; font-size: 12px;">Đang Xử Lý</span>
+            </div>
+            <span style="font-size: 11px; color: #fde68a; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${String(step).replace(/"/g, "&quot;")}">
+              ${step}
+            </span>
+          </div>
+        `;
+      } else if (h.status === "failed") {
+        liveSectionHtml = `
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
               <span style="font-size: 13px;">🔴</span>
               <span style="color: var(--accent-rose); font-weight: 700; font-size: 12px;">Thất Bại</span>
+              <button class="btn btn-primary btn-sm" style="padding: 2px 8px; font-size: 10px; font-weight: 700; background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); border-color: #f59e0b;" onclick="retryFailedDeploy('${h.taskId || h.id}')" title="Nạp Spaceship (nếu hết tiền) rồi thử lại">
+                🔄 Thử Lại
+              </button>
             </div>
-            <span style="font-size: 11px; color: var(--accent-rose); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${h.error || ""}">
+            <span style="font-size: 11px; color: var(--accent-rose); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${String(h.error || "").replace(/"/g, "&quot;")}">
               ${h.error || "Lỗi cấu hình"}
             </span>
           </div>
@@ -3255,29 +3705,36 @@ function renderHistoryTable() {
           </div>
         `;
       } else {
-        // Dưới 15 phút: Đang chờ xử lý ngầm bình thường
-        let remainingMinutes = Math.max(1, Math.round(15 - ageMinutes));
+        // Đã xong job nhưng chờ HTTP 200 — hiện lỗi thật nếu có (403/1014/522...)
+        const errRaw = String(h.lastCheckError || "").trim();
+        const isBanned1014 = /1014|cross-user|banned/i.test(errRaw) || /HTTP 403/i.test(errRaw);
+        const errLabel = isBanned1014
+          ? "Lỗi Cloudflare 1014 (CNAME/Pages lệch)"
+          : errRaw
+          ? errRaw
+          : `Đang cấp SSL/DNS (chờ tối đa ${Math.max(1, Math.round(15 - ageMinutes))}p)`;
         liveSectionHtml = `
           <div style="display: flex; flex-direction: column; gap: 3px;">
             <div style="display: flex; align-items: center; gap: 6px;">
-              <span class="spinner" style="width: 13px; height: 13px; border-width: 2px; border-top-color: var(--accent-cyan);"></span>
-              <span style="color: var(--accent-cyan); font-size: 11px; font-weight: 700;">Đang Xử Lý Ngầm...</span>
+              <span class="spinner" style="width: 13px; height: 13px; border-width: 2px; border-top-color: ${isBanned1014 ? "var(--accent-rose)" : "var(--accent-cyan)"};"></span>
+              <span style="color: ${isBanned1014 ? "var(--accent-rose)" : "var(--accent-cyan)"}; font-size: 11px; font-weight: 700;">${isBanned1014 ? "Chưa Live (1014)" : "Đang Xử Lý..."}</span>
               <button class="btn btn-secondary btn-sm" style="padding: 1px 6px; font-size: 10px; border-color: rgba(6, 182, 212, 0.4);" onclick="verifyDomainNow('${h.id}', '${h.domain}')" title="Kiểm tra trạng thái ngay">
                 🔄 Check
               </button>
             </div>
-            <span style="font-size: 10px; color: var(--text-dim); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="Hệ thống đang cấp DNS & SSL Cloudflare. Chờ tối đa 15 phút trước khi thông báo.">
-              Đang cấp SSL/DNS (chờ tối đa ${remainingMinutes}p)
+            <span style="font-size: 10px; color: ${isBanned1014 ? "#fda4af" : "var(--text-dim)"}; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${String(errLabel).replace(/"/g, "&quot;")}">
+              ${errLabel}
             </span>
           </div>
         `;
       }
 
       const hasLogs = Array.isArray(h.repairLogs) && h.repairLogs.length > 0;
+      const rowBusy = h.status === "in_progress" || h.status === "pending";
 
       return `
-        <tr>
-          <td style="color: var(--text-dim); font-family: var(--font-mono);">${index + 1}</td>
+        <tr style="${rowBusy ? "background: rgba(245, 158, 11, 0.08);" : ""}">
+          <td style="color: var(--text-dim); font-family: var(--font-mono);">${rowOffset + index + 1}</td>
           <td style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap;">
             ${formattedDate}
             ${histIdHtml}
@@ -3370,8 +3827,7 @@ function openRepairLogsModal(domain) {
 }
 
 async function autoRepairDomainNow(id, domain, isFullRebuild = false) {
-  const label = isFullRebuild ? "tái triển khai toàn diện từ A-Z" : "tự động sửa lỗi";
-  showToast(`🔧 Đang ${label} cho [${domain}]...`);
+  showProcessingToast(domain);
   try {
     const res = await fetch("/api/auto-repair", {
       method: "POST",
@@ -3380,12 +3836,12 @@ async function autoRepairDomainNow(id, domain, isFullRebuild = false) {
     });
     const data = await res.json();
     if (data.success && data.repaired) {
-      showToast(`🎉 [${domain}] ĐÃ TỰ ĐỘNG LÀM XONG! Đang kiểm tra trạng thái 200 OK...`);
+      showToast(`🎉 [${domain}] ĐÃ TỰ ĐỘNG LÀM XONG! Đang kiểm tra trạng thái 200 OK...`, "success");
       fetchHistory();
       // Kích hoạt kiểm tra trạng thái ngay sau khi sửa
       setTimeout(() => verifyDomainNow(id, domain), 3000);
     } else {
-      showToast(`⚠️ Sửa lỗi: ${data.error || "Không thể tự động sửa lỗi"}`);
+      showToast(`⚠️ Sửa lỗi: ${data.error || "Không thể tự động sửa lỗi"}`, "error");
       fetchHistory();
     }
   } catch (err) {
@@ -3441,28 +3897,14 @@ function quickInspectFromHistory(domain) {
 }
 
 // Event Listeners cho History Tab
-if (historySearchInput) {
-  historySearchInput.addEventListener("input", (e) => {
-    currentHistorySearch = e.target.value.trim();
-    if (clearHistorySearch) {
-      clearHistorySearch.style.display = currentHistorySearch ? "block" : "none";
-    }
-    renderHistoryTable();
-  });
+if (historySearchInput && !historySearchInput.dataset.paginationBound) {
+  historySearchInput.dataset.paginationBound = "1";
 }
 
-if (clearHistorySearch) {
-  clearHistorySearch.addEventListener("click", () => {
-    if (historySearchInput) historySearchInput.value = "";
-    currentHistorySearch = "";
-    clearHistorySearch.style.display = "none";
-    renderHistoryTable();
-  });
-}
-
-if (refreshHistoryBtn) {
+if (refreshHistoryBtn && !refreshHistoryBtn.dataset.paginationBound) {
+  refreshHistoryBtn.dataset.paginationBound = "1";
   refreshHistoryBtn.addEventListener("click", () => {
-    fetchHistory();
+    fetchHistory(historyPage);
     showToast("🔄 Đã cập nhật lại lịch sử!");
   });
 }
@@ -3496,40 +3938,76 @@ function copyText(text) {
   });
 }
 
-// Toast helper
+// Toast helper — type: processing | success | error | info | auto
 let toastTimeout = null;
-function showToast(msg) {
+
+function inferToastType(msg) {
+  const s = String(msg || "");
+  if (/^(❌|⚠️\s*Lỗi|⚠️\s*CẢNH|⚠️\s*Token không)/.test(s) || s.includes("thất bại") || s.includes("Thất bại") || s.includes("Lỗi kết nối") || s.includes("Lỗi:")) {
+    if (s.startsWith("⚠️ Vui lòng") || s.startsWith("⚠️ Không") || s.startsWith("⚠️ Tiến trình") || s.startsWith("ℹ️")) return "info";
+    if (s.startsWith("❌") || s.includes("Lỗi") || s.includes("thất bại") || s.includes("Thất bại")) return "error";
+  }
+  if (/^(✅|🎉|✨|🗑️)/.test(s) || s.includes("thành công") || s.includes("Thành công") || s.includes("hoàn tất") || s.includes("Hoàn tất")) {
+    return "success";
+  }
+  if (/^(🚀|⏳|🔄|⚡ Đang|🩺 Đang|🔧 Đang|📥 Đang)/.test(s) || s.includes("Đang xử lý") || s.includes("đang được xử lý") || s.includes("tiếp nhận")) {
+    return "processing";
+  }
+  return "info";
+}
+
+function showToast(msg, type = "auto") {
   const toast = document.getElementById("toast");
   const toastMessage = document.getElementById("toastMessage");
+  const toastIcon = document.getElementById("toastIcon");
   if (!toast || !toastMessage) return;
+
+  const resolved = type === "auto" ? inferToastType(msg) : type;
+  toast.classList.remove("toast-processing", "toast-success", "toast-error", "toast-info");
+  toast.classList.add(`toast-${resolved}`);
+
+  const icons = {
+    processing: "⏳",
+    success: "✅",
+    error: "❌",
+    info: "✨",
+  };
+  if (toastIcon) toastIcon.textContent = icons[resolved] || "✨";
 
   toastMessage.textContent = msg;
   toast.classList.add("show");
 
   if (toastTimeout) clearTimeout(toastTimeout);
+  const holdMs = resolved === "processing" ? 5500 : resolved === "error" ? 5000 : 4000;
   toastTimeout = setTimeout(() => {
     toast.classList.remove("show");
-  }, 4000);
+  }, holdMs);
 }
 
+/** Toast vàng chuẩn khi bấm nút chạy tác vụ nền */
+function showProcessingToast(detail) {
+  const extra = detail ? ` (${detail})` : "";
+  showToast(
+    `⏳ Đang xử lý${extra} — chưa xong. Xem kết quả ở Tiến trình / Lịch sử (thành công hoặc thất bại).`,
+    "processing"
+  );
+}
+
+window.showProcessingToast = showProcessingToast;
+
 // ── 8. USER AUTHENTICATION & WALLET CONTROLLER ─────────────────────────────
-let currentUser = {
-  id: "u_admin",
-  username: "admin",
-  fullName: "Tổng Quản Trị (Admin)",
-  role: "admin",
-  balance: 0,
-};
 let authToken = localStorage.getItem("freze_auth_token") || "";
 let isAuthRegisterMode = false;
 
-
-
 async function checkAuth() {
   authToken = localStorage.getItem("freze_auth_token") || "";
+  authReady = false;
+  currentUser = null;
+  document.body.classList.remove("auth-ready", "user-is-admin", "user-is-member");
+
   if (!authToken) {
     window.location.href = "/login";
-    return;
+    return false;
   }
 
   try {
@@ -3537,14 +4015,20 @@ async function checkAuth() {
     const data = await res.json();
     if (data.success && data.user) {
       currentUser = { ...data.user, balance: data.balance || 0 };
+      authReady = true;
+      document.body.classList.remove("auth-pending");
+      document.body.classList.add("auth-ready");
+      document.body.classList.add(currentUser.role === "admin" ? "user-is-admin" : "user-is-member");
       updateUserUI();
-    } else {
-      localStorage.removeItem("freze_auth_token");
-      window.location.href = "/login";
+      return true;
     }
+    localStorage.removeItem("freze_auth_token");
+    window.location.href = "/login";
+    return false;
   } catch {
-    // If offline or error, allow viewing
-    updateUserUI();
+    localStorage.removeItem("freze_auth_token");
+    window.location.href = "/login";
+    return false;
   }
 }
 
@@ -3561,6 +4045,8 @@ function switchToTab(tabId) {
 }
 
 function updateUserUI() {
+  if (!authReady || !currentUser) return;
+
   const userNameText = document.getElementById("userNameText");
   const userRoleTag = document.getElementById("userRoleTag");
   const userBalanceText = document.getElementById("userBalanceText");
@@ -3572,10 +4058,10 @@ function updateUserUI() {
 
   const isAdmin = currentUser.role === "admin";
 
-  if (userNameText) userNameText.textContent = currentUser.username || "admin";
+  if (userNameText) userNameText.textContent = currentUser.username || "—";
   if (userRoleTag) {
-    userRoleTag.textContent = (currentUser.role || "ADMIN").toUpperCase();
-    userRoleTag.className = `user-role-tag ${currentUser.role || "admin"}`;
+    userRoleTag.textContent = (currentUser.role || "user").toUpperCase();
+    userRoleTag.className = `user-role-tag ${currentUser.role === "admin" ? "admin" : "user"}`;
   }
   const balNum = typeof currentUser.balance === "number" ? currentUser.balance : 0;
   const balFormatted = balNum.toLocaleString("vi-VN");
@@ -3584,7 +4070,7 @@ function updateUserUI() {
   if (userBalanceText) userBalanceText.textContent = `${balFormatted} Xu`;
   if (walletCardBalance) walletCardBalance.textContent = `${balFormatted} Xu`;
   if (walletCardVnd) walletCardVnd.textContent = `≈ ${balVnd} VNĐ (1 Xu = 1.000 đ)`;
-  if (walletCardRole) walletCardRole.textContent = (currentUser.role || "ADMIN").toUpperCase();
+  if (walletCardRole) walletCardRole.textContent = (currentUser.role || "user").toUpperCase();
   if (clonerCurrentBalanceText) clonerCurrentBalanceText.textContent = `${balFormatted} Xu`;
 
   if (adminSection) {
@@ -3599,7 +4085,7 @@ function updateUserUI() {
 
   if (navTabBuyLabel) navTabBuyLabel.textContent = isAdmin ? "Mua Tên Miền" : "Tra Cứu & Mua Miền";
   if (navTabDomainsLabel) navTabDomainsLabel.textContent = isAdmin ? "Quản Lý Domain" : "Tên Miền Của Tôi";
-  if (navTabTasksLabel) navTabTasksLabel.textContent = isAdmin ? "Tiến Trình Ngầm" : "Tiến Trình Của Tôi";
+  if (navTabTasksLabel) navTabTasksLabel.textContent = isAdmin ? "Tiến Trình" : "Tiến Trình";
   if (navTabWalletLabel) navTabWalletLabel.textContent = isAdmin ? "Ví & Thành Viên" : "Ví & Nạp VietQR";
 
   // Hide or Show admin tabs
@@ -3618,8 +4104,61 @@ function updateUserUI() {
     renderTemplates();
   }
 
+  const userOrderHint = document.getElementById("userOrderFlowHint");
+  if (userOrderHint) userOrderHint.style.display = "none";
+
+  const buySectionDesc = document.getElementById("tabBuySectionDesc");
+  if (buySectionDesc) {
+    buySectionDesc.textContent = isAdmin
+      ? "Mua tên miền và tự động kết nối Cloudflare DNS, SSL, Landing Page hoặc 302."
+      : "Tra cứu tên miền còn trống, xem báo giá và gửi yêu cầu mua. Theo dõi đơn tại tab Ví.";
+  }
+
+  const buyTab = document.getElementById("tab-buy");
+  if (buyTab) {
+    buyTab.querySelectorAll('.sub-pill[data-sub="buy-lp"], .sub-pill[data-sub="buy-302"]').forEach((el) => {
+      el.style.display = isAdmin ? "inline-flex" : "none";
+    });
+    document.querySelectorAll(".admin-buy-target-group").forEach((g) => {
+      g.style.display = isAdmin ? "block" : "none";
+    });
+    if (!isAdmin) {
+      const checkPill = buyTab.querySelector('.sub-pill[data-sub="check-batch"]');
+      if (checkPill && !checkPill.classList.contains("active")) checkPill.click();
+      ["form-buy-lp", "form-buy-302"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = "none";
+      });
+    } else {
+      loadAdminTargetUserOptions();
+    }
+  }
+
+  const userOrdersPanel = document.getElementById("userDomainOrdersPanel");
+  if (userOrdersPanel) userOrdersPanel.style.display = isAdmin ? "none" : "block";
+
+  loadDomainOrdersList();
+
   // Load wallet & transactions
   loadWalletData();
+}
+
+async function loadAdminTargetUserOptions() {
+  if (!currentUser || currentUser.role !== "admin") return;
+  try {
+    const res = await fetch("/api/admin/users", { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.success || !Array.isArray(data.users)) return;
+    const opts = ['<option value="">— Gán cho chính Admin —</option>'].concat(
+      data.users
+        .filter((u) => u.role !== "admin" && u.id !== "u_admin")
+        .map((u) => `<option value="${u.id}">${u.username}${u.fullName ? ` (${u.fullName})` : ""}</option>`)
+    );
+    ["buyLpTargetUser", "buy302TargetUser"].forEach((id) => {
+      const sel = document.getElementById(id);
+      if (sel) sel.innerHTML = opts.join("");
+    });
+  } catch {}
 }
 
 // ── 4B. BATCH DOMAIN AVAILABILITY & PRICING CHECKER ─────────────────────────
@@ -3690,8 +4229,10 @@ function renderBatchCheckResultsTable(data) {
       }
     }
 
+    const isAdmin = isAdminUser();
     const actionButtons = isAvail
-      ? `
+      ? isAdmin
+        ? `
         <div style="display: flex; gap: 6px; justify-content: flex-end;">
           <button class="btn btn-primary btn-sm" onclick="quickSelectBuyFromBatch('${r.domain}', 'lp')" title="Mua và gán vào Landing Page">
             🎨 Mua & Gán LP
@@ -3700,6 +4241,9 @@ function renderBatchCheckResultsTable(data) {
             ⚡ Mua 302
           </button>
         </div>
+      `
+        : `
+        ${buildOrderDomainButtonHtml({ domain: r.domain, priceXu: r.priceXu || 250, ruleApplied: r.ruleApplied || "Quy chuẩn" })}
       `
       : `<span style="color: var(--text-dim); font-size: 12px;">🔒 Không thể mua</span>`;
 
@@ -3739,6 +4283,10 @@ function clearBatchDomainCheck() {
 }
 
 function quickSelectBuyFromBatch(domain, mode = "lp") {
+  if (!isAdminUser()) {
+    openConfirmDomainPurchaseModal(domain, 250, "", { deployMode: mode === "302" ? "302" : "LP" });
+    return;
+  }
   if (mode === "302") {
     document.querySelector('.sub-pill[data-sub="buy-302"]')?.click();
     const domInput = document.getElementById("buy302Domain");
@@ -3845,8 +4393,8 @@ async function loadTransactions() {
         <tr>
           <td><span style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">${new Date(t.timestamp).toLocaleString("vi-VN")}</span></td>
           <td><span class="user-role-tag ${t.type === "TOPUP" ? "admin" : "user"}">${t.type}</span></td>
-          <td style="font-weight: 700; color: ${color};">${sign}${t.amount.toFixed(2)}$</td>
-          <td style="font-weight: 600; color: #fff;">${t.newBalance.toFixed(2)}$</td>
+          <td style="font-weight: 700; color: ${color};">${sign}${Number(t.amount).toLocaleString("vi-VN")} Xu</td>
+          <td style="font-weight: 600; color: #fff;">${Number(t.newBalance).toLocaleString("vi-VN")} Xu</td>
           <td style="color: var(--text-muted);">${t.note || "-"}</td>
         </tr>
       `;
@@ -3870,7 +4418,7 @@ async function loadUsersList() {
 
     if (topupUserSelect) {
       topupUserSelect.innerHTML = allUsersCache.map((u) => `
-        <option value="${u.id}">${u.username} (${u.fullName}) - Số dư: ${u.balance.toFixed(2)}$</option>
+        <option value="${u.id}">${u.username} (${u.fullName}) - Số dư: ${(u.balance || 0).toLocaleString("vi-VN")} Xu</option>
       `).join("");
     }
 
@@ -3886,15 +4434,15 @@ async function loadUsersList() {
         <td>${u.fullName || "-"}</td>
         <td><span class="user-role-tag ${u.role}">${u.role.toUpperCase()}</span></td>
         <td><span class="badge-status ${u.status === 'active' ? 'badge-success' : 'badge-danger'}">${u.status === 'active' ? '🟢 Hoạt Động' : '🔴 Tạm Khóa'}</span></td>
-        <td style="font-weight: 700; color: var(--accent-emerald);">${u.balance.toFixed(2)}$</td>
+        <td style="font-weight: 700; color: var(--accent-emerald);">${(u.balance || 0).toLocaleString("vi-VN")} Xu</td>
         <td style="font-weight: 600; color: var(--accent-cyan);">${u.domainCount || 0} tên miền</td>
         <td>
           <div style="display: flex; gap: 6px;">
             <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.id}')" title="Sửa thông tin hoặc đổi mật khẩu">
               ✏️ Sửa
             </button>
-            <button class="btn btn-secondary btn-sm" onclick="quickTopupForUser('${u.id}', '${u.username}')" title="Nạp tiền trực tiếp">
-              💵 Nạp
+            <button class="btn btn-secondary btn-sm" onclick="quickTopupForUser('${u.id}', '${u.username}')" title="Admin cộng Xu trực tiếp cho user này">
+              💵 Cộng Xu
             </button>
             ${u.username !== "admin" ? `
             <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}', '${u.username}')" title="Xóa tài khoản">
@@ -3998,12 +4546,67 @@ async function deleteUser(userId, username) {
 }
 
 // ── 8B. DOMAIN OWNERSHIP ASSIGNMENT ────────────────────────────────────────
-function openDomainAssignModal(domainToPreselect = "") {
+function parseAssignDomainList(raw) {
+  const text = String(raw || "");
+  const parts = text
+    .split(/[\n\r,;\t]+/)
+    .map((s) =>
+      s
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, "")
+        .replace(/\/.*$/, "")
+        .replace(/^www\./, "")
+        .replace(/^\d+[\.\):\-\s]+/, "")
+        .trim()
+    )
+    .filter((s) => s && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(s));
+  return [...new Set(parts)];
+}
+
+function refreshAssignDomainParsedCount() {
+  const ta = document.getElementById("assignDomainList");
+  const countEl = document.getElementById("assignDomainParsedCount");
+  if (!countEl) return;
+  const n = parseAssignDomainList(ta?.value || "").length;
+  countEl.textContent = String(n);
+}
+
+function addSelectedDomainToAssignList() {
+  const sel = document.getElementById("assignDomainSelect");
+  const ta = document.getElementById("assignDomainList");
+  const dom = (sel?.value || "").trim().toLowerCase();
+  if (!dom || !ta) return;
+  const existing = parseAssignDomainList(ta.value);
+  if (existing.includes(dom)) {
+    showToast(`ℹ️ [${dom}] đã có trong list`);
+    return;
+  }
+  ta.value = existing.length ? `${existing.join("\n")}\n${dom}` : dom;
+  refreshAssignDomainParsedCount();
+  showToast(`➕ Đã thêm [${dom}] vào list`);
+}
+
+async function openDomainAssignModal(domainToPreselect = "") {
   const domainSelect = document.getElementById("assignDomainSelect");
-  if (domainSelect && allDomains.length > 0) {
-    domainSelect.innerHTML = allDomains.map((d) => `
-      <option value="${d.domain}" ${d.domain === domainToPreselect ? "selected" : ""}>${d.domain} (${d.primaryFolder || d.templateName || "302"})</option>
-    `).join("");
+  const ta = document.getElementById("assignDomainList");
+  if (ta) {
+    ta.value = domainToPreselect ? String(domainToPreselect).trim().toLowerCase().replace(/^www\./, "") : "";
+    ta.oninput = refreshAssignDomainParsedCount;
+    refreshAssignDomainParsedCount();
+  }
+  if (domainSelect) {
+    domainSelect.innerHTML = `<option value="">Đang tải danh sách...</option>`;
+    try {
+      const res = await fetch("/api/domains-list?all=1&fields=names", { headers: authHeaders() });
+      const data = await res.json();
+      const names = Array.isArray(data.domains) ? data.domains : [];
+      domainSelect.innerHTML =
+        `<option value="">-- Chọn để thêm vào list --</option>` +
+        names.map((dom) => `<option value="${dom}">${dom}</option>`).join("");
+    } catch {
+      domainSelect.innerHTML = `<option value="">Không tải được danh sách</option>`;
+    }
   }
   loadUsersList();
   openModal("domainAssignModal");
@@ -4011,23 +4614,35 @@ function openDomainAssignModal(domainToPreselect = "") {
 
 async function handleDomainAssignSubmit(e) {
   e.preventDefault();
-  const domain = document.getElementById("assignDomainSelect")?.value;
   const userId = document.getElementById("assignUserSelect")?.value;
+  const domains = parseAssignDomainList(document.getElementById("assignDomainList")?.value || "");
+  const btn = document.getElementById("btnConfirmAssignDomains");
 
-  if (!domain || !userId) {
-    showToast("❌ Vui lòng chọn đầy đủ domain và thành viên");
+  if (!domains.length || !userId) {
+    showToast("❌ Dán ít nhất 1 tên miền hợp lệ và chọn thành viên");
     return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = `Đang gán ${domains.length} miền...`;
   }
 
   try {
     const res = await fetch("/api/admin/assign-domain", {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ domain, userId }),
+      body: JSON.stringify({ domains, userId }),
     });
     const data = await res.json();
     if (data.success) {
-      showToast(`✅ Đã gán quyền quản lý [${domain}] cho thành viên!`);
+      const ok = data.assignedCount ?? domains.length;
+      const fail = Array.isArray(data.failed) ? data.failed.length : 0;
+      showToast(
+        fail
+          ? `✅ Đã gán ${ok} miền, ${fail} lỗi`
+          : `✅ Đã gán ${ok} tên miền cho thành viên!`
+      );
       closeModal("domainAssignModal");
       fetchDomains();
       loadUsersList();
@@ -4036,6 +4651,11 @@ async function handleDomainAssignSubmit(e) {
     }
   } catch (err) {
     showToast(`❌ Lỗi kết nối: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Xác Nhận Gán Domain";
+    }
   }
 }
 
@@ -4089,8 +4709,52 @@ function stopTopupBalancePoll() {
   }
 }
 
-function quickTopupForUser(userId, username) {
-  openTopupModal();
+async function quickTopupForUser(userId, username) {
+  if (!userId) {
+    showToast("❌ Thiếu userId", "error");
+    return;
+  }
+  if (currentUser?.role !== "admin") {
+    showToast("❌ Chỉ Admin được cộng Xu cho thành viên", "error");
+    return;
+  }
+
+  const raw = prompt(
+    `Cộng Xu trực tiếp cho @${username}\n(Không mở QR admin — ghi đúng ví user này)\n\nNhập số Xu (> 0):`,
+    "300"
+  );
+  if (raw === null) return;
+  const amount = parseFloat(String(raw).replace(/,/g, "").trim());
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showToast("❌ Số Xu không hợp lệ", "error");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/admin/wallet/topup", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        userId,
+        amount,
+        note: `Admin cộng ${amount} Xu cho @${username}`,
+      }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      showToast(`❌ Cộng Xu thất bại: ${data.error || "Lỗi"}`, "error");
+      return;
+    }
+    showToast(
+      `✅ Đã cộng +${amount.toLocaleString("vi-VN")} Xu cho @${username}. Số dư user: ${Number(data.balance).toLocaleString("vi-VN")} Xu`,
+      "success"
+    );
+    await loadUsersList();
+    await loadTransactions();
+    if (typeof checkAuth === "function") checkAuth();
+  } catch (err) {
+    showToast(`❌ Lỗi kết nối: ${err.message}`, "error");
+  }
 }
 
 function setTopupAmount(amt) {
@@ -4132,7 +4796,11 @@ async function simulatePaymentWebhook() {
   const amountXu = parseFloat(document.getElementById("topupAmountInput")?.value || "100");
   const username = currentUser.username || "admin";
 
-  showToast(`⚡ Đang gửi tín hiệu Webhook giả lập nạp ${amountXu} Xu qua ngân hàng...`);
+  if (!confirm(`⚠️ SIMULATE sẽ cộng Xu vào ví @${username} (user đang đăng nhập), KHÔNG phải thành viên khác.\n\nChỉ dùng để test webhook. Tiếp tục nạp ${amountXu} Xu?`)) {
+    return;
+  }
+
+  showToast(`⚡ Đang gửi tín hiệu Webhook giả lập nạp ${amountXu} Xu...`, "processing");
   try {
     const res = await fetch("/api/wallet/simulate-pay", {
       method: "POST",
@@ -4141,37 +4809,297 @@ async function simulatePaymentWebhook() {
     });
     const data = await res.json();
     if (data.success) {
-      showToast(`🎉 TỰ ĐỘNG NẠP XU THÀNH CÔNG! Số dư mới: ${data.result.newBalance.toLocaleString("vi-VN")} Xu`);
-      checkAuth();
+      showToast(
+        `✅ Simulate OK cho @${username}: +${amountXu.toLocaleString("vi-VN")} Xu → số dư ${Number(data.result.newBalance).toLocaleString("vi-VN")} Xu`,
+        "success"
+      );
+      await checkAuth();
+      await loadTransactions();
+      stopTopupBalancePoll();
       closeModal("topupModal");
     } else {
-      showToast(`❌ Lỗi webhook: ${data.error}`);
+      showToast(`❌ Lỗi webhook: ${data.error}`, "error");
     }
   } catch (err) {
-    showToast(`❌ Lỗi kết nối: ${err.message}`);
+    showToast(`❌ Lỗi kết nối: ${err.message}`, "error");
   }
 }
 
 // ── 9. TASK QUEUE CONTROLLER & REAL-TIME POLLING ───────────────────────────
 let allTasks = [];
+let hubOrdersCache = [];
+let hubOptimisticTasks = new Map();
 let taskPollingInterval = null;
+const TASK_POLL_FAST_MS = 1200;
+const TASK_POLL_SLOW_MS = 4000;
+let tasksQueuePage = 1;
+const TASKS_PAGE_SIZE = 8;
+let tasksQueueFilter = "active"; // active | done | all
+
+function isTaskRunningStatus(s) {
+  return s === "RUNNING" || s === "PENDING";
+}
+function isTaskTerminalStatus(s) {
+  return s === "SUCCESS" || s === "FAILED" || s === "CANCELLED";
+}
+function domainKeyOf(t) {
+  return String(t?.domain || t?.id || "")
+    .toLowerCase()
+    .replace(/^www\./, "");
+}
+
+function pushOptimisticHubTask({ domain, title, label }) {
+  const key = String(domain || "").toLowerCase();
+  if (!key) return;
+  hubOptimisticTasks.set(key, {
+    id: `opt_${Date.now()}`,
+    title: title || label || `Đang xử lý — ${domain}`,
+    domain,
+    status: "RUNNING",
+    progress: 5,
+    currentStep: label || "Đang gửi yêu cầu lên server...",
+    steps: [{ time: new Date().toISOString(), message: label || "Đang gửi yêu cầu lên server...", status: "info" }],
+    createdAt: new Date().toISOString(),
+    _optimistic: true,
+  });
+  tasksQueuePage = 1;
+  tasksQueueFilter = "active";
+  renderTasks();
+  updateTaskBadge();
+}
+
+function mergeHubTaskFromApi(task) {
+  if (!task?.id) return;
+  const key = String(task.domain || "").toLowerCase();
+  if (key) hubOptimisticTasks.delete(key);
+  const idx = allTasks.findIndex((t) => t.id === task.id);
+  if (idx >= 0) allTasks[idx] = task;
+  else allTasks.unshift(task);
+  renderTasks();
+  updateTaskBadge();
+}
+
+function syncOptimisticTasksFromServer(tasks) {
+  const serverDomains = new Set((tasks || []).map((t) => String(t.domain || "").toLowerCase()).filter(Boolean));
+  for (const key of hubOptimisticTasks.keys()) {
+    if (serverDomains.has(key)) hubOptimisticTasks.delete(key);
+  }
+  const now = Date.now();
+  for (const [key, t] of hubOptimisticTasks.entries()) {
+    const age = now - new Date(t.createdAt || 0).getTime();
+    if (age > 3 * 60 * 1000) hubOptimisticTasks.delete(key);
+  }
+}
+
+function rescheduleTaskPolling() {
+  const running = getDisplayTasks().filter((t) => isTaskRunningStatus(t.status)).length;
+  const ms = running > 0 ? TASK_POLL_FAST_MS : TASK_POLL_SLOW_MS;
+  if (taskPollingInterval) clearInterval(taskPollingInterval);
+  taskPollingInterval = setInterval(() => {
+    loadTasksList();
+  }, ms);
+}
 
 async function loadTasksList() {
   try {
-    const res = await fetch("/api/tasks", { headers: authHeaders() });
-    const data = await res.json();
+    await fetchHistorySilent().catch(() => {});
+    const [tasksRes, ordersRes] = await Promise.all([
+      fetch("/api/tasks", { headers: authHeaders() }),
+      fetch("/api/domain-orders", { headers: authHeaders() }).catch(() => null),
+    ]);
+    const data = await tasksRes.json();
     if (data.success) {
       allTasks = data.tasks || [];
-      renderTasks();
-      updateTaskBadge();
+      syncOptimisticTasksFromServer(allTasks);
     }
+    if (ordersRes?.ok) {
+      const ordersData = await ordersRes.json();
+      hubOrdersCache = ordersData.success && Array.isArray(ordersData.orders) ? ordersData.orders : [];
+    }
+    renderTasks();
+    updateTaskBadge();
+    rescheduleTaskPolling();
   } catch {}
+}
+
+function getPendingOrdersAsTasks() {
+  return (hubOrdersCache || [])
+    .filter((o) => o.status === "pending" || (o.status === "approved" && !o.fulfilledAt))
+    .map((o) => ({
+      id: o.id,
+      title:
+        o.status === "pending"
+          ? `🛒 Đặt mua — ${o.domain}`
+          : `⚙️ Admin đang cài — ${o.domain}`,
+      domain: o.domain,
+      status: o.status === "pending" ? "PENDING" : "RUNNING",
+      progress: o.status === "pending" ? 20 : 60,
+      currentStep:
+        o.status === "pending"
+          ? `Chờ duyệt • ${(o.priceXu || 0).toLocaleString("vi-VN")} Xu`
+          : "Admin đã duyệt — đang mua & cài đặt",
+      steps: [
+        {
+          time: o.createdAt || new Date().toISOString(),
+          message:
+            o.status === "pending"
+              ? `Chờ duyệt • ${(o.priceXu || 0).toLocaleString("vi-VN")} Xu`
+              : "Admin đã duyệt — đang mua & cài đặt",
+          status: "info",
+        },
+      ],
+      createdAt: o.createdAt || new Date().toISOString(),
+      userId: o.userId,
+      username: o.username,
+      _fromOrder: true,
+    }));
+}
+
+function getHistoryProgressAsTasks() {
+  const tasksById = new Map(allTasks.map((t) => [t.id, t]));
+  const terminalDomains = new Set(
+    allTasks
+      .filter((t) => isTaskTerminalStatus(t.status))
+      .map((t) => domainKeyOf(t))
+      .filter(Boolean)
+  );
+  const now = Date.now();
+  return (allHistory || [])
+    .filter((h) => {
+      if (h.status !== "in_progress" && h.status !== "pending") return false;
+      if (h.taskId && tasksById.has(h.taskId)) {
+        const t = tasksById.get(h.taskId);
+        if (isTaskTerminalStatus(t.status) || isTaskRunningStatus(t.status)) return false;
+      }
+      const key = String(h.domain || "")
+        .toLowerCase()
+        .replace(/^www\./, "");
+      if (key && terminalDomains.has(key)) {
+        const term = allTasks.find((t) => domainKeyOf(t) === key && isTaskTerminalStatus(t.status));
+        const termTs = term?.finishedAt ? new Date(term.finishedAt).getTime() : 0;
+        const histTs = new Date(h.updatedAt || h.timestamp || 0).getTime();
+        if (termTs && termTs >= histTs) return false;
+      }
+      const age = now - new Date(h.updatedAt || h.timestamp || 0).getTime();
+      if (age > 2 * 60 * 60 * 1000) return false;
+      return true;
+    })
+    .map((h) => ({
+      id: h.taskId || h.id,
+      title: `${h.actionLabel || "Đang xử lý"} — ${h.domain}`,
+      domain: h.domain,
+      status: "RUNNING",
+      progress: typeof h.progressPct === "number" ? h.progressPct : 45,
+      currentStep: h.progress || h.details?.step || "Đang xử lý trên server...",
+      steps: [
+        {
+          time: h.timestamp || new Date().toISOString(),
+          message: h.progress || h.details?.step || "Đang xử lý trên server...",
+          status: "info",
+        },
+      ],
+      createdAt: h.timestamp || new Date().toISOString(),
+      userId: h.userId,
+      username: h.username || h.fullName,
+      _fromHistory: true,
+    }));
+}
+
+function getDisplayTasks() {
+  const merged = new Map();
+
+  const beats = (next, prev) => {
+    if (!prev) return true;
+    if (next._fromHistory && !prev._fromHistory && isTaskTerminalStatus(prev.status)) return false;
+    if (!next._fromHistory && prev._fromHistory && isTaskTerminalStatus(next.status)) return true;
+    if (!next._fromHistory && prev._fromHistory && isTaskRunningStatus(next.status)) return true;
+    if (next._fromHistory && !prev._fromHistory && isTaskRunningStatus(prev.status)) return false;
+    if (isTaskTerminalStatus(next.status) && isTaskRunningStatus(prev.status) && prev._fromHistory) return true;
+    if (isTaskRunningStatus(next.status) && next._fromHistory && isTaskTerminalStatus(prev.status)) return false;
+    return (next._pri || 0) > (prev._pri || 0);
+  };
+
+  const add = (t, pri) => {
+    const key = domainKeyOf(t);
+    if (!key) return;
+    const row = { ...t, _pri: pri };
+    const prev = merged.get(key);
+    if (beats(row, prev)) merged.set(key, row);
+  };
+
+  for (const t of hubOptimisticTasks.values()) add(t, 60);
+  allTasks.filter((t) => isTaskRunningStatus(t.status)).forEach((t) => add(t, 50));
+  getHistoryProgressAsTasks().forEach((t) => add(t, 35));
+  getPendingOrdersAsTasks().forEach((t) => add(t, 30));
+
+  allTasks
+    .filter((t) => isTaskTerminalStatus(t.status))
+    .forEach((t) => {
+      const fin = t.finishedAt ? new Date(t.finishedAt).getTime() : 0;
+      const keepMs = t.status === "FAILED" ? 6 * 60 * 60 * 1000 : 30 * 60 * 1000;
+      if (fin && Date.now() - fin < keepMs) add(t, 25);
+    });
+
+  const trackedDomains = new Set([...merged.keys()]);
+  for (const h of allHistory || []) {
+    if (h.status !== "failed" || !h.domain) continue;
+    const key = String(h.domain).toLowerCase().replace(/^www\./, "");
+    if (trackedDomains.has(key)) continue;
+    const ts = h.updatedAt || h.timestamp;
+    const age = ts ? Date.now() - new Date(ts).getTime() : Infinity;
+    if (age > 6 * 60 * 60 * 1000) continue;
+    add(
+      {
+        id: h.taskId || h.id,
+        title: `${h.actionLabel || "Thất bại"} — ${h.domain}`,
+        domain: h.domain,
+        status: "FAILED",
+        progress: 100,
+        currentStep: h.error || "Cài đặt thất bại",
+        steps: [
+          {
+            time: ts || new Date().toISOString(),
+            message: h.error || "Cài đặt thất bại",
+            status: "error",
+          },
+        ],
+        createdAt: h.timestamp || new Date().toISOString(),
+        finishedAt: ts || new Date().toISOString(),
+        error: h.error,
+        _fromHistory: true,
+      },
+      20
+    );
+  }
+
+  return Array.from(merged.values())
+    .sort((a, b) => {
+      const ar = isTaskRunningStatus(a.status) ? 1 : 0;
+      const br = isTaskRunningStatus(b.status) ? 1 : 0;
+      if (br !== ar) return br - ar;
+      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    })
+    .map(({ _pri, ...t }) => t);
+}
+
+function getFilteredDisplayTasks() {
+  const all = getDisplayTasks();
+  if (tasksQueueFilter === "active") return all.filter((t) => isTaskRunningStatus(t.status));
+  if (tasksQueueFilter === "done") return all.filter((t) => isTaskTerminalStatus(t.status));
+  return all;
+}
+
+function setTasksQueueFilter(filter) {
+  tasksQueueFilter = filter === "done" || filter === "all" ? filter : "active";
+  tasksQueuePage = 1;
+  renderTasks();
+  updateTaskBadge();
 }
 
 function updateTaskBadge() {
   const badge = document.getElementById("badgeTasksCount");
   const headerCount = document.getElementById("headerTaskCount");
-  const running = allTasks.filter((t) => t.status === "RUNNING" || t.status === "PENDING").length;
+  const running = getDisplayTasks().filter((t) => isTaskRunningStatus(t.status)).length;
 
   if (badge) {
     badge.textContent = running;
@@ -4179,73 +5107,118 @@ function updateTaskBadge() {
   }
 
   if (headerCount) {
-    headerCount.textContent = `${running} tác vụ ngầm`;
+    headerCount.textContent = running > 0 ? `${running} đang chạy` : "0 đang chạy";
     headerCount.style.color = running > 0 ? "var(--accent-amber)" : "var(--text-muted)";
   }
+
+  const mark = (id, on) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.outline = on ? "2px solid var(--accent-cyan)" : "";
+    el.style.opacity = on ? "1" : "0.75";
+  };
+  mark("tasksFilterActive", tasksQueueFilter === "active");
+  mark("tasksFilterDone", tasksQueueFilter === "done");
+  mark("tasksFilterAll", tasksQueueFilter === "all");
 }
 
 function renderTasks() {
   const container = document.getElementById("tasksListContainer");
   if (!container) return;
 
-  if (allTasks.length === 0) {
+  const filtered = getFilteredDisplayTasks();
+  const totalPages = Math.max(1, Math.ceil(filtered.length / TASKS_PAGE_SIZE));
+  if (tasksQueuePage > totalPages) tasksQueuePage = totalPages;
+  const start = (tasksQueuePage - 1) * TASKS_PAGE_SIZE;
+  const pageItems = filtered.slice(start, start + TASKS_PAGE_SIZE);
+
+  if (typeof renderPaginationBar === "function") {
+    renderPaginationBar(document.getElementById("tasksPagination"), {
+      page: tasksQueuePage,
+      totalPages,
+      total: filtered.length,
+      limit: TASKS_PAGE_SIZE,
+      onPage: (p) => {
+        tasksQueuePage = p;
+        renderTasks();
+      },
+      label: "tiến trình",
+    });
+  }
+
+  if (filtered.length === 0) {
+    const emptyMsg =
+      tasksQueueFilter === "done"
+        ? "Chưa có tiến trình vừa hoàn tất trong cửa sổ gần đây."
+        : tasksQueueFilter === "all"
+          ? "Hàng đợi trống."
+          : "Không có tiến trình đang chạy.";
     container.innerHTML = `
       <div class="empty-state" style="padding: 40px; text-align: center;">
         <span style="font-size: 40px;">☕</span>
-        <p style="margin-top: 10px; color: var(--text-muted);">Hiện tại không có tác vụ chạy ngầm nào.</p>
+        <p style="margin-top: 10px; color: var(--text-muted);">${emptyMsg}</p>
+        <p style="font-size: 12px; color: var(--text-dim); margin-top: 6px;">Mua / đổi link / đổi LP — xong chuyển sang Lịch sử.</p>
       </div>
     `;
     return;
   }
 
-  container.innerHTML = allTasks.map((t) => {
-    const statusClass = t.status.toLowerCase();
-    const statusLabel =
-      t.status === "SUCCESS"
-        ? "✅ HOÀN TẤT"
-        : t.status === "FAILED"
-        ? "❌ THẤT BẠI"
-        : t.status === "RUNNING"
-        ? "⏳ ĐANG XỬ LÝ"
-        : "⏱️ CHỜ XỬ LÝ";
+  container.innerHTML = pageItems
+    .map((t) => {
+      const statusClass = String(t.status || "").toLowerCase();
+      const statusLabel =
+        t.status === "SUCCESS"
+          ? "✅ HOÀN TẤT"
+          : t.status === "FAILED"
+            ? "❌ THẤT BẠI"
+            : t.status === "RUNNING"
+              ? "⏳ ĐANG XỬ LÝ"
+              : "⏱️ CHỜ XỬ LÝ";
 
-    const lastLog = t.steps && t.steps.length > 0 ? t.steps[t.steps.length - 1].message : t.currentStep;
+      const lastLog =
+        t.currentStep ||
+        (t.steps && t.steps.length > 0 ? t.steps[t.steps.length - 1].message : "") ||
+        "…";
+      const pct = Math.min(100, Math.max(0, Number(t.progress) || 0));
+      const safeId = String(t.id || "").replace(/'/g, "\\'");
 
-    return `
+      return `
       <div class="task-item-card ${statusClass}">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
           <div>
             <div style="display: flex; align-items: center; gap: 10px;">
-              <span class="user-role-tag ${t.status === "SUCCESS" ? "admin" : (t.status === "FAILED" ? "user" : "admin")}">${statusLabel}</span>
+              <span class="user-role-tag ${t.status === "SUCCESS" ? "admin" : t.status === "FAILED" ? "user" : "admin"}">${statusLabel}</span>
               <strong style="font-size: 15px; color: #fff;">${t.title}</strong>
             </div>
             <span style="font-size: 12px; color: var(--text-dim); margin-top: 4px; display: inline-block;">
-              Khởi tạo: ${new Date(t.createdAt).toLocaleString("vi-VN")} • Thực hiện bởi: <b>${t.userId}</b>
+              ${t.domain ? `<span style="font-family: var(--font-mono); color: #fbbf24;">${t.domain}</span> • ` : ""}
+              ${new Date(t.createdAt).toLocaleString("vi-VN")}
             </span>
           </div>
           <div style="display: flex; gap: 8px; align-items: center;">
-            ${t.status === "SUCCESS" && t.result?.template?.id ? `
-              <button class="btn btn-primary btn-sm" onclick="downloadTemplateZip('${t.result.template.id}')" style="background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%); border-color: #10b981; font-weight: 700;">
-                📥 Tải ZIP Mã Nguồn
-              </button>
-            ` : ""}
-            <button class="btn btn-secondary btn-sm" onclick="openTaskDetail('${t.id}')">
-              📜 Xem Nhật Ký Chi Tiết
-            </button>
+            ${
+              t.status === "SUCCESS" && t.result?.template?.id
+                ? `<button class="btn btn-primary btn-sm" onclick="downloadTemplateZip('${t.result.template.id}')" style="background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%); border-color: #10b981; font-weight: 700;">📥 Tải ZIP</button>`
+                : ""
+            }
+            ${
+              t.status === "FAILED"
+                ? `<button class="btn btn-primary btn-sm" onclick="retryFailedDeploy('${safeId}')" style="background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); border-color: #f59e0b; font-weight: 700;">🔄 Thử Lại</button>`
+                : ""
+            }
+            <button class="btn btn-secondary btn-sm" onclick="openTaskDetail('${safeId}')" ${t._fromHistory || t._fromOrder || t._optimistic ? "disabled title='Xem tab Lịch sử nếu cần'" : ""}>📜 Nhật ký</button>
           </div>
         </div>
-
         <div class="task-progress-track">
-          <div class="task-progress-bar ${statusClass}" style="width: ${t.progress || 0}%;"></div>
+          <div class="task-progress-bar ${statusClass}" style="width: ${pct}%;"></div>
         </div>
-
-        <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 6px;">
-          <span>👉 ${lastLog}</span>
-          <span style="font-weight: 700; color: #fff;">${t.progress || 0}%</span>
+        <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 6px; gap: 10px;">
+          <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">👉 ${lastLog}</span>
+          <span style="font-weight: 700; color: #fff; flex-shrink:0;">${pct}%</span>
         </div>
-      </div>
-    `;
-  }).join("");
+      </div>`;
+    })
+    .join("");
 }
 
 function openTaskDetail(taskId) {
@@ -4261,25 +5234,86 @@ function openTaskDetail(taskId) {
   if (sub) sub.textContent = `Trạng thái: ${task.status} (${task.progress}%) • Bắt đầu: ${new Date(task.createdAt).toLocaleTimeString()}`;
   if (pBar) {
     pBar.style.width = `${task.progress || 0}%`;
-    pBar.className = `task-progress-bar ${task.status.toLowerCase()}`;
+    pBar.className = `task-progress-bar ${String(task.status || "").toLowerCase()}`;
   }
   if (logs) {
-    logs.innerHTML = (task.steps || []).map((s) => `
+    logs.innerHTML = (task.steps || [])
+      .map(
+        (s) => `
       <div style="margin-bottom: 6px;">
         <span style="color: var(--text-dim);">[${new Date(s.time).toLocaleTimeString()}]</span>
-        <span style="color: ${s.status === "success" ? "var(--accent-emerald)" : (s.status === "error" ? "var(--accent-rose)" : "var(--text-main)")};">${s.message}</span>
-      </div>
-    `).join("");
+        <span style="color: ${s.status === "success" ? "var(--accent-emerald)" : s.status === "error" ? "var(--accent-rose)" : "var(--text-main)"};">${s.message}</span>
+      </div>`
+      )
+      .join("");
+    if (task.status === "FAILED") {
+      const safeId = String(task.id || "").replace(/'/g, "\\'");
+      logs.innerHTML += `
+        <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08);">
+          <button class="btn btn-primary btn-sm" onclick="closeModal('taskDetailModal'); retryFailedDeploy('${safeId}')" style="background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); border-color: #f59e0b; font-weight: 700;">
+            🔄 Thử Lại Mua / Cài
+          </button>
+        </div>`;
+    }
   }
 
   openModal("taskDetailModal");
 }
 
+/** Ghép lại args deploy từ task FAILED hoặc lịch sử failed */
+function buildRetryDeployArgs(refId) {
+  const id = String(refId || "");
+  const task = allTasks.find((t) => t.id === id);
+  const hist =
+    (allHistory || []).find((h) => h.id === id || h.taskId === id) ||
+    (task?.domain
+      ? (allHistory || []).find((h) => String(h.domain || "").toLowerCase() === String(task.domain).toLowerCase() && h.status === "failed")
+      : null);
+
+  if (task?.params?.domain || hist?.domain) {
+    const p = task?.params || {};
+    const mode = String(p.mode || p.type || task?.type || hist?.actionType || "").toUpperCase();
+    const buy =
+      p.isBuy === true ||
+      hist?.isBuy === true ||
+      mode.includes("BUY") ||
+      /mua/i.test(String(task?.title || hist?.actionLabel || ""));
+    return {
+      domain: p.domain || hist.domain,
+      link: p.link || hist?.link || "",
+      tele: p.tele || hist?.tele || p.link || hist?.link || "",
+      templateId: p.templateId || hist?.templateId || "",
+      isBuy: buy,
+      type: mode.includes("302") ? "302" : "lp",
+      spaceshipBuyConfirmed: false,
+      targetUserId: p.targetUserId || undefined,
+      orderId: p.orderId || undefined,
+    };
+  }
+  return null;
+}
+
+window.retryFailedDeploy = async function retryFailedDeploy(refId) {
+  const args = buildRetryDeployArgs(refId);
+  if (!args?.domain) {
+    showToast("❌ Không tìm thấy thông tin để thử lại (task/lịch sử).", "error");
+    return;
+  }
+  const ok = confirm(
+    `Thử lại ${args.isBuy ? "MUA & CÀI" : "CÀI"} cho [${args.domain}]?\n\n` +
+      `Nếu lỗi hết tiền Spaceship: nạp balance trước, rồi bấm OK để báo giá và mua lại.`
+  );
+  if (!ok) return;
+  showToast(`🔄 Đang thử lại [${args.domain}]...`, "info");
+  try {
+    await executeDeployFlow(args);
+  } catch (err) {
+    showToast(`❌ Thử lại thất bại: ${err.message}`, "error");
+  }
+};
+
 function startTaskPolling() {
-  if (taskPollingInterval) clearInterval(taskPollingInterval);
-  taskPollingInterval = setInterval(() => {
-    loadTasksList();
-  }, 3000);
+  rescheduleTaskPolling();
 }
 
 // ── 10. VIP WEB CLONER CONTROLLER & ADVANCED CUSTOMIZATION ──────────────────
@@ -4453,12 +5487,14 @@ async function handleCloneWebsite(e) {
     });
     const data = await res.json();
     if (data.success) {
-      showToast("🚀 Tác vụ Clone VIP đã được đưa vào hàng đợi chạy ngầm!");
-      const tasksTabBtn = document.querySelector('[data-tab="tab-tasks"]');
-      if (tasksTabBtn) tasksTabBtn.click();
-      loadTasksList();
+      showProcessingToast("Clone VIP");
+      startHubProgressWatch({
+        domain: domain || templateName || url,
+        label: "Đang clone & đóng gói",
+        switchTab: true,
+      });
     } else {
-      showToast(`❌ Lỗi: ${data.error}`);
+      showToast(`❌ Lỗi: ${data.error}`, "error");
     }
   } catch (err) {
     showToast(`❌ Lỗi kết nối: ${err.message}`);
@@ -4755,6 +5791,7 @@ async function handleSwitchModeSubmit(e) {
   }
 
   closeModal("switchModeModal");
+  startHubProgressWatch({ domain, label: `Đang chuyển sang ${toMode === "LP" ? "LP" : "302"}` });
 
   try {
     const res = await fetch("/api/tasks/switch-mode", {
@@ -4764,16 +5801,10 @@ async function handleSwitchModeSubmit(e) {
     });
     const data = await res.json();
     if (data.success) {
-      showDomainProcessingModal({
-        domain,
-        link: targetUrl,
-        templateId,
-        type: toMode === "LP" ? "lp" : "302",
-        customActionText: `🔁 Đang Chuyển Đổi Sang [${toMode === "LP" ? "Landing Page" : "302 Redirect"}]...`,
-      });
-      showToast(`🚀 Đã tiếp nhận chuyển đổi chế độ cho [${domain}]! Vui lòng vào Lịch Sử theo dõi.`);
+      if (data.task) mergeHubTaskFromApi(data.task);
       fetchDomains();
-      fetchHistory();
+      await fetchHistorySilent();
+      await loadTasksList();
     } else {
       showActionResultPopup({
         success: false,
@@ -5335,28 +6366,71 @@ function switchPermSubTab(subTabId) {
 // ── DOMAIN PURCHASE ORDERS WORKFLOW & MODALS ─────────────────────────────
 let currentPurchaseOrderData = null;
 
-function openConfirmDomainPurchaseModal(domain, priceXu = 250, ruleApplied = "") {
+function orderDomainClick(btn, e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  if (!btn) return;
+  const domain = btn.getAttribute("data-domain") || "";
+  const priceXu = Number(btn.getAttribute("data-price")) || 250;
+  const ruleApplied = btn.getAttribute("data-rule") || "Quy chuẩn";
+  let extra = {};
+  try {
+    extra = JSON.parse(btn.getAttribute("data-extra") || "{}");
+  } catch {}
+  btn.disabled = true;
+  btn.dataset.origLabel = btn.innerHTML;
+  btn.innerHTML = "⏳ Đang mở...";
+  openConfirmDomainPurchaseModal(domain, priceXu, ruleApplied, extra);
+  setTimeout(() => {
+    btn.disabled = false;
+    if (btn.dataset.origLabel) btn.innerHTML = btn.dataset.origLabel;
+  }, 400);
+}
+
+function buildOrderDomainButtonHtml({ domain, priceXu = 250, ruleApplied = "Quy chuẩn", extra = {} }) {
+  const extraJson = escapeHtmlText(JSON.stringify(extra));
+  return `<button type="button" class="btn btn-primary btn-sm js-btn-order-domain" data-domain="${escapeHtmlText(domain)}" data-price="${priceXu}" data-rule="${escapeHtmlText(ruleApplied)}" data-extra="${extraJson}" onclick="orderDomainClick(this, event)" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #000; font-weight: 800; border-color: #f59e0b; min-width: 130px;">🛒 Đặt Mua Ngay</button>`;
+}
+
+function openConfirmDomainPurchaseModal(domain, priceXu = 250, ruleApplied = "", extra = {}) {
   const norm = (domain || "").trim().toLowerCase();
   const hiddenInput = document.getElementById("confirmOrderDomainHidden");
+  const linkHidden = document.getElementById("confirmOrderLinkHidden");
+  const teleHidden = document.getElementById("confirmOrderTeleHidden");
+  const tplHidden = document.getElementById("confirmOrderTemplateHidden");
+  const modeHidden = document.getElementById("confirmOrderDeployModeHidden");
   const badgeDomain = document.getElementById("confirmOrderDomainBadge");
   const badgePrice = document.getElementById("confirmOrderPriceBadge");
   const badgeRule = document.getElementById("confirmOrderRuleBadge");
   const badgeBalance = document.getElementById("confirmOrderBalanceBadge");
-  const jobNoteInput = document.getElementById("confirmOrderJobNote");
+  const summaryEl = document.getElementById("confirmOrderSummaryText");
 
-  currentPurchaseOrderData = { domain: norm, priceXu, ruleApplied };
+  currentPurchaseOrderData = {
+    domain: norm,
+    priceXu,
+    ruleApplied,
+    link: extra.link || "",
+    tele: extra.tele || "",
+    templateId: extra.templateId || "",
+    deployMode: extra.deployMode || "LP",
+  };
 
   if (hiddenInput) hiddenInput.value = norm;
+  if (linkHidden) linkHidden.value = extra.link || "";
+  if (teleHidden) teleHidden.value = extra.tele || "";
+  if (tplHidden) tplHidden.value = extra.templateId || "";
+  if (modeHidden) modeHidden.value = extra.deployMode === "302" ? "302" : "LP";
   if (badgeDomain) badgeDomain.textContent = norm;
   if (badgePrice) badgePrice.textContent = `${priceXu} Xu (≈ ${(priceXu).toLocaleString("vi-VN")}k đ)`;
   if (badgeRule) badgeRule.textContent = ruleApplied || "Quy chuẩn định giá";
   
   const userBalance = currentUser ? (currentUser.balance || 0) : 0;
   if (badgeBalance) badgeBalance.textContent = `🪙 ${userBalance.toLocaleString("vi-VN")} Xu`;
-  
-  if (jobNoteInput) {
-    jobNoteInput.value = "";
-    jobNoteInput.focus();
+
+  if (summaryEl) {
+    summaryEl.innerHTML = `Bạn xác nhận sẽ sử dụng <span style="color: #10b981;">${priceXu.toLocaleString("vi-VN")} Xu</span> để mua tên miền <span style="color: #fbbf24; font-family: var(--font-mono);">${norm}</span>?`;
   }
 
   openModal("confirmDomainPurchaseModal");
@@ -5365,7 +6439,6 @@ function openConfirmDomainPurchaseModal(domain, priceXu = 250, ruleApplied = "")
 async function handleConfirmDomainPurchaseSubmit(e) {
   e.preventDefault();
   const domain = document.getElementById("confirmOrderDomainHidden")?.value;
-  const note = document.getElementById("confirmOrderJobNote")?.value.trim();
   const btn = document.getElementById("btnSubmitConfirmPurchase");
 
   if (!domain) {
@@ -5375,15 +6448,24 @@ async function handleConfirmDomainPurchaseSubmit(e) {
 
   if (btn) btn.disabled = true;
 
+  closeModal("confirmDomainPurchaseModal");
+  startHubProgressWatch({ domain, label: "Đang gửi đơn mua", switchTab: false });
+
   try {
+    const link = document.getElementById("confirmOrderLinkHidden")?.value?.trim() || currentPurchaseOrderData?.link || "";
+    const tele = document.getElementById("confirmOrderTeleHidden")?.value?.trim() || currentPurchaseOrderData?.tele || "";
+    const templateId = document.getElementById("confirmOrderTemplateHidden")?.value?.trim() || currentPurchaseOrderData?.templateId || "";
+    const deployMode = document.getElementById("confirmOrderDeployModeHidden")?.value || currentPurchaseOrderData?.deployMode || "LP";
+    const note = `Đặt mua ${domain}`;
+
     const res = await fetch("/api/domain-orders", {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ domain, note }),
+      body: JSON.stringify({ domain, note, link, tele, templateId, deployMode }),
     });
     const data = await res.json();
     if (data.success) {
-      closeModal("confirmDomainPurchaseModal");
+      showProcessingToast(data.order?.domain || domain);
       
       const successDom = document.getElementById("successOrderDomainText");
       const successPrice = document.getElementById("successOrderPriceText");
@@ -5393,8 +6475,9 @@ async function handleConfirmDomainPurchaseSubmit(e) {
       openModal("domainOrderSuccessModal");
       loadDomainOrdersList();
       loadWalletData();
+      startHubProgressWatch({ domain: data.order?.domain || domain, switchTab: true });
     } else {
-      showToast(`❌ Lỗi đặt mua: ${data.error}`);
+      showToast(`❌ Lỗi đặt mua: ${data.error}`, "error");
     }
   } catch (err) {
     showToast(`❌ Lỗi kết nối: ${err.message}`);
@@ -5407,95 +6490,231 @@ async function loadDomainOrdersList() {
   try {
     const res = await fetch("/api/domain-orders", { headers: authHeaders() });
     const data = await res.json();
-    const tbody = document.getElementById("domainOrdersTableBody");
-    const empty = document.getElementById("domainOrdersEmpty");
+    if (!data.success || !Array.isArray(data.orders)) return;
 
-    if (data.success && Array.isArray(data.orders)) {
-      if (data.orders.length === 0) {
-        if (tbody) tbody.innerHTML = "";
-        if (empty) empty.style.display = "block";
-        return;
-      }
-
-      if (empty) empty.style.display = "none";
-      if (tbody) {
-        tbody.innerHTML = data.orders.map((o, idx) => {
-          let statusHtml = "";
-          let actionHtml = "-";
-
-          if (o.status === "approved") {
-            statusHtml = `<span class="badge-status badge-success" style="font-weight: 700;">🟢 ĐÃ DUYỆT (-${o.deductedAmount || o.priceXu} Xu)</span>`;
-          } else if (o.status === "rejected") {
-            statusHtml = `<span class="badge-status badge-danger" style="font-weight: 700;">🔴 TỪ CHỐI (${o.rejectReason || "Không đạt"})</span>`;
-          } else {
-            statusHtml = `<span class="badge-status badge-warning" style="font-weight: 700;">🟡 CHỜ ADMIN DUYỆT</span>`;
-            if (currentUser && currentUser.role === "admin") {
-              const balanceTag = o.hasEnoughBalance
-                ? `<span style="color: #10b981; font-size: 11px; font-weight: 700;">🟢 Đủ Xu (${o.userCurrentBalance} Xu)</span>`
-                : `<span style="color: #f43f5e; font-size: 11px; font-weight: 700;">🔴 Thiếu Xu (${o.userCurrentBalance}/${o.priceXu} Xu)</span>`;
-              
-              actionHtml = `
-                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                  <div style="display: flex; gap: 6px;">
-                    <button class="btn btn-primary btn-sm" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700; font-size: 11px; padding: 4px 8px;" onclick="handleAdminApproveDomainOrder('${o.id}')" title="Duyệt đơn và trừ Xu">
-                      ✅ Duyệt Mua (Trừ Xu)
-                    </button>
-                    <button class="btn btn-secondary btn-sm" style="color: var(--accent-rose); border-color: rgba(244,63,94,0.4); font-size: 11px; padding: 4px 8px;" onclick="handleAdminRejectDomainOrder('${o.id}')" title="Từ chối đơn mua">
-                      ❌ Từ Chối
-                    </button>
-                  </div>
-                  ${balanceTag}
-                </div>
-              `;
-            }
-          }
-
-          const balanceDisplay = o.userCurrentBalance !== undefined
-            ? `<span style="font-family: var(--font-mono); font-weight: 700; color: ${o.hasEnoughBalance ? "#10b981" : "#f43f5e"};">${o.userCurrentBalance} Xu</span>`
-            : "-";
-
-          return `
-            <tr>
-              <td style="color: var(--text-dim); font-family: var(--font-mono);">${idx + 1}</td>
-              <td style="color: var(--text-muted); font-size: 12px;">${new Date(o.createdAt).toLocaleString("vi-VN")}</td>
-              <td>
-                <strong style="color: var(--accent-cyan); font-weight: 700;">👤 ${o.username}</strong>
-                <div style="font-size: 11px; color: var(--text-dim);">${o.fullName || ""}</div>
-              </td>
-              <td><strong style="color: #fbbf24; font-family: var(--font-mono); font-size: 14px;">${o.domain}</strong></td>
-              <td>
-                <strong style="color: #10b981; font-family: var(--font-mono);">${o.priceXu} Xu</strong>
-                <div style="font-size: 11px; color: var(--text-dim);">${o.ruleApplied || ""}</div>
-              </td>
-              <td>${balanceDisplay}</td>
-              <td style="color: var(--text-dim); font-size: 13px;">${o.note || "-"}</td>
-              <td>${statusHtml}</td>
-              <td style="text-align: right;">${actionHtml}</td>
-            </tr>
-          `;
-        }).join("");
-      }
+    const pendingBadge = document.getElementById("badgeOrdersPending");
+    if (pendingBadge && isAdminUser()) {
+      pendingBadge.textContent = String(data.pendingCount || 0);
+      pendingBadge.style.display = data.pendingCount > 0 ? "inline-flex" : "none";
     }
+
+    renderAdminDomainOrdersTable(data.orders);
+    renderUserDomainOrdersTable(data.orders);
   } catch {}
 }
 
+function renderOrderStatusHtml(o, { adminView = false } = {}) {
+  let statusHtml = "";
+  let actionHtml = "-";
+
+  if (o.status === "approved") {
+    if (o.fulfilledAt) {
+      statusHtml = `<span class="badge-status badge-success" style="font-weight: 700;">✅ ĐÃ CÀI XONG</span>
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">${new Date(o.fulfilledAt).toLocaleString("vi-VN")}</div>`;
+    } else {
+      statusHtml = `<span class="badge-status badge-success" style="font-weight: 700;">🟢 ĐÃ DUYỆT (-${o.deductedAmount || o.priceXu} Xu)</span>
+        <div style="font-size: 11px; color: #fbbf24; margin-top: 4px;">⏳ Chờ hoàn tất cài đặt</div>`;
+      if (adminView) {
+        actionHtml = `
+          <button class="btn btn-primary btn-sm" style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); font-weight: 700; font-size: 11px; padding: 6px 10px;" onclick="handleAdminFulfillDomainOrder('${o.id}')" title="Thử mua Spaceship & cài lại">
+            🔄 Cài Lại
+          </button>
+        `;
+      }
+    }
+  } else if (o.status === "rejected") {
+    statusHtml = `<span class="badge-status badge-danger" style="font-weight: 700;">🔴 TỪ CHỐI (${o.rejectReason || "Không đạt"})</span>`;
+  } else {
+    statusHtml = `<span class="badge-status badge-warning" style="font-weight: 700;">🟡 CHỜ ADMIN DUYỆT</span>`;
+    if (adminView) {
+      const balanceTag = o.hasEnoughBalance
+        ? `<span style="color: #10b981; font-size: 11px; font-weight: 700;">🟢 Đủ Xu (${o.userCurrentBalance} Xu)</span>`
+        : `<span style="color: #f43f5e; font-size: 11px; font-weight: 700;">🔴 Thiếu Xu (${o.userCurrentBalance}/${o.priceXu} Xu)</span>`;
+      actionHtml = `
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+          <div style="display: flex; gap: 6px;">
+            <button class="btn btn-primary btn-sm" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); font-weight: 700; font-size: 11px; padding: 4px 8px;" onclick="handleAdminApproveDomainOrder('${o.id}')" title="Duyệt, trừ Xu khách và mua trên Spaceship">
+              💳 Duyệt & Mua Spaceship
+            </button>
+            <button class="btn btn-secondary btn-sm" style="color: var(--accent-rose); border-color: rgba(244,63,94,0.4); font-size: 11px; padding: 4px 8px;" onclick="handleAdminRejectDomainOrder('${o.id}')">
+              ❌ Từ Chối
+            </button>
+          </div>
+          ${balanceTag}
+        </div>
+      `;
+    }
+  }
+
+  return { statusHtml, actionHtml };
+}
+
+function renderAdminDomainOrdersTable(orders) {
+  const tbody = document.getElementById("adminDomainOrdersTableBody");
+  const empty = document.getElementById("adminDomainOrdersEmpty");
+  if (!tbody) return;
+
+  if (!isAdminUser()) {
+    if (empty) empty.style.display = "none";
+    tbody.innerHTML = "";
+    return;
+  }
+
+  if (orders.length === 0) {
+    tbody.innerHTML = "";
+    if (empty) empty.style.display = "block";
+    return;
+  }
+  if (empty) empty.style.display = "none";
+
+  tbody.innerHTML = orders
+    .map((o, idx) => {
+      const { statusHtml, actionHtml } = renderOrderStatusHtml(o, { adminView: true });
+      const balanceDisplay =
+        o.userCurrentBalance !== undefined
+          ? `<span style="font-family: var(--font-mono); font-weight: 700; color: ${o.hasEnoughBalance ? "#10b981" : "#f43f5e"};">${o.userCurrentBalance} Xu</span>`
+          : "-";
+      return `
+        <tr>
+          <td style="color: var(--text-dim); font-family: var(--font-mono);">${idx + 1}</td>
+          <td style="color: var(--text-muted); font-size: 12px;">${new Date(o.createdAt).toLocaleString("vi-VN")}</td>
+          <td>
+            <strong style="color: var(--accent-cyan); font-weight: 700;">👤 ${o.username}</strong>
+            <div style="font-size: 11px; color: var(--text-dim);">${o.fullName || ""}</div>
+          </td>
+          <td><strong style="color: #fbbf24; font-family: var(--font-mono); font-size: 14px;">${o.domain}</strong></td>
+          <td>
+            <strong style="color: #10b981; font-family: var(--font-mono);">${o.priceXu} Xu</strong>
+            <div style="font-size: 11px; color: var(--text-dim);">${o.ruleApplied || ""}</div>
+            ${o.link ? `<div style="font-size: 10px; color: var(--text-dim); margin-top: 2px;">🔗 ${o.link.slice(0, 40)}${o.link.length > 40 ? "…" : ""}</div>` : ""}
+            ${o.templateId ? `<div style="font-size: 10px; color: var(--text-dim);">🎨 ${o.templateId}</div>` : ""}
+            ${o.deployMode === "302" ? `<div style="font-size: 10px; color: #38bdf8;">⚡ 302</div>` : ""}
+          </td>
+          <td>${balanceDisplay}</td>
+          <td style="color: var(--text-dim); font-size: 13px;">${o.note || "-"}</td>
+          <td>${statusHtml}</td>
+          <td style="text-align: right;">${actionHtml}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderUserDomainOrdersTable(orders) {
+  const tbody = document.getElementById("userDomainOrdersTableBody");
+  const empty = document.getElementById("userDomainOrdersEmpty");
+  const panel = document.getElementById("userDomainOrdersPanel");
+  if (!tbody) return;
+
+  if (panel) panel.style.display = isAdminUser() ? "none" : "block";
+
+  const myOrders = isAdminUser() ? [] : orders;
+
+  if (myOrders.length === 0) {
+    tbody.innerHTML = "";
+    if (empty) empty.style.display = isAdminUser() ? "none" : "block";
+    return;
+  }
+  if (empty) empty.style.display = "none";
+
+  tbody.innerHTML = myOrders
+    .map((o, idx) => {
+      const { statusHtml } = renderOrderStatusHtml(o, { adminView: false });
+      return `
+        <tr>
+          <td style="color: var(--text-dim); font-family: var(--font-mono);">${idx + 1}</td>
+          <td style="color: var(--text-muted); font-size: 12px;">${new Date(o.createdAt).toLocaleString("vi-VN")}</td>
+          <td><strong style="color: #fbbf24; font-family: var(--font-mono);">${o.domain}</strong></td>
+          <td><strong style="color: #10b981; font-family: var(--font-mono);">${o.priceXu} Xu</strong></td>
+          <td style="color: var(--text-dim); font-size: 13px;">${o.note || "-"}</td>
+          <td>${statusHtml}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
 async function handleAdminApproveDomainOrder(orderId) {
+  if (!isAdminUser()) return;
+
   try {
-    const res = await fetch(`/api/admin/domain-orders/${encodeURIComponent(orderId)}/approve`, {
+    const listRes = await fetch("/api/domain-orders", { headers: authHeaders() });
+    const listData = await listRes.json();
+    const order = (listData.orders || []).find((o) => o.id === orderId);
+    if (!order) {
+      showToast("❌ Không tìm thấy đơn hàng");
+      return;
+    }
+    if (order.status !== "pending") {
+      showToast("❌ Đơn không còn ở trạng thái chờ duyệt");
+      return;
+    }
+    if (!order.hasEnoughBalance) {
+      showToast(`❌ User thiếu Xu (${order.userCurrentBalance}/${order.priceXu})`, "error");
+      return;
+    }
+
+    let link = (order.link || "").trim();
+    let tele = (order.tele || "").trim();
+    let templateId = (order.templateId || "").trim();
+    const deployMode = order.deployMode === "302" ? "302" : "LP";
+
+    if (!link) {
+      link = prompt(`Nhập link đích cho ${order.domain}:`, "")?.trim() || "";
+      if (!link) return;
+    }
+    if (deployMode !== "302" && !templateId) {
+      if (allTemplates && allTemplates.length > 0) {
+        templateId = allTemplates[0].id;
+        const pick = confirm(`Đơn chưa có mẫu LP. Dùng mẫu "${allTemplates[0].name}"?\n\nCancel để hủy.`);
+        if (!pick) return;
+      } else {
+        templateId = prompt(`Nhập templateId cho LP:`, "")?.trim() || "";
+        if (!templateId) return;
+      }
+    }
+
+    const quote = await fetchSpaceshipQuote(order.domain);
+    if (!quote.canPurchase) {
+      showToast(`❌ ${quote.message || "Không mua được trên Spaceship"}`, "error");
+      return;
+    }
+    const confirmed = await openSpaceshipBuyConfirmModal(quote);
+    if (!confirmed) {
+      showToast("Đã hủy — chưa trừ tiền Spaceship.", "info");
+      return;
+    }
+
+    const approveRes = await fetch(`/api/admin/domain-orders/${encodeURIComponent(orderId)}/approve`, {
       method: "POST",
       headers: authHeaders(),
     });
-    const data = await res.json();
-    if (data.success) {
-      showToast(`🎉 ${data.message}`);
-      loadDomainOrdersList();
-      loadWalletData();
-      if (typeof loadUsersList === "function") loadUsersList();
-    } else {
-      showToast(`❌ Lỗi: ${data.error}`);
+    const approveData = await approveRes.json();
+    if (!approveData.success) {
+      showToast(`❌ Duyệt đơn thất bại: ${approveData.error}`, "error");
+      return;
     }
+
+    showToast(`✅ Đã duyệt & trừ ${approveData.deductedAmount || order.priceXu} Xu — đang mua Spaceship & cài...`, "success");
+    loadDomainOrdersList();
+    loadWalletData();
+
+    await executeDeployFlow({
+      domain: order.domain,
+      link,
+      tele,
+      templateId,
+      isBuy: true,
+      type: deployMode === "302" ? "302" : "lp",
+      targetUserId: order.userId,
+      orderId: order.id,
+      spaceshipBuyConfirmed: true,
+      quotedTotalUsd: quote.totalUsd,
+    });
+
+    setTimeout(() => loadDomainOrdersList(), 3000);
   } catch (err) {
-    showToast(`❌ Lỗi kết nối: ${err.message}`);
+    showToast(`❌ ${err.message}`, "error");
   }
 }
 
@@ -5521,9 +6740,75 @@ async function handleAdminRejectDomainOrder(orderId) {
   }
 }
 
+async function handleAdminFulfillDomainOrder(orderId) {
+  if (!currentUser || currentUser.role !== "admin") return;
+
+  try {
+    const res = await fetch("/api/domain-orders", { headers: authHeaders() });
+    const data = await res.json();
+    const order = (data.orders || []).find((o) => o.id === orderId);
+    if (!order) {
+      showToast("❌ Không tìm thấy đơn hàng");
+      return;
+    }
+    if (order.status !== "approved") {
+      showToast("❌ Chỉ fulfill đơn đã duyệt");
+      return;
+    }
+    if (order.fulfilledAt) {
+      showToast("ℹ️ Đơn này đã cài xong rồi");
+      return;
+    }
+
+    let link = (order.link || "").trim();
+    let tele = (order.tele || "").trim();
+    let templateId = (order.templateId || "").trim();
+    const deployMode = order.deployMode === "302" ? "302" : "LP";
+
+    if (!link) {
+      link = prompt(`Nhập link đích cho ${order.domain}:`, "")?.trim() || "";
+      if (!link) return;
+    }
+
+    if (deployMode !== "302" && !templateId) {
+      if (allTemplates && allTemplates.length > 0) {
+        templateId = allTemplates[0].id;
+        const pick = confirm(`Đơn chưa có mẫu LP. Dùng mẫu mặc định "${allTemplates[0].name}"?\n\nBấm Cancel để hủy và chọn mẫu thủ công trên tab Mua.`);
+        if (!pick) return;
+      } else {
+        templateId = prompt(`Nhập templateId cho LP (${order.domain}):`, "")?.trim() || "";
+        if (!templateId) return;
+      }
+    }
+
+    if (!confirm(`Mua hộ & cài ${order.domain} cho ${order.username}?\n\nSpaceship sẽ tính phí USD (Admin thanh toán). Xu khách đã trừ khi duyệt.`)) {
+      return;
+    }
+
+    await executeDeployFlow({
+      domain: order.domain,
+      link,
+      tele,
+      templateId,
+      isBuy: true,
+      type: deployMode === "302" ? "302" : "lp",
+      targetUserId: order.userId,
+      orderId: order.id,
+    });
+
+    setTimeout(() => loadDomainOrdersList(), 3000);
+  } catch (err) {
+    showToast(`❌ ${err.message}`, "error");
+  }
+}
+
 function goToDomainOrdersHistory() {
   closeModal("domainOrderSuccessModal");
-  switchToTab("tab-wallet");
+  if (isAdminUser()) {
+    switchToTab("tab-orders");
+  } else {
+    switchToTab("tab-wallet");
+  }
   loadDomainOrdersList();
 }
 
@@ -5531,6 +6816,7 @@ function goToDomainOrdersHistory() {
 window.openModal = openModal;
 window.closeModal = closeModal;
 window.showToast = showToast;
+window.showProcessingToast = showProcessingToast;
 window.showActionResultPopup = showActionResultPopup;
 window.copyActionResultDomain = copyActionResultDomain;
 window.copyActionResultLink = copyActionResultLink;
@@ -5542,6 +6828,8 @@ window.openQuickDeployModal = openQuickDeployModal;
 window.openBatchSetLinkModal = openBatchSetLinkModal;
 window.copyText = copyText;
 window.goToHistoryFromReadyModal = goToHistoryFromReadyModal;
+window.goToTasksFromProcessingModal = goToTasksFromProcessingModal;
+window.goToHistoryFromProcessingModal = goToHistoryFromProcessingModal;
 window.openVisualTemplatePicker = openVisualTemplatePicker;
 window.openConfirmSelectTemplateModal = openConfirmSelectTemplateModal;
 window.openPreviewModal = openPreviewModal;
@@ -5562,10 +6850,20 @@ window.handleAdminManualAssign = handleAdminManualAssign;
 
 // Domain Purchase Orders globals
 window.openConfirmDomainPurchaseModal = openConfirmDomainPurchaseModal;
+window.orderDomainClick = orderDomainClick;
+window.runBatchDomainCheck = runBatchDomainCheck;
+window.loadSampleBatchCheckDomains = loadSampleBatchCheckDomains;
+window.clearBatchDomainCheck = clearBatchDomainCheck;
+window.closeSpaceshipBuyConfirmModal = closeSpaceshipBuyConfirmModal;
+
+document.getElementById("btnConfirmSpaceshipBuy")?.addEventListener("click", () => {
+  closeSpaceshipBuyConfirmModal(true);
+});
 window.handleConfirmDomainPurchaseSubmit = handleConfirmDomainPurchaseSubmit;
 window.loadDomainOrdersList = loadDomainOrdersList;
 window.handleAdminApproveDomainOrder = handleAdminApproveDomainOrder;
 window.handleAdminRejectDomainOrder = handleAdminRejectDomainOrder;
+window.handleAdminFulfillDomainOrder = handleAdminFulfillDomainOrder;
 window.goToDomainOrdersHistory = goToDomainOrdersHistory;
 
 

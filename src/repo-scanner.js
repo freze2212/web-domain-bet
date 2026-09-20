@@ -16,11 +16,14 @@ import {
   cfRequest,
   addPagesDomain,
   removeDomainFromAllPagesProjects,
+  getAllPagesProjectsForAccount,
 } from "./cloudflare.js";
-import { ACTIVE_TEMPLATES, updateTemplateDomainsJson, getTemplate } from "./templates.js";
-import { getHistory, addHistoryItem, updateHistoryItem, getLastDomainHistoryMeta } from "./history.js";
-import { verifyHistoryItem } from "./verifier.js";
+import { ACTIVE_TEMPLATES, updateTemplateDomainsJson, getTemplate, listTemplates, resolveTemplatePath } from "./templates.js";
+import { getHistory, addHistoryItem, updateHistoryItem, getLastDomainHistoryMeta, setHistoryProgress } from "./history.js";
+import { verifyHistoryItem, waitForLiveLinkMatch, waitFor302RedirectMatch } from "./verifier.js";
 import { normalizeDomain, normalizeUrl } from "./utils.js";
+import { listHubZonesFromCache, isAdminCfZone, adminSkipPayload, isFrezeHubDomain } from "./cf-account-guard.js";
+import { patchIndexHtmlLinks } from "./lp-link-patch.js";
 
 const execAsync = promisify(exec);
 
@@ -101,6 +104,7 @@ export function getPagesProjectForFolder(folderPath) {
     "landingpage-xoamaan-4d": "landingpage-xoamaan-4d",
     "ldpape_4d-5-quocgia": "gg88-lp-5uae",
     "lp-1-page-gg88": "lp-1-page-gg88",
+    "lp-gg88-gt9-sk": "lp-gg88-gt9-sk",
     "lp-xoaipan-9d-g": "lp-9d-xoaip-gg88",
     "landing-page-5f": "landingpage-5f-gg88",
     "lp-c168-xoamaan": "lp-gg88-xoamaan",
@@ -117,21 +121,53 @@ export function getPagesProjectForFolder(folderPath) {
   return folderName;
 }
 
+/** Bỏ folder backup / rác — không được coi là source LP để sửa link */
+export function isJunkLandingPath(p) {
+  const parts = String(p || "").split(/[/\\]/);
+  return parts.some((seg) => {
+    if (!seg) return false;
+    const lower = seg.toLowerCase();
+    if (["node_modules", ".git", "dist", "build", "screenshots", "backups"].includes(lower)) return true;
+    if (/\.bak($|-)/i.test(seg)) return true;
+    if (/\.old($|-)/i.test(seg)) return true;
+    if (/\.wrong-/i.test(seg)) return true;
+    if (/^backup/i.test(seg)) return true;
+    return false;
+  });
+}
+
+function skipScanDirName(name) {
+  const lower = String(name || "").toLowerCase();
+  if (["node_modules", ".git", "dist", "build", "screenshots", "backups"].includes(lower)) return true;
+  if (/\.bak($|-)/i.test(name)) return true;
+  if (/\.old($|-)/i.test(name)) return true;
+  if (/\.wrong-/i.test(name)) return true;
+  if (/^backup/i.test(name)) return true;
+  return false;
+}
+
+let listAllDomainsCache = { at: 0, data: null };
+const LIST_DOMAINS_TTL_MS = 5 * 60_000;
+
+export function invalidateDomainListCache() {
+  listAllDomainsCache = { at: 0, data: null };
+}
+
 // 1. Quét tìm toàn bộ các file domains.json trên máy
 export function getAllDomainsJsonFiles() {
   const files = [];
   function scan(dir, depth = 0) {
     if (depth > 5) return;
+    if (isJunkLandingPath(dir)) return;
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const ent of entries) {
-        if (
-          ent.isDirectory() &&
-          !["node_modules", ".git", "dist", "build", "screenshots", "backups"].includes(ent.name)
-        ) {
+        if (ent.isDirectory()) {
+          if (skipScanDirName(ent.name)) continue;
           scan(path.join(dir, ent.name), depth + 1);
         } else if (ent.name === "domains.json") {
-          files.push(path.join(dir, ent.name));
+          const full = path.join(dir, ent.name);
+          if (!isJunkLandingPath(full)) files.push(full);
         }
       }
     } catch {}
@@ -142,13 +178,14 @@ export function getAllDomainsJsonFiles() {
   return files;
 }
 
-// 2. Tìm chính xác domain nằm ở folder gốc / repo nào
+// 2. Tìm chính xác domain nằm ở folder gốc / repo nào (không gồm .bak / backup)
 export function findDomainInRepos(domain) {
-  const norm = domain.trim().toLowerCase();
+  const norm = domain.trim().toLowerCase().replace(/^www\./, "");
   const allFiles = getAllDomainsJsonFiles();
   const matches = [];
 
   for (const f of allFiles) {
+    if (isJunkLandingPath(f)) continue;
     try {
       const dj = JSON.parse(fs.readFileSync(f, "utf8"));
       if (norm in dj || `www.${norm}` in dj) {
@@ -163,31 +200,192 @@ export function findDomainInRepos(domain) {
   return matches;
 }
 
-// 3. Kiểm tra domain thuộc tài khoản Cloudflare chính đã cấu hình
-export async function checkDomainCfAccount(domain) {
-  const norm = domain.trim().toLowerCase();
-  const token = config.cloudflare.token();
-  const accountId = config.cloudflare.accountId();
-  if (!token || !accountId) {
+/** Map CNAME pages.dev → template ACTIVE (ưu tiên khớp project / sibling -N) */
+export function findTemplateByPagesCname(cnameTarget) {
+  if (!cnameTarget) return null;
+  const target = String(cnameTarget).trim().toLowerCase().replace(/\.$/, "");
+  const host = target.endsWith(".pages.dev") ? target : `${target}.pages.dev`;
+  const project = host.replace(/\.pages\.dev$/, "");
+  // landing-page-uae-98 → landing-page-uae ; lp-gg88-vip-7 → lp-gg88-vip
+  const rootBase = project.replace(/-\d+$/, "");
+
+  const hit =
+    ACTIVE_TEMPLATES.find((t) => (t.cnameTarget || "").toLowerCase() === host) ||
+    ACTIVE_TEMPLATES.find((t) => `${(t.pagesProject || "").toLowerCase()}.pages.dev` === host) ||
+    ACTIVE_TEMPLATES.find((t) => (t.pagesProject || "").toLowerCase() === project) ||
+    ACTIVE_TEMPLATES.find((t) => {
+      const base = (t.pagesProject || "").replace(/-\d+$/, "").toLowerCase();
+      return base && base === rootBase;
+    }) ||
+    // Họ UAE Admin: CNAME landing-page-uae / -1 / -2 / -98
+    (/^landing-page-uae(-\d+)?$/.test(project)
+      ? ACTIVE_TEMPLATES.find((t) => t.id === "landing_page_uae")
+      : null);
+
+  if (hit?.id) {
+    const resolved = getTemplate(hit.id);
+    if (resolved) return resolved;
+  }
+  return hit ? getTemplate(hit.id) || hit : null;
+}
+
+function normalizePagesCnameHost(cnameTarget) {
+  const target = String(cnameTarget || "").trim().toLowerCase().replace(/\.$/, "");
+  return target.endsWith(".pages.dev") ? target : `${target}.pages.dev`;
+}
+
+function templateMatchesPagesCname(tpl, cnameTarget) {
+  if (!tpl || !cnameTarget) return !cnameTarget;
+  const host = normalizePagesCnameHost(cnameTarget);
+  const candidates = new Set(
+    [
+      tpl.cnameTarget,
+      tpl.pagesProject ? `${tpl.pagesProject}.pages.dev` : "",
+      tpl.pagesProject,
+    ]
+      .filter(Boolean)
+      .map((s) => String(s).trim().toLowerCase().replace(/\.$/, ""))
+  );
+  const project = host.replace(/\.pages\.dev$/, "");
+  candidates.add(host);
+  candidates.add(project);
+  return candidates.has(host) || candidates.has(project);
+}
+
+/** Khi CNAME đã biết nhưng chưa có trong templates — lấy Git repo từ Pages API */
+async function resolveTemplateFromPagesCname(cnameTarget, cfInfo) {
+  const host = normalizePagesCnameHost(cnameTarget);
+  const project = host.replace(/\.pages\.dev$/, "");
+  const accId = cfInfo?.accountId || config.cloudflare.accountId();
+  const tok = cfInfo?.token || config.cloudflare.token();
+
+  let proj = null;
+  try {
+    proj = await cfRequest(`/accounts/${accId}/pages/projects/${encodeURIComponent(project)}`, {
+      token: tok || undefined,
+    });
+  } catch {}
+
+  const gitOwner = proj?.source?.config?.owner || "";
+  const gitRepoName = proj?.source?.config?.repo_name || "";
+  const gitRepo = gitOwner && gitRepoName ? `${gitOwner}/${gitRepoName}` : "";
+
+  if (gitRepo) {
+    const byRepo = listTemplates().find(
+      (t) => String(t.gitRepo || "").toLowerCase() === gitRepo.toLowerCase()
+    );
+    if (byRepo && templateMatchesPagesCname(byRepo, host)) {
+      return getTemplate(byRepo.id) || byRepo;
+    }
+  }
+
+  const byProject = getTemplate(project);
+  if (byProject?.pagesProject && templateMatchesPagesCname(byProject, host)) {
+    return byProject;
+  }
+
+  if (gitRepo && gitRepoName) {
+    const brand = "GG88";
+    const folder = gitRepoName;
+    const resolvedPath = resolveTemplatePath(
+      path.join("/var/www/Landingpages", brand, folder),
+      brand,
+      folder
+    );
     return {
-      accountName: "Thiếu cấu hình Cloudflare",
-      accountId: null,
-      zone: null,
-      token: null,
+      id: `pages_${project}`,
+      name: project,
+      folder,
+      path: resolvedPath,
+      gitRepo,
+      pagesProject: project,
+      cnameTarget: host,
+      brand,
+      brandLabel: brand,
     };
   }
-  try {
-    const res = await fetch(
-      `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent(norm)}&account.id=${encodeURIComponent(accountId)}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    const data = await res.json();
-    if (data.success && data.result?.length > 0) {
+
+  return null;
+}
+
+async function resolveTemplateForDomain(domain, pagesCnameTarget, cfInfo) {
+  if (pagesCnameTarget) {
+    let tpl = findTemplateByPagesCname(pagesCnameTarget);
+    if (!tpl) tpl = await resolveTemplateFromPagesCname(pagesCnameTarget, cfInfo);
+    if (tpl && !templateMatchesPagesCname(tpl, pagesCnameTarget)) {
       return {
-        accountName: "Freze (Primary)",
-        accountId,
-        zone: data.result[0],
-        token,
+        template: null,
+        error: `Template [${tpl.name || tpl.id}] không khớp CNAME live ${pagesCnameTarget}`,
+      };
+    }
+    if (tpl) return { template: tpl, error: null };
+    return {
+      template: null,
+      error: `CNAME live ${pagesCnameTarget} — chưa map được template/Pages Git cho [${domain}]`,
+    };
+  }
+  return { template: null, error: null };
+}
+
+async function resolveServingPagesCname(domain, cfInfo) {
+  // 1) DNS CNAME trong zone
+  if (cfInfo?.zone) {
+    try {
+      const records = await cfRequest("/zones/" + cfInfo.zone.id + "/dns_records?per_page=100", {
+        headers: cfInfo.token ? { Authorization: "Bearer " + cfInfo.token } : undefined,
+      });
+      const cnameRec = (records || []).find(
+        (r) =>
+          (r.name === domain || r.name === "www." + domain) &&
+          r.type === "CNAME" &&
+          String(r.content || "").includes(".pages.dev")
+      );
+      if (cnameRec?.content) return cnameRec.content.trim().toLowerCase();
+    } catch {}
+  }
+
+  // 2) Custom domain đang gắn trên Pages project nào
+  try {
+    const list = (await getAllPagesProjectsForAccount(cfInfo?.accountId || config.cloudflare.accountId())) || [];
+    const norm = domain.toLowerCase();
+    for (const p of list) {
+      const domains = Array.isArray(p.domains) ? p.domains : [];
+      const hit = domains.some((d) => {
+        const name = String(typeof d === "string" ? d : d?.name || "").toLowerCase();
+        return name === norm || name === `www.${norm}`;
+      });
+      if (hit) {
+        const sub = (p.subdomain || p.name || "").toLowerCase();
+        return sub.endsWith(".pages.dev") ? sub : `${sub}.pages.dev`;
+      }
+    }
+  } catch {}
+
+  // 3) Ownership / history
+  try {
+    const prev = getLastDomainHistoryMeta(domain);
+    if (prev?.cnameTarget && String(prev.cnameTarget).includes(".pages.dev")) {
+      return String(prev.cnameTarget).trim().toLowerCase();
+    }
+  } catch {}
+
+  return null;
+}
+
+// 3. Kiểm tra domain thuộc tài khoản Cloudflare nào (Freze hoặc Admin)
+export async function checkDomainCfAccount(domain) {
+  const norm = domain.trim().toLowerCase();
+  try {
+    const { findZoneByName, tokenForZone, isAdminAccountZone } = await import("./cloudflare.js");
+    const zone = await findZoneByName(norm);
+    if (zone) {
+      const admin = isAdminAccountZone(zone);
+      return {
+        accountName: zone.account?.name || (admin ? "Admin" : "Freze"),
+        accountId: zone.account?.id || zone.accountId || null,
+        zone,
+        token: tokenForZone(zone),
+        cfAccountType: admin ? "admin" : "freze",
       };
     }
   } catch {}
@@ -335,6 +533,19 @@ export function updateJsConfigFile(folderPath, domain, newLink, newTele) {
     } catch {}
   }
 
+  // Cập nhật index.html gốc nếu có (nhiều LP hardcode REDIRECT_URL / href)
+  const rootHtml = path.join(folderPath, "index.html");
+  if (fs.existsSync(rootHtml) && newLink) {
+    try {
+      let h = fs.readFileSync(rootHtml, "utf8");
+      h = patchIndexHtmlLinks(h, norm, newLink);
+      fs.writeFileSync(rootHtml, h, "utf8");
+      if (!updatedRelPath) updatedRelPath = "index.html";
+    } catch (err) {
+      console.error(`Lỗi cập nhật ${rootHtml}:`, err.message);
+    }
+  }
+
   // Cập nhật 07124351/index.html nếu có
   const subHtml = path.join(folderPath, "07124351", "index.html");
   if (fs.existsSync(subHtml) && newLink) {
@@ -348,27 +559,40 @@ export function updateJsConfigFile(folderPath, domain, newLink, newTele) {
   return updatedRelPath;
 }
 
-// 4. Cập nhật link & telegram chuẩn xác CHỈ tại các folder gốc đang chứa domain đó
+// 4. DEPRECATED path — không còn dùng để set-link LP (dễ ghi nhiều folder).
+// Giữ lại nhưng: bỏ junk, CHỈ cập nhật folder có .git, và success chỉ khi có ít nhất 1 origin push OK.
 export async function updateDomainInExactRepos(domain, newLink, newTele = "") {
-  const norm = domain.trim().toLowerCase();
-  const matches = findDomainInRepos(norm);
+  const norm = domain.trim().toLowerCase().replace(/^www\./, "");
+  const matches = findDomainInRepos(norm).filter(
+    (m) => m?.folderPath && fs.existsSync(m.folderPath) && !isJunkLandingPath(m.folderPath)
+  );
 
   if (matches.length === 0) {
     return {
       success: false,
-      error: `Tên miền [${domain}] KHÔNG tồn tại trong bất kỳ folder source Landing Page nào! Không thể tự ý thêm bừa bãi.`,
+      error: `Tên miền [${domain}] KHÔNG tồn tại trong folder Git Landing Page hợp lệ!`,
       updatedRepos: [],
     };
   }
 
   const updatedRepos = [];
   for (const m of matches) {
+    const gitDir = path.join(m.folderPath, ".git");
+    if (!fs.existsSync(gitDir)) {
+      console.warn(`[SetLink] Bỏ qua folder không có .git: ${m.folderPath}`);
+      continue;
+    }
     try {
       const dj = JSON.parse(fs.readFileSync(m.filePath, "utf8"));
       const existing = typeof dj[norm] === "object" ? dj[norm] : {};
-      
+
       const mainUrl = newLink || existing.main_url || existing.url || "";
-      const teleUrl = newTele || existing.telegram_url || existing.tele || (newTele ? newTele : (existing.messenger_url && existing.messenger_url !== mainUrl ? existing.messenger_url : ""));
+      const teleUrl =
+        newTele ||
+        existing.telegram_url ||
+        existing.tele ||
+        (existing.messenger_url && existing.messenger_url !== mainUrl ? existing.messenger_url : "") ||
+        "";
 
       const entry = {
         main_url: mainUrl,
@@ -379,41 +603,40 @@ export async function updateDomainInExactRepos(domain, newLink, newTele = "") {
       dj[`www.${norm}`] = entry;
       fs.writeFileSync(m.filePath, JSON.stringify(dj, null, 2), "utf8");
 
-      // Cập nhật js/config.js hoặc config.js nếu có
       const jsConfigRel = updateJsConfigFile(m.folderPath, norm, mainUrl, teleUrl);
       updateJsConfigFile(m.folderPath, `www.${norm}`, mainUrl, teleUrl);
 
-      // Git commit & push: Tự động nhận diện nhánh hiện tại (main/master)
-      const gitDir = path.join(m.folderPath, ".git");
       let gitPushed = false;
-      if (fs.existsSync(gitDir)) {
+      let gitError = null;
+      try {
+        let currentBranch = "main";
         try {
-          let currentBranch = "main";
-          try {
-            const bRes = await execAsync("git branch --show-current", { cwd: m.folderPath });
-            if (bRes.stdout.trim()) currentBranch = bRes.stdout.trim();
-          } catch {}
-
-          await execAsync(`git add . && git commit -m "Update link & telegram for ${norm}"`, { cwd: m.folderPath }).catch(() => {});
-          await execAsync(`git push origin ${currentBranch}`, { cwd: m.folderPath });
-          gitPushed = true;
-        } catch (gitErr) {
-          console.warn(`[Git] Lỗi push tại ${m.folderPath}:`, gitErr.message);
-        }
+          const bRes = await execAsync("git branch --show-current", { cwd: m.folderPath });
+          if (bRes.stdout.trim()) currentBranch = bRes.stdout.trim();
+        } catch {}
+        const filesToAdd = jsConfigRel ? `domains.json ${jsConfigRel}` : "domains.json";
+        await execAsync(`git add ${filesToAdd}`, { cwd: m.folderPath });
+        await execAsync(`git commit -m "Update link & telegram for ${norm}"`, { cwd: m.folderPath }).catch(() => {});
+        await execAsync(`git push origin ${currentBranch}`, { cwd: m.folderPath });
+        gitPushed = true;
+      } catch (gitErr) {
+        gitError = gitErr.message;
+        console.warn(`[Git] Lỗi push tại ${m.folderPath}:`, gitErr.message);
       }
 
-      // Tự động deploy mã nguồn lên đúng Cloudflare Pages project
       const projectName = getPagesProjectForFolder(m.folderPath);
-      console.log(`[Deploy] Deploying ${m.folderPath} to Cloudflare Pages project [${projectName}]...`);
-      await deployToAllPagesInstances(projectName, m.folderPath).catch((err) => {
-        console.warn(`[Deploy] Deploy warning for ${projectName}:`, err.message);
-      });
+      if (gitPushed) {
+        await deployToAllPagesInstances(projectName, m.folderPath).catch((err) => {
+          console.warn(`[Deploy] Deploy warning for ${projectName}:`, err.message);
+        });
+      }
 
       updatedRepos.push({
         folderPath: m.folderPath,
         filePath: m.filePath,
         projectName,
         gitPushed,
+        gitError,
         jsConfigUpdated: !!jsConfigRel,
       });
     } catch (err) {
@@ -421,8 +644,10 @@ export async function updateDomainInExactRepos(domain, newLink, newTele = "") {
     }
   }
 
+  const anyPush = updatedRepos.some((r) => r.gitPushed);
   return {
-    success: true,
+    success: anyPush,
+    error: anyPush ? null : `git push origin thất bại trên mọi folder khớp [${domain}]`,
     domain: norm,
     newLink,
     newTele,
@@ -499,6 +724,11 @@ export async function removeDomainFromRepo(domain, folderOrFilePath) {
 
 // 6. Quét và tổng hợp tất cả domains từ mọi repo & lịch sử triển khai
 export function listAllDomains() {
+  const now = Date.now();
+  if (listAllDomainsCache.data && now - listAllDomainsCache.at < LIST_DOMAINS_TTL_MS) {
+    return listAllDomainsCache.data;
+  }
+
   const allFiles = getAllDomainsJsonFiles();
   const domainMap = new Map();
 
@@ -583,42 +813,43 @@ export function listAllDomains() {
     }
   } catch {}
 
-  // C. Quét gộp từ Toàn Bộ Cloudflare Zones (1,250+ tên miền)
+  // C. Cloudflare Zones — Freze + Admin (khi có ADMIN token)
   try {
-    const cfCachePath = path.resolve(__dirname, "../data/cf_zones_cache.json");
-    if (fs.existsSync(cfCachePath)) {
-      const cfZones = JSON.parse(fs.readFileSync(cfCachePath, "utf8"));
-      for (const z of cfZones) {
-        const norm = (z.name || "").trim().toLowerCase();
-        if (!norm) continue;
+    for (const z of listHubZonesFromCache({ includeAdmin: true })) {
+      const norm = (z.name || "").trim().toLowerCase();
+      if (!norm) continue;
+      const isAdmin = isAdminCfZone(z);
 
-        const isFreze = z.accountName?.toLowerCase().includes("freze");
-        const accountLabel = isFreze ? "Cloudflare (Freze)" : "Cloudflare (Admin)";
-
-        if (!domainMap.has(norm)) {
-          domainMap.set(norm, {
-            domain: norm,
-            mainUrl: "",
-            messengerUrl: "",
-            telegramUrl: "",
-            repos: [],
-            filePaths: [],
-            primaryFolder: accountLabel,
-            folderPath: "",
-            sourceType: "cloudflare",
-            actionType: "CLOUDFLARE",
-            cfAccount: z.accountName,
-            status: z.status,
-            zoneId: z.id,
-          });
-        } else {
-          const existing = domainMap.get(norm);
-          if (!existing.cfAccount && z.accountName) {
-            existing.cfAccount = z.accountName;
-          }
-          if (!existing.zoneId && z.id) {
-            existing.zoneId = z.id;
-          }
+      if (!domainMap.has(norm)) {
+        domainMap.set(norm, {
+          domain: norm,
+          mainUrl: "",
+          messengerUrl: "",
+          telegramUrl: "",
+          repos: [],
+          filePaths: [],
+          primaryFolder: isAdmin ? "Cloudflare (Admin)" : "Cloudflare (Freze)",
+          folderPath: "",
+          sourceType: "cloudflare",
+          actionType: "CLOUDFLARE",
+          cfAccount: z.accountName,
+          cfAccountType: isAdmin ? "admin" : "freze",
+          status: z.status,
+          zoneId: z.id,
+        });
+      } else {
+        const existing = domainMap.get(norm);
+        if (!existing.cfAccount && z.accountName) {
+          existing.cfAccount = z.accountName;
+        }
+        if (!existing.cfAccountType) {
+          existing.cfAccountType = isAdmin ? "admin" : "freze";
+        }
+        if (!existing.zoneId && z.id) {
+          existing.zoneId = z.id;
+        }
+        if (isAdmin && existing.primaryFolder === "Cloudflare (Freze)") {
+          existing.primaryFolder = "Cloudflare (Admin)";
         }
       }
     }
@@ -626,7 +857,12 @@ export function listAllDomains() {
     console.warn("Lỗi nạp cf_zones_cache.json:", err.message);
   }
 
-  return Array.from(domainMap.values()).sort((a, b) => a.domain.localeCompare(b.domain));
+  // Chỉ loại miền Admin khi thiếu ADMIN token (blockHubMutation)
+  const result = Array.from(domainMap.values())
+    .filter((d) => isFrezeHubDomain(d.domain))
+    .sort((a, b) => a.domain.localeCompare(b.domain));
+  listAllDomainsCache = { at: now, data: result };
+  return result;
 }
 
 // 7. Hàm thông minh: Tự nhận diện Landing Page hay 302 Redirect và đổi link chuẩn xác
@@ -647,53 +883,70 @@ export async function smartSetLink(rawDomain, rawLink, rawTele = "", actor = {})
 
   const cfInfo = await checkDomainCfAccount(domain).catch(() => ({ accountName: "Chưa rõ", token: null, zone: null, accountId: null }));
 
-  // LIVE TRUTH: Page Rule 302 active → 302; else CNAME pages.dev / domains.json → LP
+  // Không can thiệp miền zone Cloudflare Admin (active)
+  const skip = adminSkipPayload(domain);
+  if (skip) {
+    return { ...skip, type: "admin_cf_skip", cfAccount: skip.cfAccount || cfInfo.accountName };
+  }
+
+  const histId = `hist_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  addHistoryItem({
+    id: histId,
+    domain,
+    actionType: "SET_LINK",
+    actionLabel: "Cập Nhật Link Đích",
+    link,
+    tele,
+    status: "in_progress",
+    progress: "Đang nhận diện LP / 302...",
+    cfAccount: cfInfo.accountName || "Đang xác định...",
+    ...actorFields,
+    details: { step: "Đang nhận diện LP / 302..." },
+  });
+
+  // LIVE TRUTH: Page Rule 302 active → 302; else Pages CNAME / custom domain → LP
   let active302 = null;
-  let pagesCnameTarget = null;
   if (cfInfo.zone) {
-    try { active302 = await findActiveForwardingRule(cfInfo.zone.id); } catch {}
     try {
-      const records = await cfRequest("/zones/" + cfInfo.zone.id + "/dns_records", {
-        headers: cfInfo.token ? { Authorization: "Bearer " + cfInfo.token } : undefined,
+      active302 = await findActiveForwardingRule(cfInfo.zone.id, {
+        token: cfInfo.token || undefined,
       });
-      const cnameRec = records?.find(
-        (r) => (r.name === domain || r.name === ("www." + domain)) && r.type === "CNAME"
-      );
-      if (cnameRec?.content?.includes(".pages.dev")) {
-        pagesCnameTarget = cnameRec.content.trim().toLowerCase();
-      }
     } catch {}
   }
 
   const repoMatches = findDomainInRepos(domain);
-  let matchingTemplate = null;
+  let pagesCnameTarget = await resolveServingPagesCname(domain, cfInfo);
 
+  let matchingTemplate = null;
   if (pagesCnameTarget) {
-    const target = pagesCnameTarget;
-    const rootBase = target.replace(/\.pages\.dev$/, "").replace(/-\d+$/, "");
-    matchingTemplate = ACTIVE_TEMPLATES.find(
-      (t) =>
-        t.cnameTarget?.toLowerCase() === target ||
-        ((t.pagesProject || "") + ".pages.dev").toLowerCase() === target ||
-        target.startsWith((t.pagesProject || "").toLowerCase()) ||
-        (t.pagesProject && t.pagesProject.replace(/-\d+$/, "").toLowerCase() === rootBase)
-    );
+    const resolved = await resolveTemplateForDomain(domain, pagesCnameTarget, cfInfo);
+    matchingTemplate = resolved.template;
+    if (!matchingTemplate && resolved.error) {
+      updateHistoryItem(histId, {
+        status: "failed",
+        progress: null,
+        error: resolved.error,
+        cnameTarget: pagesCnameTarget,
+      });
+      return { success: false, error: resolved.error, histId, cnameTarget: pagesCnameTarget };
+    }
   }
 
-  if (!matchingTemplate && repoMatches.length > 0) {
+  // Chỉ fallback repo/history khi CHƯA biết CNAME Pages (tránh push nhầm repo như gg88pr)
+  if (!pagesCnameTarget && !matchingTemplate && repoMatches.length > 0) {
     matchingTemplate =
       ACTIVE_TEMPLATES.find(
         (t) =>
-          t.path &&
+          t.folder &&
           repoMatches.some(
             (m) =>
-              (m.folderPath || "").toLowerCase().includes(path.basename(t.path).toLowerCase()) ||
-              (m.filePath || "").toLowerCase().includes(path.basename(t.path).toLowerCase())
+              path.basename(m.folderPath || "").toLowerCase() === String(t.folder).toLowerCase()
           )
       ) || null;
+    if (matchingTemplate?.id) matchingTemplate = getTemplate(matchingTemplate.id) || matchingTemplate;
   }
 
-  if (!matchingTemplate) {
+  if (!pagesCnameTarget && !matchingTemplate) {
     try {
       const histItems = getHistory() || [];
       const lastLp = histItems.find(
@@ -706,30 +959,96 @@ export async function smartSetLink(rawDomain, rawLink, rawTele = "", actor = {})
       if (lastLp?.templateId) {
         const tpl = getTemplate(lastLp.templateId);
         if (tpl?.path && fs.existsSync(tpl.path)) matchingTemplate = tpl;
+        if (!pagesCnameTarget && lastLp.cnameTarget) pagesCnameTarget = lastLp.cnameTarget;
       }
     } catch {}
   }
 
-  const isLandingPage = !active302 && (!!pagesCnameTarget || repoMatches.length > 0 || !!matchingTemplate);
-  const validRepoMatches = repoMatches.filter((m) => m && m.folderPath && fs.existsSync(m.folderPath));
-  const hasLocalTemplate = matchingTemplate && matchingTemplate.path && fs.existsSync(matchingTemplate.path);
+  if (matchingTemplate?.id && !(matchingTemplate.path && fs.existsSync(matchingTemplate.path))) {
+    matchingTemplate = getTemplate(matchingTemplate.id) || matchingTemplate;
+  }
+
+  const isLandingPage = !active302 && (!!pagesCnameTarget || !!matchingTemplate);
+  let hasLocalTemplate =
+    matchingTemplate &&
+    ((matchingTemplate.path && fs.existsSync(matchingTemplate.path)) || !!matchingTemplate.gitRepo);
 
   if (isLandingPage) {
-    let updatedRepos = [];
-    if (validRepoMatches.length > 0) {
-      const res = await updateDomainInExactRepos(domain, link, tele);
-      if (res.success) updatedRepos = res.updatedRepos;
-    } else if (hasLocalTemplate) {
-      const res = await updateTemplateDomainsJson(matchingTemplate, domain, link, tele).catch(() => ({}));
-      updatedRepos = [{
-        folderPath: matchingTemplate.path,
-        filePath: path.join(matchingTemplate.path, "domains.json"),
-        projectName: matchingTemplate.pagesProject,
-        gitPushed: true,
-        jsConfigUpdated: res.jsConfigUpdated,
-      }];
+    if (!hasLocalTemplate) {
+      updateHistoryItem(histId, {
+        status: "failed",
+        progress: null,
+        error: "Không tìm thấy folder Git template",
+        templateName: matchingTemplate?.name || "N/A",
+        cnameTarget: pagesCnameTarget || null,
+      });
+      return {
+        success: false,
+        error:
+          `Không tìm thấy folder Git template cho [${domain}]` +
+          (pagesCnameTarget ? ` (CNAME ${pagesCnameTarget})` : "") +
+          `. Không ghi folder lệch / .bak.`,
+        histId,
+      };
     }
 
+    const gitDir = path.join(matchingTemplate.path, ".git");
+    const hasLocalGit = fs.existsSync(gitDir);
+
+    setHistoryProgress(histId, `Đang push Git mẫu [${matchingTemplate.name}]...`, {
+      templateId: matchingTemplate.id,
+      templateName: matchingTemplate.name,
+      cnameTarget: pagesCnameTarget || matchingTemplate.cnameTarget || null,
+    });
+
+    let pushRes;
+    try {
+      if (hasLocalGit) {
+        pushRes = await updateTemplateDomainsJson(matchingTemplate, domain, link, tele);
+      } else if (matchingTemplate.gitRepo) {
+        const { upsertDomainEntryInRepo } = await import("./github.js");
+        setHistoryProgress(histId, `Push GitHub API → ${matchingTemplate.gitRepo}...`, {
+          templateId: matchingTemplate.id,
+          templateName: matchingTemplate.name,
+        });
+        await upsertDomainEntryInRepo(
+          matchingTemplate.gitRepo,
+          domain,
+          {
+            main_url: link,
+            messenger_url: tele || link,
+            telegram_url: tele || undefined,
+          },
+          { message: `Update link & telegram for ${domain}` }
+        );
+        pushRes = { gitPush: { originOk: true, via: "github_api" }, jsConfigUpdated: false };
+      } else {
+        throw new Error(
+          `Template [${matchingTemplate.id}] thiếu .git tại ${matchingTemplate.path} và không có gitRepo`
+        );
+      }
+    } catch (err) {
+      updateHistoryItem(histId, {
+        actionLabel: "Cập Nhật Link Đích (Landing Page)",
+        templateId: matchingTemplate.id || null,
+        templateName: matchingTemplate.name || "Landing Page",
+        cnameTarget: pagesCnameTarget || matchingTemplate.cnameTarget || null,
+        status: "failed",
+        progress: null,
+        liveStatus: "LINK_PUSH_FAILED",
+        cfAccount: cfInfo.accountName,
+        error: err.message,
+        details: { mode: "landing_page", error: err.message, path: matchingTemplate.path },
+      });
+      return {
+        success: false,
+        error: err.message,
+        histId,
+        type: "landing_page",
+      };
+    }
+
+    setHistoryProgress(histId, "Đang purge cache Cloudflare...");
     if (cfInfo.zone) {
       await deleteForwardingPageRules(cfInfo.zone.id).catch(() => {});
       await cfRequest("/zones/" + cfInfo.zone.id + "/purge_cache", {
@@ -739,33 +1058,96 @@ export async function smartSetLink(rawDomain, rawLink, rawTele = "", actor = {})
       }).catch(() => {});
     }
 
-    const histItem = addHistoryItem({
-      domain,
-      actionType: "SET_LINK",
-      actionLabel: "Cập Nhật Link Đích (Landing Page)",
-      link,
-      tele,
-      templateId: matchingTemplate?.id || prev?.templateId || null,
-      templateName: matchingTemplate?.name || prev?.templateName || "Landing Page",
-      cnameTarget: pagesCnameTarget || matchingTemplate?.cnameTarget || null,
-      status: "success",
-      cfAccount: cfInfo.accountName,
-      ...actorFields,
-      details: { mode: "landing_page", updatedRepos: updatedRepos?.map?.((r) => r.filePath || r) || updatedRepos },
+    setHistoryProgress(histId, "Đang chờ live link khớp (domains.json)...", {
+      templateId: matchingTemplate.id,
+      templateName: matchingTemplate.name,
     });
-    verifyHistoryItem(histItem.id).catch(() => {});
+    const liveCheck = await waitForLiveLinkMatch(domain, link, { maxAttempts: 15, delayMs: 8000 });
+    if (!liveCheck.ok) {
+      updateHistoryItem(histId, {
+        actionLabel: "Cập Nhật Link Đích (Landing Page)",
+        templateId: matchingTemplate.id || null,
+        templateName: matchingTemplate.name || "Landing Page",
+        cnameTarget: pagesCnameTarget || matchingTemplate.cnameTarget || null,
+        status: "failed",
+        progress: null,
+        liveStatus: "LINK_MISMATCH",
+        cfAccount: cfInfo.accountName,
+        error: liveCheck.error,
+        liveLinkObserved: liveCheck.link,
+        details: {
+          mode: "landing_page",
+          route: "cname_template_git_push",
+          gitPush: pushRes?.gitPush || null,
+          verifyError: liveCheck.error,
+          claimedLink: link,
+          liveLink: liveCheck.link,
+        },
+      });
+      return {
+        success: false,
+        verified: false,
+        type: "landing_page",
+        domain,
+        link,
+        tele,
+        error: `Đã push Git nhưng live chưa khớp — ${liveCheck.error}`,
+        histId,
+        liveLink: liveCheck.link,
+        claimedLink: link,
+      };
+    }
+
+    const updatedRepos = [
+      {
+        folderPath: matchingTemplate.path,
+        filePath: path.join(matchingTemplate.path, "domains.json"),
+        projectName: matchingTemplate.pagesProject,
+        gitPushed: !!(pushRes?.gitPush?.originOk),
+        jsConfigUpdated: !!pushRes?.jsConfigUpdated,
+      },
+    ];
+
+    const histItem = updateHistoryItem(histId, {
+      actionLabel: "Cập Nhật Link Đích (Landing Page)",
+      templateId: matchingTemplate.id || prev?.templateId || null,
+      templateName: matchingTemplate.name || prev?.templateName || "Landing Page",
+      cnameTarget: pagesCnameTarget || matchingTemplate.cnameTarget || null,
+      status: "success",
+      progress: null,
+      liveStatus: "200_OK",
+      cfAccount: cfInfo.accountName,
+      details: {
+        mode: "landing_page",
+        route: "cname_template_git_push",
+        updatedRepos: updatedRepos.map((r) => r.filePath),
+        gitPush: pushRes?.gitPush || null,
+        liveVerified: true,
+        liveLink: liveCheck.link,
+        verifyAttempts: liveCheck.attempts,
+      },
+    });
+    verifyHistoryItem(histItem.id, true).catch(() => {});
     return {
       success: true,
+      verified: true,
       type: "landing_page",
       actionLabel: "Cập Nhật Link Đích (Landing Page)",
-      domain, link, tele,
+      domain,
+      link,
+      tele,
       cfAccount: cfInfo.accountName,
       updatedRepos,
-      message: "Đã đổi link đích cho Landing Page [" + domain + "] thành công!",
+      cnameTarget: pagesCnameTarget || matchingTemplate.cnameTarget || null,
+      templateId: matchingTemplate.id,
+      histId,
+      liveLink: liveCheck.link,
+      message: `Live đã khớp link [${domain}] → ${liveCheck.link}`,
     };
   }
 
   // 302 path — nếu còn sót trong domains.json LP thì gỡ trước
+  setHistoryProgress(histId, "Đang cập nhật Page Rule 302...");
   if (repoMatches.length > 0 && active302) {
     for (const m of repoMatches) {
       await removeDomainFromRepo(domain, m.filePath || m.folderPath).catch(() => {});
@@ -778,60 +1160,120 @@ export async function smartSetLink(rawDomain, rawLink, rawTele = "", actor = {})
       await cfRequest("/zones/" + cfInfo.zone.id + "/purge_cache", {
         method: "POST",
         body: { purge_everything: true },
+        headers: cfInfo.token ? { Authorization: "Bearer " + cfInfo.token } : undefined,
       }).catch(() => {});
     }
+    setHistoryProgress(histId, "Đang chờ 302 redirect khớp link...");
+    const r302 = await waitFor302RedirectMatch(domain, link);
+    if (!r302.ok) {
+      updateHistoryItem(histId, {
+        actionLabel: prResult.action === "updated" ? "Cập Nhật Link 302 (Page Rule)" : "Tạo Mới Link 302 (Page Rule)",
+        templateName: "Direct 302 Redirect",
+        status: "failed",
+        progress: null,
+        liveStatus: "LINK_MISMATCH",
+        cfAccount: cfInfo.accountName,
+        error: r302.error,
+        liveLinkObserved: r302.link,
+        details: { mode: "redirect_302", pageRuleAction: prResult.action, verifyError: r302.error },
+      });
+      return {
+        success: false,
+        verified: false,
+        type: "redirect_302",
+        domain,
+        link,
+        tele,
+        error: `Page Rule đã ghi nhưng live 302 chưa khớp — ${r302.error}`,
+        histId,
+      };
+    }
     const actionText = prResult.action === "updated" ? "Cập Nhật Link 302 (Page Rule)" : "Tạo Mới Link 302 (Page Rule)";
-    const histItem = addHistoryItem({
-      domain,
-      actionType: "SET_LINK",
+    const histItem = updateHistoryItem(histId, {
       actionLabel: actionText,
-      link, tele,
       templateName: "Direct 302 Redirect",
       status: "success",
+      progress: null,
+      liveStatus: "200_OK",
       cfAccount: cfInfo.accountName,
-      ...actorFields,
-      details: { mode: "redirect_302", pageRuleAction: prResult.action },
+      details: { mode: "redirect_302", pageRuleAction: prResult.action, liveVerified: true, liveLink: r302.link },
     });
     verifyHistoryItem(histItem.id).catch(() => {});
     return {
       success: true,
+      verified: true,
       type: "redirect_302",
       actionLabel: actionText,
       domain, link, tele,
       cfAccount: cfInfo.accountName,
       action: prResult.action,
-      message: "Đã đổi link 302 chuyển hướng cho [" + domain + "] thành công!",
+      histId,
+      liveLink: r302.link,
+      message: `Live 302 đã khớp link [${domain}] → ${r302.link}`,
     };
   } catch (prErr) {
     try {
+      setHistoryProgress(histId, "Đang tạo zone / Page Rule 302...");
       await getOrCreateZone(domain);
       const prResult = await updateOrCreatePageRule(domain, link);
-      const histItem = addHistoryItem({
-        domain,
-        actionType: "SET_LINK",
+      setHistoryProgress(histId, "Đang chờ 302 redirect khớp link...");
+      const r302 = await waitFor302RedirectMatch(domain, link);
+      if (!r302.ok) {
+        updateHistoryItem(histId, {
+          actionLabel: "Tạo Mới Link 302 (Page Rule)",
+          templateName: "Direct 302 Redirect",
+          status: "failed",
+          progress: null,
+          liveStatus: "LINK_MISMATCH",
+          cfAccount: cfInfo.accountName,
+          error: r302.error,
+          details: { mode: "redirect_302", pageRuleAction: prResult.action, createdZone: true, verifyError: r302.error },
+        });
+        return {
+          success: false,
+          verified: false,
+          type: "redirect_302",
+          domain,
+          link,
+          tele,
+          error: `Page Rule đã ghi nhưng live 302 chưa khớp — ${r302.error}`,
+          histId,
+        };
+      }
+      const histItem = updateHistoryItem(histId, {
         actionLabel: "Tạo Mới Link 302 (Page Rule)",
-        link, tele,
         templateName: "Direct 302 Redirect",
         status: "success",
+        progress: null,
+        liveStatus: "200_OK",
         cfAccount: cfInfo.accountName,
-        ...actorFields,
-        details: { mode: "redirect_302", pageRuleAction: prResult.action, createdZone: true },
+        details: { mode: "redirect_302", pageRuleAction: prResult.action, createdZone: true, liveVerified: true, liveLink: r302.link },
       });
       verifyHistoryItem(histItem.id).catch(() => {});
       return {
         success: true,
+        verified: true,
         type: "redirect_302",
         actionLabel: "Tạo Mới Link 302 (Page Rule)",
         domain, link, tele,
         cfAccount: cfInfo.accountName,
         action: prResult.action,
-        message: "Đã tạo mới cấu hình 302 Page Rule cho [" + domain + "] thành công!",
+        histId,
+        liveLink: r302.link,
+        message: `Live 302 đã khớp link [${domain}] → ${r302.link}`,
       };
     } catch (createErr) {
+      updateHistoryItem(histId, {
+        status: "failed",
+        progress: null,
+        error: createErr.message || prErr.message,
+        templateName: "Direct 302 Redirect",
+      });
       return {
         success: false,
         error: "Không thể cập nhật link cho [" + domain + "]: " + createErr.message,
         cfAccount: cfInfo.accountName,
+        histId,
       };
     }
   }

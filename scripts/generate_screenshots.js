@@ -24,8 +24,8 @@ export async function generateAllScreenshots() {
     console.log(`🖼️ [${t.name}] Đang chụp từ: ${targetUrl}...`);
 
     try {
-      const cmd = `"${CHROME_BIN}" --headless=new --disable-gpu --hide-scrollbars --window-size=1200,800 --virtual-time-budget=4000 --screenshot="${outFile}" "${targetUrl}"`;
-      await execAsync(cmd, { timeout: 8000 });
+      const cmd = `"${CHROME_BIN}" --headless=new --disable-gpu --hide-scrollbars --window-size=1200,800 --virtual-time-budget=8000 --screenshot="${outFile}" "${targetUrl}"`;
+      await execAsync(cmd, { timeout: 20000 });
 
       if (fs.existsSync(outFile) && fs.statSync(outFile).size > 0) {
         console.log(`  ✅ Đã lưu ảnh: ${outFile} (${fs.statSync(outFile).size} bytes)`);

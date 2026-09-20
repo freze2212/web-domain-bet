@@ -85,20 +85,6 @@ export const ACTIVE_TEMPLATES: LandingTemplate[] = [
     brandLabel: "GG88"
   },
   {
-    id: "ladpage_3f_nhannhan",
-    name: "Welcome to ⭐ Cổng chính thức năm 2026",
-    title: "Welcome to ⭐ Cổng chính thức năm 2026",
-    folder: "3f-thanhnhan",
-    path: "C:\\Landingpages\\GG88\\3f-thanhnhan",
-    pagesProject: "landingpage-5f-g",
-    cnameTarget: "landingpage-5f-g-f3x.pages.dev",
-    sampleDomain: "ggtong.me",
-    sampleUrl: "https://ggtong.me",
-    totalDomains: 1,
-    brand: "GG88",
-    brandLabel: "GG88"
-  },
-  {
     id: "lp_5h_gg88",
     name: "Welcome to cổng quốc tế chính thức ☀ 2026️",
     title: "Welcome to cổng quốc tế chính thức ☀ 2026️",
@@ -139,6 +125,21 @@ export const ACTIVE_TEMPLATES: LandingTemplate[] = [
     totalDomains: 31,
     brand: "GG88",
     brandLabel: "GG88"
+  },
+  {
+    id: "lp_gg88_gt9_sk",
+    name: "GG88 GT9 — Video SK (gg88sk.com)",
+    title: "GG88 GT9 — Video SK (gg88sk.com)",
+    folder: "lp-gg88-gt9-sk",
+    path: "C:\\Landingpages\\GG88\\lp-gg88-gt9-sk",
+    gitRepo: "freze2212/lp-gg88-gt9-sk",
+    pagesProject: "lp-gg88-gt9-sk",
+    cnameTarget: "lp-gg88-gt9-sk.pages.dev",
+    sampleDomain: "gg88sk.com",
+    sampleUrl: "https://gg88sk.com",
+    totalDomains: 1,
+    brand: "GG88",
+    brandLabel: "GG88",
   },
   {
     id: "lp_1_page_gg88",

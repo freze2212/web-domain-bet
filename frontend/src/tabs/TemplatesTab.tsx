@@ -152,39 +152,48 @@ export const TemplatesTab: React.FC<TemplatesTabProps> = ({ onApplyTemplate }) =
                   {tpl.name}
                 </h3>
 
-                <div className="mt-3 space-y-1.5 text-xs text-gray-400">
-                  <div className="flex items-center justify-between">
-                    <span>CNAME Target:</span>
-                    <span className="font-mono text-cyan-300 text-[11px]">{tpl.cnameTarget}</span>
-                  </div>
+                <div className="mt-3">
+                  <a
+                    href={`https://${tpl.cnameTarget}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Mở trang mẫu live"
+                    className="flex min-w-0 items-center gap-2 rounded-lg border border-white/10 bg-black/40 px-2.5 py-1.5 text-xs text-gray-400 transition-colors hover:border-cyan-500/40 hover:bg-cyan-500/10"
+                  >
+                    <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-gray-500">
+                      Mẫu
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-medium text-cyan-300">
+                      {tpl.pagesProject || String(tpl.cnameTarget || '').replace(/\.pages\.dev$/i, '')}
+                    </span>
+                    <span className="shrink-0 text-cyan-400/80">↗</span>
+                  </a>
                   {tpl.sampleDomain && (
-                    <div className="flex items-center justify-between">
-                      <span>Mẫu chạy thực tế:</span>
-                      <span className="font-mono text-gray-300 text-[11px]">{tpl.sampleDomain}</span>
+                    <div className="mt-1.5 flex items-center justify-between gap-2 px-0.5 text-[11px] text-gray-500">
+                      <span>Demo</span>
+                      <span className="truncate font-mono text-gray-400">{tpl.sampleDomain}</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Action Buttons: Áp Dụng Mẫu & Mở Trang Web (Live Demo) */}
-              <div className="border-t border-gray-800/80 bg-[#0d1220] p-4 grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-[1.15fr_0.85fr] gap-2 border-t border-gray-800/80 bg-[#0d1220] p-4">
+                <button
+                  onClick={() => onApplyTemplate(tpl)}
+                  className="flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 py-2 text-xs font-bold text-white shadow-md shadow-cyan-500/20 transition-all hover:from-cyan-400 hover:to-blue-500"
+                >
+                  <Rocket className="h-3.5 w-3.5" />
+                  Áp dụng
+                </button>
                 <a
                   href={tpl.sampleUrl || `https://${tpl.cnameTarget}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-1.5 rounded-xl border border-gray-700 bg-[#161d31] py-2 text-xs font-semibold text-gray-300 hover:border-gray-600 hover:text-white transition-all"
+                  className="flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-transparent py-2 text-xs font-semibold text-gray-400 transition-all hover:border-cyan-500/45 hover:bg-cyan-500/10 hover:text-white"
                 >
                   <ExternalLink className="h-3.5 w-3.5 text-cyan-400" />
-                  Mở Trang Web
+                  Mở web
                 </a>
-
-                <button
-                  onClick={() => onApplyTemplate(tpl)}
-                  className="flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 py-2 text-xs font-bold text-white shadow-md shadow-cyan-500/20 hover:from-cyan-400 hover:to-blue-500 transition-all"
-                >
-                  <Rocket className="h-3.5 w-3.5" />
-                  Áp Dụng Mẫu
-                </button>
               </div>
             </div>
           ))}
