@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getUserById } from "./auth.js";
+import { getStore, setStore } from "./mongo-stores.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, "..", "data");
@@ -18,37 +19,50 @@ export function invalidateOwnershipCache() {
 }
 
 function loadOwnership() {
-  try {
-    if (!fs.existsSync(OWNERSHIP_FILE)) {
-      fs.writeFileSync(OWNERSHIP_FILE, JSON.stringify({}, null, 2), "utf8");
-      ownershipCache = { mtime: Date.now(), data: {} };
-      return ownershipCache.data;
-    }
-    const mtime = fs.statSync(OWNERSHIP_FILE).mtimeMs;
-    if (ownershipCache.data && ownershipCache.mtime === mtime) {
-      return ownershipCache.data;
-    }
-    const data = JSON.parse(fs.readFileSync(OWNERSHIP_FILE, "utf8"));
-    ownershipCache = { mtime, data: data && typeof data === "object" ? data : {} };
-    return ownershipCache.data;
-  } catch {
-    ownershipCache = { mtime: Date.now(), data: {} };
-    return ownershipCache.data;
-  }
+  const data = getStore("domains");
+  const map = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  ownershipCache = { mtime: Date.now(), data: map };
+  return map;
 }
 
 function saveOwnership(data) {
-  fs.writeFileSync(OWNERSHIP_FILE, JSON.stringify(data, null, 2), "utf8");
-  try {
-    ownershipCache = { mtime: fs.statSync(OWNERSHIP_FILE).mtimeMs, data };
-  } catch {
-    ownershipCache = { mtime: Date.now(), data };
-  }
+  ownershipCache = { mtime: Date.now(), data };
+  setStore("domains", data);
 }
 
-export function assignDomain(domain, userId, meta = {}) {
+function isHubAdminAccount(userId, username) {
+  const id = String(userId || "");
+  const name = String(username || "").toLowerCase();
+  return id === "u_admin" || id === "admin" || name === "admin";
+}
+
+export function describeOwnerConflict(domain, nextUserId) {
+  const existing = getDomainOwner(domain);
+  if (!existing?.userId || existing.userId === nextUserId) return null;
+  const user = getUserById(existing.userId);
+  const username = user?.username || existing.username || existing.userId;
+  if (isHubAdminAccount(existing.userId, username)) return null;
+  return {
+    domain: existing.domain,
+    userId: existing.userId,
+    username,
+    fullName: user?.fullName || existing.fullName || "",
+  };
+}
+
+export function assignDomain(domain, userId, meta = {}, options = {}) {
   const norm = domain.trim().toLowerCase().replace(/^www\./, "");
   const map = loadOwnership();
+  const existing = map[norm];
+  if (existing?.userId && existing.userId !== userId && !options.allowTransfer) {
+    const conflict = describeOwnerConflict(norm, userId);
+    const err = new Error(
+      `Tên miền ${norm} đang thuộc @${conflict?.username || existing.userId}. Xác nhận đổi chủ thì mới gán được.`
+    );
+    err.code = "OWNER_CONFLICT";
+    err.currentOwner = conflict;
+    throw err;
+  }
   map[norm] = {
     domain: norm,
     userId,
@@ -57,6 +71,19 @@ export function assignDomain(domain, userId, meta = {}) {
   };
   saveOwnership(map);
   return map[norm];
+}
+
+/** Cập nhật meta, giữ nguyên chủ cũ nếu miền đã có người quản lý. */
+export function touchDomainOwner(domain, fallbackUserId, meta = {}) {
+  const existing = getDomainOwner(domain);
+  const userId = existing?.userId || fallbackUserId;
+  if (!userId) return existing;
+  const owner = getUserById(userId);
+  return assignDomain(domain, userId, {
+    username: owner?.username || existing?.username,
+    fullName: owner?.fullName || existing?.fullName,
+    ...meta,
+  });
 }
 
 export function unassignDomain(domain) {
@@ -78,7 +105,7 @@ export function getDomainOwner(domain) {
  */
 export function canUserManageDomain(user, domain) {
   if (!user) return false;
-  if (user.role === "admin" || user.userId === "u_admin" || user.id === "u_admin" || user.username === "admin") {
+  if (user.role === "admin" || user.userId === "u_admin" || user.id === "u_admin") {
     return true; // Admin có quyền với tất cả các tên miền
   }
 
@@ -124,14 +151,24 @@ export function resolveDeployOwnerUserId(currentUser, body = {}) {
 
 /** Gán/cập nhật ownership sau deploy thành công */
 export function syncDeployOwnership(domain, currentUser, body, meta = {}) {
-  const ownerId = resolveDeployOwnerUserId(currentUser, body);
+  const existing = getDomainOwner(domain);
+  let ownerId = resolveDeployOwnerUserId(currentUser, body);
+  const confirm = body?.confirmTransfer === true;
+  if (existing?.userId && existing.userId !== ownerId && !confirm) {
+    ownerId = existing.userId;
+  }
   const owner = getUserById(ownerId);
-  return assignDomain(domain, ownerId, {
-    username: owner?.username,
-    fullName: owner?.fullName,
-    assignedBy: currentUser?.userId || currentUser?.username || "system",
-    ...meta,
-  });
+  return assignDomain(
+    domain,
+    ownerId,
+    {
+      username: owner?.username || existing?.username,
+      fullName: owner?.fullName || existing?.fullName,
+      assignedBy: currentUser?.userId || currentUser?.username || "system",
+      ...meta,
+    },
+    { allowTransfer: confirm }
+  );
 }
 
 /** Giữ chủ cũ khi admin sửa miền của khách (set-link / switch) */

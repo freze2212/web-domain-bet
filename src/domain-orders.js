@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assignDomain, getDomainOwner } from "./ownership.js";
-import { calculateDomainPriceRule, getBalance, deductBalance } from "./wallet.js";
+import { assignDomain, getDomainOwner, describeOwnerConflict, unassignDomain } from "./ownership.js";
+import { calculateDomainPriceRule, getBalance, deductBalance, topupBalance } from "./wallet.js";
+import { getStore, setStore } from "./mongo-stores.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, "..", "data");
@@ -13,23 +14,18 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 function loadOrders() {
-  if (!fs.existsSync(ORDERS_FILE)) {
-    fs.writeFileSync(ORDERS_FILE, JSON.stringify([], null, 2), "utf8");
-    return [];
-  }
-  try {
-    return JSON.parse(fs.readFileSync(ORDERS_FILE, "utf8"));
-  } catch {
-    return [];
-  }
+  const data = getStore("domain_orders");
+  return Array.isArray(data) ? data : [];
 }
 
 function saveOrders(data) {
-  fs.writeFileSync(ORDERS_FILE, JSON.stringify(data, null, 2), "utf8");
+  const list = Array.isArray(data) ? data : [];
+  setStore("domain_orders", list);
 }
 
 /**
- * Tạo đơn đặt mua tên miền mới (Chờ Admin duyệt - CHƯA trừ xu lúc này)
+ * Tạo đơn đặt mua tên miền mới (Chờ Admin duyệt).
+ * Chưa trừ Xu lúc gửi, nhưng ví phải đủ trả đơn này và các đơn đang chờ.
  */
 export function createDomainOrder({ userId, username, fullName, domain, note = "", link = "", tele = "", templateId = "", deployMode = "LP" }) {
   const normDomain = domain.trim().toLowerCase().replace(/^www\./, "");
@@ -53,6 +49,27 @@ export function createDomainOrder({ userId, username, fullName, domain, note = "
     } else {
       throw new Error(`Tên miền ${normDomain} hiện đã có một đơn đặt mua khác đang chờ Admin duyệt!`);
     }
+  }
+
+  const owned = getDomainOwner(normDomain);
+  if (owned?.userId) {
+    throw new Error(`Tên miền ${normDomain} đã có người quản lý (@${owned.username || owned.userId}). Không gửi đơn mua để nhận miền này được.`);
+  }
+
+  const isAdminAccount = userId === "u_admin" || userId === "admin";
+  const pendingHold = orders
+    .filter((o) => o.userId === userId && o.status === "pending")
+    .reduce((sum, o) => sum + (Number(o.priceXu) || 0), 0);
+  if (!isAdminAccount && currentBalance < pricing.priceXu + pendingHold) {
+    const have = currentBalance.toLocaleString("vi-VN");
+    const need = pricing.priceXu.toLocaleString("vi-VN");
+    const held = pendingHold
+      ? ` Đơn đang chờ đã chiếm ${pendingHold.toLocaleString("vi-VN")} Xu.`
+      : "";
+    if (currentBalance <= 0) {
+      throw new Error("Bạn chưa có Xu. Hãy nạp rồi gửi lại.");
+    }
+    throw new Error(`Ví không đủ Xu để gửi yêu cầu mua. Cần ${need} Xu, hiện có ${have} Xu.${held} Hãy nạp thêm rồi gửi lại.`);
   }
 
   const newOrder = {
@@ -125,7 +142,7 @@ export function getDomainOrderById(id) {
 /**
  * Admin duyệt đơn đặt mua: Kiểm tra số dư -> Trừ xu -> Cấp quyền & Khởi tạo
  */
-export function approveDomainOrder(orderId, adminUser) {
+export function approveDomainOrder(orderId, adminUser, { confirmTransfer = false } = {}) {
   const orders = loadOrders();
   const order = orders.find((o) => o.id === orderId);
 
@@ -134,6 +151,16 @@ export function approveDomainOrder(orderId, adminUser) {
   }
   if (order.status !== "pending") {
     throw new Error(`Đơn hàng này đã được xử lý trước đó (Trạng thái: ${order.status})`);
+  }
+
+  const conflict = describeOwnerConflict(order.domain, order.userId);
+  if (conflict && !confirmTransfer) {
+    const err = new Error(
+      `Tên miền ${conflict.domain} đang thuộc @${conflict.username}. Xác nhận đổi chủ thì mới duyệt đơn được.`
+    );
+    err.code = "OWNER_CONFLICT";
+    err.currentOwner = conflict;
+    throw err;
   }
 
   const userBalance = getBalance(order.userId);
@@ -152,14 +179,19 @@ export function approveDomainOrder(orderId, adminUser) {
   );
 
   // 2. Gán quyền quản trị tên miền cho User
-  assignDomain(order.domain, order.userId, {
-    approvedBy: adminUser.username || adminUser.id || "admin",
-    approvedAt: new Date().toISOString(),
-    username: order.username,
-    fullName: order.fullName,
-    orderId: order.id,
-    purchasedWithXu: order.priceXu,
-  });
+  assignDomain(
+    order.domain,
+    order.userId,
+    {
+      approvedBy: adminUser.username || adminUser.id || "admin",
+      approvedAt: new Date().toISOString(),
+      username: order.username,
+      fullName: order.fullName,
+      orderId: order.id,
+      purchasedWithXu: order.priceXu,
+    },
+    { allowTransfer: true }
+  );
 
   // 3. Cập nhật trạng thái đơn hàng
   order.status = "approved";
@@ -201,6 +233,53 @@ export function rejectDomainOrder(orderId, adminUser, reason = "Admin từ chố
   return {
     order,
     message: "Đã từ chối đơn đặt mua thành công. Không trừ Xu của người dùng.",
+  };
+}
+
+/**
+ * Cài sau khi duyệt bị fail: hoàn Xu cho thành viên, gỡ miền khỏi tài khoản,
+ * đưa đơn về chờ duyệt để admin cài lại (lần duyệt sau trừ Xu lại).
+ */
+export function refundFailedDomainOrder(orderId, domain, reason) {
+  if (!orderId) return { refunded: false };
+  const orders = loadOrders();
+  const order = orders.find((o) => o.id === orderId);
+  if (!order || order.status !== "approved" || order.fulfilledAt) return { refunded: false };
+
+  const norm = String(domain || order.domain || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, "");
+  if (!norm || order.domain !== norm) return { refunded: false };
+
+  const amount = Number(order.deductedAmount || order.priceXu) || 0;
+  const isAdminAccount = order.userId === "u_admin" || order.userId === "admin";
+  if (!isAdminAccount && amount > 0) {
+    topupBalance(
+      order.userId,
+      amount,
+      reason || `Hoàn ${amount} Xu vì cài ${norm} thất bại`,
+      "AUTO_REFUND"
+    );
+  }
+
+  const owner = getDomainOwner(norm);
+  if (!owner || owner.userId === order.userId) unassignDomain(norm);
+
+  order.status = "pending";
+  order.resolvedAt = null;
+  order.resolvedBy = null;
+  order.deductedAmount = 0;
+  order.remainingBalance = null;
+  order.lastRefundAt = new Date().toISOString();
+  order.lastRefundReason = reason || "";
+  saveOrders(orders);
+
+  return {
+    refunded: !isAdminAccount && amount > 0,
+    reopened: true,
+    amount: !isAdminAccount ? amount : 0,
+    userId: order.userId,
   };
 }
 

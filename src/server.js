@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listTemplates, getTemplate, findTemplateByDomain, updateTemplateDomainsJson } from "./templates.js";
-import { checkDomainAvailability, registerDomain, resolveContactId, updateNameservers, getDomainInfo, quoteSpaceshipPurchase, assertSpaceshipBuyConfirmed } from "./spaceship.js";
+import { checkDomainAvailability, registerDomain, resolveContactId, updateNameservers, getDomainInfo, quoteSpaceshipPurchase, assertSpaceshipBuyConfirmed, checkDomainsAvailabilityBatch } from "./spaceship.js";
 import {
   setupCloudflare,
   setupDirect302Redirect,
@@ -31,6 +31,7 @@ import { invalidateEnrichedDomainsCache, queryEnrichedDomainsList } from "./doma
 import { logAdminAction, listAdminAudit } from "./admin-audit.js";
 import { getHistory, addHistoryItem, updateHistoryItem, clearHistory, setHistoryProgress, reconcileStaleHistory } from "./history.js";
 import { verifyHistoryItem, runVerificationQueue, startBackgroundVerifier, autoRepairDomain } from "./verifier.js";
+import { pointNameserversFor302 } from "./zone-302-wait.js";
 import { inspectDomainHealth } from "./health-checker.js";
 
 // Khóa chống trùng lặp tiến trình mua/cài đặt đồng thời cho cùng 1 tên miền
@@ -78,11 +79,11 @@ import {
   failTask,
   getTask,
   listTasks,
+  markTaskWaitingZone,
 } from "./task-queue.js";
 import {
   executeBuyAndDeploy,
   executeSwitchMode,
-  executeCloneWebsite,
   executeUpdateLink,
 } from "./task-workers.js";
 import {
@@ -110,10 +111,12 @@ import {
   processBankWebhook,
   calculateDomainPriceRule,
 } from "./wallet.js";
+import { buildSuggestCandidates } from "./domain-suggest.js";
 import {
   assignDomain,
   unassignDomain,
   getDomainOwner,
+  describeOwnerConflict,
   listUserDomainNames,
   listAllAssignments,
   canUserManageDomain,
@@ -136,9 +139,8 @@ import {
   approveDomainOrder,
   rejectDomainOrder,
   markDomainOrderFulfilled,
+  refundFailedDomainOrder,
 } from "./domain-orders.js";
-import { cloneWebsite } from "./scraper.js";
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "..");
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
@@ -222,6 +224,19 @@ function requireAdmin(res, currentUser) {
   }
   return true;
 }
+
+function canManageUserAccounts(user) {
+  return user?.role === "admin" || user?.role === "assistant";
+}
+
+const USER_AUDIT_ACTIONS = new Set([
+  "USER_CREATE",
+  "USER_UPDATE",
+  "USER_DELETE",
+  "PASSWORD_RESET",
+  "ROLE_CHANGE",
+  "STATUS_CHANGE",
+]);
 
 /** User thường không được mua miền trực tiếp — phải qua domain-orders + admin duyệt */
 function rejectNonAdminDirectBuy(res, currentUser, isBuy) {
@@ -309,6 +324,9 @@ const server = http.createServer(async (req, res) => {
     "/api/wallet/webhook-pay",
     "/api/check-domain",
     "/api/check-domains-batch",
+    "/api/suggest-domains",
+    "/api/hva-link",
+    "/api/hva-avatar",
   ];
   // simulate-pay KHÔNG còn public — chỉ admin + ALLOW_SIMULATE_PAY=true
   if (pathname.startsWith("/api/") && !publicApiPaths.includes(pathname)) {
@@ -316,6 +334,162 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 401, { success: false, error: "Yêu cầu đăng nhập hoặc phiên làm việc đã hết hạn" });
       return;
     }
+  }
+
+  if (currentUser?.role === "assistant" && pathname.startsWith("/api/")) {
+    const assistantAllowed = new Set([
+      "/api/auth/me",
+      "/api/admin/users",
+      "/api/admin/users/create",
+      "/api/admin/users/update",
+      "/api/admin/users/delete",
+      "/api/admin/audit-log",
+    ]);
+    if (!assistantAllowed.has(pathname)) {
+      sendJson(res, 403, { success: false, error: "Tài khoản trợ lý chỉ được thêm, sửa và xóa user." });
+      return;
+    }
+  }
+
+  // GET/POST /api/hva-link — nội dung bio hoangvietanh.com
+  if (pathname === "/api/hva-avatar" && req.method === "GET") {
+    const avatarFile = path.join(DATA_DIR, "hva-avatar.bin");
+    const linkFile = path.join(DATA_DIR, "hva-link.json");
+    try {
+      const saved = JSON.parse(fs.readFileSync(linkFile, "utf8"));
+      const buf = fs.readFileSync(avatarFile);
+      const mime = /^image\/(png|jpeg|webp|gif)$/.test(saved.avatarMime) ? saved.avatarMime : "image/png";
+      res.writeHead(200, {
+        "Content-Type": mime,
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+      });
+      res.end(buf);
+    } catch {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("404");
+    }
+    return;
+  }
+  if (pathname === "/api/hva-link" && (req.method === "GET" || req.method === "POST")) {
+    const linkFile = path.join(DATA_DIR, "hva-link.json");
+    const avatarFile = path.join(DATA_DIR, "hva-avatar.bin");
+    const defaults = {
+      name: "HOÀNG VIỆT ANH",
+      handle: "@hoangvietanh",
+      bio: [
+        "NHẬN KÉO THUÊ CÓ PHÍ - BẢO HIỂM VỐN",
+        "LỢI NHUẬN >100TR PHÍ 30%",
+        "LỢI NHUẬN >200TR PHÍ 40%",
+        "LỢI NHUẬN >300TR PHÍ 50%",
+        "CHỈ HỖ TRỢ DUY NHẤT TRANG GG88. CÁC TRANG KHÁC ĐỀU LÀ GIẢ MẠO",
+      ],
+      game: "https://gg8812.com",
+      gameTitle: "LINK GAME",
+      gameNote: "",
+      zalo: "https://zalo.me/+84794686666",
+      zaloTitle: "ZALO",
+      zaloNote: "Chat trực tiếp",
+      tele: "https://t.me/VietHoang0808",
+      teleTitle: "TELEGRAM",
+      teleNote: "t.me/VietHoang0808",
+      footer: "HOÀNG VIỆT ANH",
+    };
+    const cleanText = (raw, max) => String(raw ?? "").replace(/[ \t]+\n/g, "\n").trim().slice(0, max);
+    const cleanUrl = (raw) => {
+      let s = String(raw ?? "").trim();
+      if (!s) return "";
+      if (!/^https?:\/\//i.test(s)) s = "https://" + s;
+      try {
+        const u = new URL(s);
+        if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+        return s;
+      } catch {
+        return "";
+      }
+    };
+    const readSaved = () => {
+      try { return JSON.parse(fs.readFileSync(linkFile, "utf8")); } catch { return {}; }
+    };
+    const publicProfile = (saved) => {
+      const bioSrc = Array.isArray(saved.bio) ? saved.bio : defaults.bio;
+      const bio = bioSrc.map((line) => cleanText(line, 180)).filter(Boolean).slice(0, 12);
+      const hasAvatar = !!(saved.avatarMime && fs.existsSync(avatarFile));
+      return {
+        success: true,
+        name: cleanText(saved.name || defaults.name, 80),
+        handle: cleanText(saved.handle || defaults.handle, 80),
+        bio: bio.length ? bio : defaults.bio,
+        game: cleanUrl(saved.game) || defaults.game,
+        gameTitle: cleanText(saved.gameTitle || defaults.gameTitle, 60),
+        gameNote: cleanText(saved.gameNote || "", 120),
+        zalo: cleanUrl(saved.zalo) || defaults.zalo,
+        zaloTitle: cleanText(saved.zaloTitle || defaults.zaloTitle, 60),
+        zaloNote: cleanText(saved.zaloNote || defaults.zaloNote, 120),
+        tele: cleanUrl(saved.tele) || defaults.tele,
+        teleTitle: cleanText(saved.teleTitle || defaults.teleTitle, 60),
+        teleNote: cleanText(saved.teleNote || defaults.teleNote, 120),
+        footer: cleanText(saved.footer || defaults.footer, 80),
+        avatarUrl: hasAvatar ? "https://tenmienbet.top/api/hva-avatar?v=" + encodeURIComponent(saved.updatedAt || "1") : "",
+        updatedAt: saved.updatedAt || "",
+      };
+    };
+    try {
+      if (req.method === "GET") {
+        sendJson(res, 200, publicProfile(readSaved()));
+        return;
+      }
+      const body = await parseBody(req);
+      const pass = process.env.HVA_ADMIN_PASSWORD || "HvaAdmin2026";
+      if (String(body.password || "") !== pass) {
+        sendJson(res, 401, { success: false, error: "Sai mật khẩu" });
+        return;
+      }
+      const saved = readSaved();
+      const next = { ...saved };
+      const textFields = ["name", "handle", "gameTitle", "gameNote", "zaloTitle", "zaloNote", "teleTitle", "teleNote", "footer"];
+      for (const key of textFields) {
+        if (body[key] != null) next[key] = cleanText(body[key], key.endsWith("Note") ? 120 : 80);
+      }
+      if (body.bio != null) {
+        const lines = Array.isArray(body.bio) ? body.bio : String(body.bio).split(/\r?\n/);
+        next.bio = lines.map((line) => cleanText(line, 180)).filter(Boolean).slice(0, 12);
+      }
+      for (const key of ["game", "zalo", "tele"]) {
+        if (body[key] != null) {
+          const url = cleanUrl(body[key]);
+          if (!url) {
+            sendJson(res, 400, { success: false, error: "Link không hợp lệ" });
+            return;
+          }
+          next[key] = url;
+        }
+      }
+      if (body.avatarReset) {
+        delete next.avatarMime;
+        if (fs.existsSync(avatarFile)) fs.unlinkSync(avatarFile);
+      } else if (typeof body.avatar === "string" && body.avatar.startsWith("data:image/")) {
+        const match = body.avatar.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=\s]+)$/);
+        if (!match) {
+          sendJson(res, 400, { success: false, error: "Ảnh không đúng định dạng" });
+          return;
+        }
+        const buf = Buffer.from(match[2].replace(/\s/g, ""), "base64");
+        if (!buf.length || buf.length > 2_000_000) {
+          sendJson(res, 400, { success: false, error: "Ảnh tối đa 2MB" });
+          return;
+        }
+        fs.writeFileSync(avatarFile, buf);
+        next.avatarMime = match[1];
+      }
+      next.updatedAt = new Date().toISOString();
+      const { avatar, password, avatarReset, ...persist } = next;
+      fs.writeFileSync(linkFile, JSON.stringify(persist, null, 2), "utf8");
+      sendJson(res, 200, publicProfile(persist));
+    } catch (err) {
+      sendJson(res, 500, { success: false, error: err.message });
+    }
+    return;
   }
 
   // ── 1. AUTHENTICATION & USER RBAC ──────────────────────────────────────────
@@ -367,8 +541,8 @@ const server = http.createServer(async (req, res) => {
 
   // GET /api/admin/users
   if (req.method === "GET" && pathname === "/api/admin/users") {
-    if (currentUser.role !== "admin") {
-      sendJson(res, 403, { success: false, error: "Chỉ Admin mới có quyền xem danh sách người dùng" });
+    if (!canManageUserAccounts(currentUser)) {
+      sendJson(res, 403, { success: false, error: "Không có quyền xem danh sách người dùng" });
       return;
     }
     const users = listUsers().map((u) => ({
@@ -382,12 +556,20 @@ const server = http.createServer(async (req, res) => {
 
   // POST /api/admin/users/create (Admin tạo tài khoản mới)
   if (req.method === "POST" && pathname === "/api/admin/users/create") {
-    if (currentUser.role !== "admin") {
-      sendJson(res, 403, { success: false, error: "Chỉ Admin mới có quyền tạo người dùng" });
+    if (!canManageUserAccounts(currentUser)) {
+      sendJson(res, 403, { success: false, error: "Không có quyền tạo người dùng" });
       return;
     }
     try {
       const body = await parseBody(req);
+      if (currentUser.role === "assistant") {
+        if (body.role && body.role !== "user") {
+          sendJson(res, 403, { success: false, error: "Trợ lý chỉ được tạo tài khoản user." });
+          return;
+        }
+        body.role = "user";
+        body.initialBalance = 0;
+      }
       const newUser = createUserByAdmin(body);
       if (body.initialBalance && body.initialBalance > 0) {
         topupBalance(newUser.id, body.initialBalance, "Cấp vốn ban đầu từ Admin", currentUser.username);
@@ -413,13 +595,20 @@ const server = http.createServer(async (req, res) => {
 
   // POST /api/admin/users/update (Admin sửa thông tin người dùng)
   if (req.method === "POST" && pathname === "/api/admin/users/update") {
-    if (currentUser.role !== "admin") {
-      sendJson(res, 403, { success: false, error: "Chỉ Admin mới có quyền sửa người dùng" });
+    if (!canManageUserAccounts(currentUser)) {
+      sendJson(res, 403, { success: false, error: "Không có quyền sửa người dùng" });
       return;
     }
     try {
       const body = await parseBody(req);
       const before = getUserById(body.userId);
+      if (currentUser.role === "assistant") {
+        if (!before || before.role !== "user") {
+          sendJson(res, 403, { success: false, error: "Trợ lý chỉ được sửa tài khoản user." });
+          return;
+        }
+        body.role = "user";
+      }
       const updated = updateUserByAdmin(body.userId, body);
       const details = {};
       if (body.fullName !== undefined) details.fullName = { from: before?.fullName, to: updated.fullName };
@@ -446,13 +635,17 @@ const server = http.createServer(async (req, res) => {
 
   // POST /api/admin/users/delete (Admin xóa người dùng)
   if (req.method === "POST" && pathname === "/api/admin/users/delete") {
-    if (currentUser.role !== "admin") {
-      sendJson(res, 403, { success: false, error: "Chỉ Admin mới có quyền xóa người dùng" });
+    if (!canManageUserAccounts(currentUser)) {
+      sendJson(res, 403, { success: false, error: "Không có quyền xóa người dùng" });
       return;
     }
     try {
       const body = await parseBody(req);
       const before = getUserById(body.userId);
+      if (currentUser.role === "assistant" && (!before || before.role !== "user")) {
+        sendJson(res, 403, { success: false, error: "Trợ lý chỉ được xóa tài khoản user." });
+        return;
+      }
       deleteUserByAdmin(body.userId);
       logAdminAction({
         action: "USER_DELETE",
@@ -652,7 +845,13 @@ const server = http.createServer(async (req, res) => {
   // GET /api/domains/search — Freze + Admin (khi có CLOUDFLARE_ADMIN_API_TOKEN)
   if (req.method === "GET" && pathname === "/api/domains/search") {
     try {
-      const q = (parsedUrl.searchParams.get("q") || "").trim().toLowerCase();
+      const q = (parsedUrl.searchParams.get("q") || "")
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "")
+        .split("/")[0]
+        .split("?")[0];
       const isAdmin = currentUser.role === "admin";
       // Hub admin: search cả Admin zones; user thường: Freze + domain mình được gán (kể cả Admin nếu đã assign)
       const zones = listHubZonesFromCache({ includeAdmin: true });
@@ -688,7 +887,7 @@ const server = http.createServer(async (req, res) => {
 
           return {
             id: z.id,
-            domain: z.name,
+            domain: normName,
             status: z.status,
             accountName: z.accountName,
             cfAccount,
@@ -705,15 +904,23 @@ const server = http.createServer(async (req, res) => {
         .filter((r) => {
           if (isAdmin) return true;
           return r.permission === "owned" || r.permission === "pending";
-        })
-        .slice(0, 50);
+        });
+      const seenSearch = new Set();
+      const uniqueResults = [];
+      for (const r of results) {
+        const key = String(r.domain || "").toLowerCase();
+        if (!key || seenSearch.has(key)) continue;
+        seenSearch.add(key);
+        uniqueResults.push(r);
+      }
 
+      const pageResults = uniqueResults.slice(0, 50);
       sendJson(res, 200, {
         success: true,
-        count: results.length,
-        totalInSystem: isAdmin ? zones.length : results.length,
+        count: pageResults.length,
+        totalInSystem: isAdmin ? uniqueResults.length : pageResults.length,
         cfScope: "freze_and_admin",
-        results,
+        results: pageResults,
       });
     } catch (err) {
       sendJson(res, 500, { success: false, error: err.message });
@@ -818,7 +1025,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const match = pathname.match(/^\/api\/admin\/domain-requests\/([^\/]+)\/approve$/);
       const requestId = match[1];
-      const approved = approveDomainRequest(requestId, currentUser);
+      const body = await parseBody(req);
+      const approved = approveDomainRequest(requestId, currentUser, {
+        confirmTransfer: body.confirmTransfer === true,
+      });
       logAdminAction({
         action: "DOMAIN_REQUEST_APPROVE",
         actor: currentUser,
@@ -832,7 +1042,12 @@ const server = http.createServer(async (req, res) => {
         request: approved,
       });
     } catch (err) {
-      sendJson(res, 400, { success: false, error: err.message });
+      sendJson(res, err.code === "OWNER_CONFLICT" ? 409 : 400, {
+        success: false,
+        error: err.message,
+        code: err.code || undefined,
+        currentOwner: err.currentOwner || null,
+      });
     }
     return;
   }
@@ -947,7 +1162,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const match = pathname.match(/^\/api\/admin\/domain-orders\/([^\/]+)\/approve$/);
       const orderId = match[1];
-      const approveRes = approveDomainOrder(orderId, currentUser);
+      const body = await parseBody(req);
+      const approveRes = approveDomainOrder(orderId, currentUser, {
+        confirmTransfer: body.confirmTransfer === true,
+      });
       logAdminAction({
         action: "DOMAIN_ORDER_APPROVE",
         actor: currentUser,
@@ -965,7 +1183,12 @@ const server = http.createServer(async (req, res) => {
         ...approveRes,
       });
     } catch (err) {
-      sendJson(res, 400, { success: false, error: err.message });
+      sendJson(res, err.code === "OWNER_CONFLICT" ? 409 : 400, {
+        success: false,
+        error: err.message,
+        code: err.code || undefined,
+        currentOwner: err.currentOwner || null,
+      });
     }
     return;
   }
@@ -1005,13 +1228,24 @@ const server = http.createServer(async (req, res) => {
 
   // GET /api/admin/audit-log — nhật ký quản trị user / quyền / Xu
   if (req.method === "GET" && pathname === "/api/admin/audit-log") {
-    if (!requireAdmin(res, currentUser)) return;
+    if (!canManageUserAccounts(currentUser)) {
+      sendJson(res, 403, { success: false, error: "Không có quyền xem lịch sử user" });
+      return;
+    }
     try {
       const limit = parsedUrl.searchParams.get("limit") || "100";
-      const action = parsedUrl.searchParams.get("action") || "";
+      let action = parsedUrl.searchParams.get("action") || "";
       const q = parsedUrl.searchParams.get("q") || "";
       const targetUserId = parsedUrl.searchParams.get("userId") || "";
+      if (currentUser.role === "assistant" && action && !USER_AUDIT_ACTIONS.has(String(action).toUpperCase())) {
+        sendJson(res, 200, { success: true, total: 0, items: [] });
+        return;
+      }
       const data = listAdminAudit({ limit, action, q, targetUserId });
+      if (currentUser.role === "assistant") {
+        data.items = data.items.filter((item) => USER_AUDIT_ACTIONS.has(String(item.action || "").toUpperCase()));
+        data.total = data.items.length;
+      }
       sendJson(res, 200, { success: true, ...data });
     } catch (err) {
       sendJson(res, 500, { success: false, error: err.message });
@@ -1046,14 +1280,13 @@ const server = http.createServer(async (req, res) => {
       const domains = [
         ...new Set(
           listRaw
-            .map((d) =>
-              String(d || "")
-                .trim()
-                .toLowerCase()
-                .replace(/^https?:\/\//, "")
-                .replace(/\/.*$/, "")
-                .replace(/^www\./, "")
-            )
+            .map((d) => {
+              try {
+                return normalizeDomain(String(d || "")).replace(/^www\./, "");
+              } catch {
+                return "";
+              }
+            })
             .filter(Boolean)
         ),
       ];
@@ -1061,11 +1294,29 @@ const server = http.createServer(async (req, res) => {
       const target = getUserById(userId);
       if (!target) throw new Error("Không tìm thấy thành viên");
 
+      const conflicts = domains
+        .map((d) => describeOwnerConflict(d, userId))
+        .filter(Boolean);
+      if (conflicts.length && body.confirmTransfer !== true) {
+        const first = conflicts[0];
+        sendJson(res, 409, {
+          success: false,
+          code: "OWNER_CONFLICT",
+          conflicts,
+          currentOwner: first,
+          error:
+            conflicts.length === 1
+              ? `Tên miền ${first.domain} đang thuộc @${first.username}. Xác nhận đổi chủ thì mới gán được.`
+              : `${conflicts.length} tên miền đang thuộc người khác. Xác nhận đổi chủ thì mới gán được.`,
+        });
+        return;
+      }
+
       const assignments = [];
       const failed = [];
       for (const d of domains) {
         try {
-          assignments.push(assignDomain(d, userId, body.meta || {}));
+          assignments.push(assignDomain(d, userId, body.meta || {}, { allowTransfer: true }));
         } catch (err) {
           failed.push({ domain: d, error: err.message });
         }
@@ -1327,60 +1578,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // POST /api/tasks/clone-web (ASYNC WORKER - VIP Web Cloner: 100 Xu / lượt)
   if (req.method === "POST" && pathname === "/api/tasks/clone-web") {
-    try {
-      const body = await parseBody(req);
-      const url = body.url ? body.url.trim() : "";
-      if (!url) {
-        sendJson(res, 400, { success: false, error: "Vui lòng nhập URL trang web cần sao chép" });
-        return;
-      }
-
-      // Trừ 100 Xu nếu là User thường (100k = 100 Xu)
-      const CLONE_FEE_XU = 100;
-      if (currentUser.role !== "admin") {
-        deductBalance(
-          currentUser.userId,
-          CLONE_FEE_XU,
-          `Sao chép Website VIP: ${url} (100 Xu)`,
-          { url, templateName: body.templateName, domain: body.domain }
-        );
-      }
-
-      const task = createTask({
-        type: "CLONE_WEBSITE",
-        domain: body.domain || "",
-        userId: currentUser.userId,
-        title: `VIP Clone (100 Xu): ${url}`,
-        params: {
-          url,
-          templateName: body.templateName || "",
-          domain: body.domain || "",
-          targetUrl: body.targetUrl || "",
-          isDeploy: Boolean(body.domain),
-          logoData: body.logoData || null,
-          faviconData: body.faviconData || null,
-          pageTitle: body.pageTitle || "",
-          textReplacements: Array.isArray(body.textReplacements) ? body.textReplacements : [],
-          userId: currentUser.userId,
-          deductedAmount: currentUser.role === "admin" ? 0 : CLONE_FEE_XU,
-        },
-      });
-
-      setImmediate(() => {
-        executeCloneWebsite(task.id);
-      });
-
-      sendJson(res, 200, {
-        success: true,
-        message: `Đã trừ 100 Xu và khởi động tiến trình sao chép website [${url}]!`,
-        jobId: task.id,
-        task,
-      });
-    } catch (err) {
-      sendJson(res, 400, { success: false, error: err.message });
-    }
+    sendJson(res, 403, { success: false, error: "Chức năng clone web đã đóng" });
     return;
   }
 
@@ -1990,6 +2189,80 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // POST /api/suggest-domains — gợi ý đuôi TLD kèm giá (kiểu Namecheap)
+  if (req.method === "POST" && pathname === "/api/suggest-domains") {
+    try {
+      const body = await parseBody(req);
+      const seed = normalizeDomain(body.domain || body.seed || "");
+      if (!seed) {
+        sendJson(res, 400, { success: false, error: "Nhập tên miền gốc để gợi ý" });
+        return;
+      }
+      const candidates = buildSuggestCandidates(seed, { limit: Number(body.limit) || 16 });
+      if (!candidates.length) {
+        sendJson(res, 200, { success: true, seed, suggestions: [] });
+        return;
+      }
+
+      let availMap = new Map();
+      try {
+        const batch = await checkDomainsAvailabilityBatch(candidates);
+        for (const row of batch || []) {
+          const name = String(row.domain || row.name || "").toLowerCase();
+          if (name) availMap.set(name, row);
+        }
+      } catch {
+        // fallback: parallel single checks (slower)
+        await Promise.all(
+          candidates.map(async (d) => {
+            const info = await checkDomainAvailability(d).catch(() => ({ result: "unknown" }));
+            availMap.set(d, info);
+          })
+        );
+      }
+
+      const suggestions = candidates.map((domain) => {
+        const info = availMap.get(domain) || {};
+        const isPremium = Boolean(info.premiumPricing && Array.isArray(info.premiumPricing) && info.premiumPricing.length > 0);
+        const rawAvailable = info.result === "available";
+        const isAvailable = rawAvailable && !isPremium;
+        const priceRule = calculateDomainPriceRule(domain);
+        const tld = domain.includes(".") ? domain.slice(domain.lastIndexOf(".")) : "";
+        return {
+          domain,
+          tld,
+          isAvailable,
+          isBuyable: isAvailable,
+          isPremium,
+          status: isAvailable ? "AVAILABLE" : isPremium ? "PREMIUM" : info.result === "registered" || info.result === "taken" ? "TAKEN" : "UNKNOWN",
+          priceXu: priceRule.priceXu,
+          priceVnd: priceRule.priceVnd,
+          priceUsd: priceRule.priceUsd,
+          priceFormatted: `${priceRule.priceXu} Xu`,
+          priceLabel: `${priceRule.priceXu.toLocaleString("vi-VN")} Xu`,
+          ruleApplied: priceRule.ruleApplied,
+        };
+      });
+
+      // Còn trống lên trước, rồi theo giá tăng dần
+      suggestions.sort((a, b) => {
+        if (a.isAvailable !== b.isAvailable) return a.isAvailable ? -1 : 1;
+        return (a.priceXu || 0) - (b.priceXu || 0);
+      });
+
+      sendJson(res, 200, {
+        success: true,
+        seed,
+        count: suggestions.length,
+        availableCount: suggestions.filter((s) => s.isAvailable).length,
+        suggestions,
+      });
+    } catch (err) {
+      sendJson(res, 500, { success: false, error: err.message });
+    }
+    return;
+  }
+
   // POST /api/check-domains-batch (Kiểm tra hàng loạt danh sách tên miền cho User & Admin)
   if (req.method === "POST" && pathname === "/api/check-domains-batch") {
     try {
@@ -2245,7 +2518,6 @@ const server = http.createServer(async (req, res) => {
         if (zoneNs && zoneNs.length > 0) {
           await updateNameservers(domain, zoneNs).catch(() => {});
         }
-        await deleteForwardingPageRules(zone.id).catch(() => {});
       }
 
       // 4. Dọn dẹp liên kết cũ bị kẹt / lệch project
@@ -2266,7 +2538,8 @@ const server = http.createServer(async (req, res) => {
       }
 
       // 6. Cập nhật DNS CNAME (@ & www) trỏ chuẩn xác về target
-      await ensurePagesCname(domain, finalTarget).catch(() => {});
+      await ensurePagesCname(domain, finalTarget);
+      if (zone) await deleteForwardingPageRules(zone.id).catch(() => {});
 
       // 7. Cập nhật domains.json & js/config.js và Git Push / Deploy
       await updateTemplateDomainsJson(matchedTpl, domain, targetLink, targetTele).catch(() => {});
@@ -2342,7 +2615,6 @@ const server = http.createServer(async (req, res) => {
             if (zoneNs && zoneNs.length > 0) {
               await updateNameservers(dom, zoneNs).catch(() => {});
             }
-            await deleteForwardingPageRules(zone.id).catch(() => {});
           }
 
           // Dọn dẹp domain cũ
@@ -2362,8 +2634,13 @@ const server = http.createServer(async (req, res) => {
             }
           }
 
-          // Cập nhật CNAME
-          await ensurePagesCname(dom, finalTarget).catch(() => {});
+          // Cập nhật CNAME, rồi mới gỡ 302
+          let cnameOk = false;
+          try {
+            await ensurePagesCname(dom, finalTarget);
+            cnameOk = true;
+          } catch {}
+          if (cnameOk && zone) await deleteForwardingPageRules(zone.id).catch(() => {});
 
           // Ghi domains.json & deploy
           await updateTemplateDomainsJson(matchedTpl, dom, targetLink, targetTele).catch(() => {});
@@ -2493,7 +2770,29 @@ const server = http.createServer(async (req, res) => {
       updateHistoryItem(historyId, { status: "success", ...historyPatch });
       setTimeout(() => verifyHistoryItem(historyId, false).catch(() => {}), 3000);
     }
+    invalidateHubDomainCaches();
     if (task?.id) completeTask(task.id, { historyId, ...result }, finishMsg);
+  }
+
+  function withPurchaseRefund(domain, orderId, friendly) {
+    if (!orderId) return friendly;
+    try {
+      const refund = refundFailedDomainOrder(
+        orderId,
+        domain,
+        `Hoàn Xu vì cài ${domain} thất bại: ${friendly}`
+      );
+      if (refund.refunded) {
+        return `${friendly} Đã hoàn ${refund.amount} Xu vào ví và gỡ miền khỏi tài khoản. Admin duyệt lại để cài tiếp.`;
+      }
+      if (refund.reopened) {
+        return `${friendly} Đã gỡ miền khỏi tài khoản và mở lại đơn để cài tiếp.`;
+      }
+    } catch (refundErr) {
+      console.error(`[order-refund] ${domain}:`, refundErr.message);
+      return `${friendly} (Không hoàn được Xu tự động: ${refundErr.message})`;
+    }
+    return friendly;
   }
 
   function failDeployTracking(task, historyId, friendly, actionMeta = {}) {
@@ -2531,7 +2830,6 @@ const server = http.createServer(async (req, res) => {
       if (nameservers) {
         await updateNameservers(domain, nameservers).catch(() => {});
       }
-      await deleteForwardingPageRules(zone.id).catch(() => {});
       logs.push({ step: 2, message: "Cập nhật Nameservers Cloudflare hoàn tất!" });
       bumpDeployProgress(deployTask, deployHistId, 58, "Cập nhật Nameservers Cloudflare hoàn tất!");
 
@@ -2549,7 +2847,17 @@ const server = http.createServer(async (req, res) => {
           finalTarget = pagesResult.canonicalSubdomain;
         }
       }
-      await ensurePagesCname(domain, finalTarget).catch(() => {});
+      let cnameOk = false;
+      try {
+        await ensurePagesCname(domain, finalTarget);
+        cnameOk = true;
+      } catch (cnameErr) {
+        logs.push({ step: 3, message: `CNAME lỗi, giữ Page Rule 302: ${cnameErr.message}` });
+        throw cnameErr;
+      }
+      if (cnameOk) {
+        await deleteForwardingPageRules(zone.id).catch(() => {});
+      }
       logs.push({ step: 3, message: "Đã kích hoạt Cloudflare Pages Custom Domain & SSL!" });
       bumpDeployProgress(deployTask, deployHistId, 78, "Đã kích hoạt Cloudflare Pages & SSL!");
 
@@ -2593,7 +2901,7 @@ const server = http.createServer(async (req, res) => {
       );
     } catch (err) {
       const failedTpl = body?.templateId ? getTemplate(body.templateId) : null;
-      const friendly = friendlySpaceshipBuyError(err.message);
+      const friendly = withPurchaseRefund(domain, body?.orderId, friendlySpaceshipBuyError(err.message));
       failDeployTracking(deployTask, deployHistId, friendly, {
         domain,
         actionType: isBuy ? "BUY_LP" : "POINT_LP",
@@ -2632,12 +2940,37 @@ const server = http.createServer(async (req, res) => {
         bumpDeployProgress(deployTask, deployHistId, 20, "Xác nhận tên miền có sẵn...");
       }
 
-      bumpDeployProgress(deployTask, deployHistId, 55, "Đang cài đặt chuyển hướng 302 trên Cloudflare...");
-      logs.push({ step: 2, message: "Đang cài đặt chuyển hướng 302 trên Cloudflare & cập nhật Nameservers..." });
-      const cf = await setupDirect302Redirect(domain, link);
-      if (cf.nameservers) {
-        await updateNameservers(domain, cf.nameservers).catch(() => {});
+      bumpDeployProgress(deployTask, deployHistId, 55, "Đang trỏ Nameserver sang Cloudflare...");
+      logs.push({ step: 2, message: "Đang trỏ Nameserver sang Cloudflare trước khi tạo Page Rule..." });
+      const ready = await pointNameserversFor302(domain, {
+        onTick: (status) => {
+          bumpDeployProgress(deployTask, deployHistId, 60, `Đã trỏ NS. Zone Cloudflare đang "${status}"...`);
+        },
+      });
+      if (!ready.active) {
+        const waitMsg = "Đã mua và trỏ nameserver. Đang chờ zone Cloudflare active để tự tạo 302...";
+        syncDeployOwnership(domain, currentUser, body, {
+          mode: "302",
+          currentLink: link,
+          templateId: null,
+          orderId: body.orderId || null,
+        });
+        updateHistoryItem(deployHistId, {
+          status: "in_progress",
+          progress: waitMsg,
+          error: null,
+          link,
+          details: { waitZone302: true, link, orderId: body.orderId || null },
+        });
+        if (deployTask?.id) {
+          markTaskWaitingZone(deployTask.id);
+          updateTaskProgress(deployTask.id, 65, waitMsg, "Registry chưa công bố nameserver", "info");
+        }
+        logs.push({ step: 2, message: waitMsg });
+        return;
       }
+      bumpDeployProgress(deployTask, deployHistId, 70, "Đang cài đặt chuyển hướng 302 trên Cloudflare...");
+      const cf = await setupDirect302Redirect(domain, link);
 
       const existingRepos = findDomainInRepos(domain);
       for (const m of existingRepos) {
@@ -2675,7 +3008,7 @@ const server = http.createServer(async (req, res) => {
         `Đã cài 302 cho ${domain}`
       );
     } catch (err) {
-      const friendly = friendlySpaceshipBuyError(err.message);
+      const friendly = withPurchaseRefund(domain, body?.orderId, friendlySpaceshipBuyError(err.message));
       failDeployTracking(deployTask, deployHistId, friendly, {
         domain,
         actionType: isBuy ? "BUY_302" : "POINT_302",
@@ -2965,6 +3298,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       const successCount = results.filter((r) => r.status === "success").length;
+      if (successCount > 0) invalidateHubDomainCaches();
       sendJson(res, 200, {
         success: true,
         message: `Đã xử lý đổi link cho ${successCount}/${domains.length} tên miền!`,
@@ -3046,12 +3380,9 @@ const server = http.createServer(async (req, res) => {
       let activeLink = inherited.link;
       let activeTele = inherited.tele || "";
 
-      // Kiểm tra Zone Cloudflare: xoá mọi 302 Page Rule để kích hoạt Landing Page
-      setHistoryProgress(histId, "Đang gỡ Page Rule 302 (nếu có)...");
+      // Giữ Page Rule 302 tới khi CNAME Pages đã ghi. Xóa trước rồi attach fail
+      // thì A 8.8.8.8 proxied bị Cloudflare đẩy sang https://dns.google/.
       const zone = await findZoneByName(domain).catch(() => null);
-      if (zone) {
-        await deleteForwardingPageRules(zone.id, { token: tokenForZone(zone) }).catch(() => {});
-      }
 
       if (!activeLink) {
         activeLink = "https://t.me/";
@@ -3080,15 +3411,6 @@ const server = http.createServer(async (req, res) => {
           );
           if (pagesRes?.canonicalSubdomain) {
             finalTarget = pagesRes.canonicalSubdomain;
-          }
-          // chờ SSL active đúng account Pages
-          if (pagesRes?.projectName) {
-            await waitForPagesDomainActive(
-              pagesRes.projectName,
-              domain,
-              pagesRes.accountId || undefined,
-              90000
-            ).catch(() => {});
           }
         } catch (pagesErr) {
           console.error(`[Switch-Template] Lỗi addPagesDomain cho ${domain}:`, pagesErr.message);
@@ -3127,11 +3449,16 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      if (zone) {
+        setHistoryProgress(histId, "Đang gỡ Page Rule 302 sau khi CNAME đã trỏ...");
+        await deleteForwardingPageRules(zone.id, { token: tokenForZone(zone) }).catch(() => {});
+      }
+
       try {
         const proj = String(finalTarget || "").replace(/\.pages\.dev$/i, "");
         if (proj) {
           setHistoryProgress(histId, "Đang chờ Pages domain active (SSL)...");
-          await waitForPagesDomainActive(proj, domain, undefined, 120000);
+          await waitForPagesDomainActive(proj, domain, undefined, 15000);
         }
       } catch (waitErr) {
         console.warn(`[Switch-Template] Chờ Pages active: ${waitErr.message}`);
@@ -3182,6 +3509,7 @@ const server = http.createServer(async (req, res) => {
         cnameTarget: finalTarget,
         tele: activeTele || "",
       });
+      invalidateHubDomainCaches();
 
       const histItem = updateHistoryItem(histId, {
         status: "success",

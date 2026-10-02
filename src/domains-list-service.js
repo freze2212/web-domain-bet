@@ -171,7 +171,11 @@ export function queryEnrichedDomainsList(ctx, { page = 1, limit = 50, q = "", al
   const full = buildEnrichedDomainsList(ctx);
   const query = String(q || "")
     .trim()
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .split("/")[0]
+    .split("?")[0];
   const filtered = query ? full.filter((d) => domainMatchesQuery(d, query)) : full;
 
   if (all) {

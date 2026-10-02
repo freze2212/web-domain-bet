@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { calculateDomainPrice } from "./wallet.js";
+import { getStore, setStore } from "./mongo-stores.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, "..", "data");
@@ -14,33 +15,18 @@ export function invalidateHistoryCache() {
   historyCache = { mtime: -1, data: null };
 }
 
-function ensureHistoryFile() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(HISTORY_FILE)) {
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify([], null, 2), "utf8");
-    historyCache = { mtime: Date.now(), data: [] };
-  }
+function persistHistory(list) {
+  historyCache = { mtime: Date.now(), data: list };
+  setStore("history", list);
 }
 
+function ensureHistoryFile() {}
+
 export function getHistory() {
-  ensureHistoryFile();
-  try {
-    const mtime = fs.statSync(HISTORY_FILE).mtimeMs;
-    if (historyCache.data && historyCache.mtime === mtime) {
-      return historyCache.data;
-    }
-    const content = fs.readFileSync(HISTORY_FILE, "utf8");
-    const list = JSON.parse(content || "[]");
-    const data = Array.isArray(list) ? list : [];
-    historyCache = { mtime, data };
-    return data;
-  } catch (err) {
-    console.error("Lỗi đọc file lịch sử:", err.message);
-    historyCache = { mtime: Date.now(), data: [] };
-    return historyCache.data;
-  }
+  const data = getStore("history");
+  const list = Array.isArray(data) ? data : [];
+  historyCache = { mtime: Date.now(), data: list };
+  return list;
 }
 
 export function addHistoryItem(item) {
@@ -78,8 +64,7 @@ export function addHistoryItem(item) {
 
     // Giữ tối đa 500 bản ghi gần nhất
     const trimmed = list.slice(0, 500);
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(trimmed, null, 2), "utf8");
-    invalidateHistoryCache();
+    persistHistory(trimmed);
     return newEntry;
   } catch (err) {
     console.error("Lỗi ghi lịch sử:", err.message);
@@ -109,8 +94,7 @@ export function updateHistoryItem(id, updates) {
       updatedAt: new Date().toISOString(),
     };
 
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(list, null, 2), "utf8");
-    invalidateHistoryCache();
+    persistHistory(list);
     return list[index];
   } catch (err) {
     console.error("Lỗi cập nhật lịch sử:", err.message);
@@ -130,8 +114,7 @@ export function setHistoryProgress(id, step, extra = {}) {
 export function clearHistory() {
   ensureHistoryFile();
   try {
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify([], null, 2), "utf8");
-    invalidateHistoryCache();
+    persistHistory([]);
     return true;
   } catch {
     return false;
@@ -143,7 +126,7 @@ export function clearHistory() {
  * - Có bản success/failed mới hơn cùng domain → đánh dấu cancelled
  * - Treo > maxAgeMs → failed (stale)
  */
-export function reconcileStaleHistory(maxAgeMs = 2 * 60 * 60 * 1000) {
+export function reconcileStaleHistory(maxAgeMs = 20 * 60 * 1000) {
   ensureHistoryFile();
   try {
     const list = getHistory();
@@ -164,6 +147,10 @@ export function reconcileStaleHistory(maxAgeMs = 2 * 60 * 60 * 1000) {
 
     for (const h of list) {
       if (h.status !== "in_progress" && h.status !== "pending") continue;
+      if (h.details?.waitZone302) {
+        const born = new Date(h.timestamp || 0).getTime();
+        if (born && now - born < 6 * 60 * 60 * 1000) continue;
+      }
       const key = String(h.domain || "")
         .toLowerCase()
         .replace(/^www\./, "");
@@ -192,8 +179,7 @@ export function reconcileStaleHistory(maxAgeMs = 2 * 60 * 60 * 1000) {
     }
 
     if (changed > 0) {
-      fs.writeFileSync(HISTORY_FILE, JSON.stringify(list, null, 2), "utf8");
-      invalidateHistoryCache();
+      persistHistory(list);
     }
     return changed;
   } catch (err) {

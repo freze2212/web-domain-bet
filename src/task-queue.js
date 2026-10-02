@@ -44,11 +44,15 @@ loadTasks();
 reconcileStaleTasks();
 
 /** Đóng task RUNNING/PENDING treo quá lâu (PM2 restart, worker chết…). */
-export function reconcileStaleTasks(maxAgeMs = 2 * 60 * 60 * 1000) {
+export function reconcileStaleTasks(maxAgeMs = 20 * 60 * 1000) {
   const now = Date.now();
   let n = 0;
   for (const task of tasksMap.values()) {
     if (task.status !== "RUNNING" && task.status !== "PENDING") continue;
+    if (task.params?.waitZone302) {
+      const born = new Date(task.createdAt || task.startedAt || 0).getTime();
+      if (born && now - born < 6 * 60 * 60 * 1000) continue;
+    }
     const lastStep = Array.isArray(task.steps) && task.steps.length
       ? task.steps[task.steps.length - 1]?.time
       : null;
@@ -101,6 +105,15 @@ export function createTask({ type, domain = "", userId = "admin", params = {}, t
   tasksMap.set(id, task);
   saveTasks();
   notifyTaskUpdate(id);
+  return task;
+}
+
+export function markTaskWaitingZone(id) {
+  const task = tasksMap.get(id);
+  if (!task) return null;
+  task.params = { ...(task.params || {}), waitZone302: true };
+  if (task.status === "PENDING") task.status = "RUNNING";
+  saveTasks();
   return task;
 }
 

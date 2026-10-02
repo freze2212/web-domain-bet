@@ -1,16 +1,66 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { LANDING_ROOT } from "./utils.js";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { updateJsConfigFile } from "./repo-scanner.js";
 import { stripDomainsJsonFallbacks } from "./lp-link-patch.js";
 import { deployToAllPagesInstances, ensureLiveDomainLink } from "./cloudflare.js";
+import { config } from "./config.js";
 
 const execAsync = promisify(exec);
 
+function githubAuthEnv() {
+  const token = config.github.token();
+  if (!token) return { GIT_TERMINAL_PROMPT: "0" };
+  return {
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.extraheader",
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`,
+  };
+}
+
+function gitExec(cmd, cwd, { auth = false } = {}) {
+  return execAsync(cmd, {
+    cwd,
+    env: { ...process.env, ...(auth ? githubAuthEnv() : { GIT_TERMINAL_PROMPT: "0" }) },
+  });
+}
+
 // Danh sách các mẫu Landing Page CHUẨN HOẠT ĐỘNG (Verified Active on Cloudflare Pages)
 export const ACTIVE_TEMPLATES = [
+  {
+    "id": "lp_llnewz",
+    "name": "XOAMAAN - BẢO VỆ AN TOÀN TÀI KHOẢN",
+    "title": "XOAMAAN - BẢO VỆ AN TOÀN TÀI KHOẢN",
+    "folder": "lp-llnewz",
+    "path": "C:\\Landingpages\\GG88\\lp-llnewz",
+    "gitRepo": "freze2212/lp-llnewz",
+    "pagesProject": "lp-llnewz",
+    "cnameTarget": "lp-llnewz.pages.dev",
+    "sampleDomain": "autocode.live",
+    "sampleUrl": "https://autocode.live",
+    "totalDomains": 1,
+    "brand": "GG88",
+    "brandLabel": "GG88"
+  },
+  {
+    "id": "lp_gg88ny",
+    "name": "Welcome to ⭐ Cổng chính thức năm 2026 (gg88ny)",
+    "title": "Welcome to ⭐ Cổng chính thức năm 2026",
+    "folder": "lp-gg88ny",
+    "path": "C:\\Landingpages\\GG88\\lp-gg88ny",
+    "gitRepo": "freze2212/lp-gg88ny",
+    "pagesProject": "lp-gg88ny",
+    "cnameTarget": "lp-gg88ny.pages.dev",
+    "sampleDomain": "gg88hh.com",
+    "sampleUrl": "https://gg88hh.com",
+    "totalDomains": 1,
+    "brand": "GG88",
+    "brandLabel": "GG88"
+  },
   {
     "id": "mm88_lp_5uae",
     "name": "MM88 - CỔNG QUỐC TẾ 5 QUỐC GIA (5 UAE)",
@@ -216,17 +266,19 @@ export const ACTIVE_TEMPLATES = [
   },
   {
     "id": "lp_gg88_c168_qte",
-    "name": "Welcome to cổng quốc tế chính thức ☀ 2026️",
+    "name": "GG88BZ — Cổng quốc tế chính thức ☀ 2026",
     "title": "Welcome to cổng quốc tế chính thức ☀ 2026️",
     "folder": "lp-c168-qte",
     "path": "C:\\Landingpages\\LLWIN\\lp-c168-qte",
+    "gitRepo": "freze2212/lp-gg88-c168-qte",
     "pagesProject": "lp-gg88-c168-qte",
     "cnameTarget": "lp-gg88-c168-qte.pages.dev",
-    "sampleDomain": "32llwin.com",
-    "sampleUrl": "https://32llwin.com",
-    "totalDomains": 0,
-    "brand": "LLWIN",
-    "brandLabel": "LLWIN"
+    "pagesAccountId": "456da4d89821d871fac09c0e5651338a",
+    "sampleDomain": "ggtop.us",
+    "sampleUrl": "https://ggtop.us",
+    "totalDomains": 2,
+    "brand": "GG88",
+    "brandLabel": "GG88"
   },
   {
     "id": "lp_gg88_xoamaan",
@@ -478,6 +530,66 @@ export const ACTIVE_TEMPLATES = [
     "brandLabel": "GG88"
   },
   {
+    "id": "lp_mm88_5f",
+    "name": "MM88 — CỔNG QUỐC TẾ 2026 SINGAPORE (5F clone)",
+    "title": "MM88 - Cổng Chính Thức 2026 - Singapore",
+    "folder": "lp-mm88-5f",
+    "path": "C:\\Landingpages\\MM88\\lp-mm88-5f",
+    "gitRepo": "freze2212/lp-mm88-5f",
+    "pagesProject": "lp-mm88-5f",
+    "cnameTarget": "lp-mm88-5f.pages.dev",
+    "sampleDomain": "mmquocte.com",
+    "sampleUrl": "https://mmquocte.com",
+    "totalDomains": 1,
+    "brand": "MM88",
+    "brandLabel": "MM88"
+  },
+  {
+    "id": "lp_mm88_u880",
+    "name": "MM88 — U880 VIP (Đại Sứ)",
+    "title": "MM88 - Đại Sứ Thương Hiệu Toàn Cầu",
+    "folder": "lp-mm88-u880",
+    "path": "C:\\Landingpages\\MM88\\lp-mm88-u880",
+    "gitRepo": "freze2212/lp-mm88-u880",
+    "pagesProject": "lp-mm88-u880",
+    "cnameTarget": "lp-mm88-u880.pages.dev",
+    "sampleDomain": "lp-mm88-u880.pages.dev",
+    "sampleUrl": "https://lp-mm88-u880.pages.dev",
+    "totalDomains": 0,
+    "brand": "MM88",
+    "brandLabel": "MM88"
+  },
+  {
+    "id": "lp_xoamaan_to",
+    "name": "GG88 — XOAMAAN.SITE (clone) → xoamaan.to",
+    "title": "GG88 — XOAMAAN.SITE Landing",
+    "folder": "lp-xoamaan-to",
+    "path": "C:\\Landingpages\\GG88\\lp-xoamaan-to",
+    "gitRepo": "freze2212/lp-xoamaan-to",
+    "pagesProject": "lp-xoamaan-to",
+    "cnameTarget": "lp-xoamaan-to.pages.dev",
+    "sampleDomain": "xoamaan.to",
+    "sampleUrl": "https://xoamaan.to",
+    "totalDomains": 1,
+    "brand": "GG88",
+    "brandLabel": "GG88"
+  },
+  {
+    "id": "lp_gg88_cd",
+    "name": "GG88 CD — Trung Tâm Chuyển Đổi Link (no App DL)",
+    "title": "GG88 CD — Trung Tâm Chuyển Đổi Link",
+    "folder": "lp-gg88-cd",
+    "path": "C:\\Landingpages\\GG88\\lp-gg88-cd",
+    "gitRepo": "freze2212/lp-gg88-cd",
+    "pagesProject": "lp-gg88-cd",
+    "cnameTarget": "lp-gg88-cd.pages.dev",
+    "sampleDomain": "gg88macao.com",
+    "sampleUrl": "https://gg88macao.com",
+    "totalDomains": 1,
+    "brand": "GG88",
+    "brandLabel": "GG88"
+  },
+  {
     "id": "landing_page_uae",
     "name": "GG88 - LANDING PAGE UAE (Admin Pages · Git)",
     "title": "GG88 - LANDING PAGE UAE (Admin Pages · Git)",
@@ -492,6 +604,53 @@ export const ACTIVE_TEMPLATES = [
     "totalDomains": 158,
     "brand": "GG88",
     "brandLabel": "GG88"
+  },
+  {
+    "id": "lp_xoamadoc",
+    "name": "S.Y.S.T.E.M // OVERRIDE (xoamadoc)",
+    "title": "S.Y.S.T.E.M // OVERRIDE",
+    "folder": "lp-xoamadoc",
+    "path": "C:\\Landingpages\\GG88\\lp-xoamadoc",
+    "gitRepo": "freze2212/lp-xoamadoc",
+    "pagesProject": "lp-xoamadoc",
+    "cnameTarget": "lp-xoamadoc.pages.dev",
+    "sampleDomain": "xoamadoc.top",
+    "sampleUrl": "https://xoamadoc.top",
+    "totalDomains": 1,
+    "brand": "GG88",
+    "brandLabel": "GG88"
+  },
+  {
+    "id": "landingpage_xoamaan_4d",
+    "name": "XOAMAAN 4D — xoamaan.uk",
+    "title": "xoamagg",
+    "folder": "landingpage-xoamaan-4d",
+    "path": "C:\\Landingpages\\GG88\\landingpage-xoamaan-4d",
+    "gitRepo": "freze2212/landingpage-xoamaan-4d",
+    "pagesProject": "landingpage-xoamaan-4d",
+    "cnameTarget": "landingpage-xoamaan-4d.pages.dev",
+    "pagesAccountId": "ddead9accc534c1eb074d2a46fffe748",
+    "sampleDomain": "xoamaan.uk",
+    "sampleUrl": "https://xoamaan.uk",
+    "totalDomains": 11,
+    "brand": "GG88",
+    "brandLabel": "GG88"
+  },
+  {
+    "id": "lp_88vipqt",
+    "name": "MM88 — Link độc quyền bảo mật cao (88vipqt)",
+    "title": "MM88",
+    "folder": "lp-88vipqt",
+    "path": "C:\\Landingpages\\MM88\\lp-88vipqt",
+    "gitRepo": "freze2212/lp-88vipqt",
+    "pagesProject": "lp-88vipqt-git",
+    "cnameTarget": "lp-88vipqt-git.pages.dev",
+    "pagesAccountId": "456da4d89821d871fac09c0e5651338a",
+    "sampleDomain": "88vipqt.com",
+    "sampleUrl": "https://88vipqt.com",
+    "totalDomains": 1,
+    "brand": "MM88",
+    "brandLabel": "MM88"
   }
 ];
 
@@ -501,9 +660,9 @@ let lastTemplatesReadTime = 0;
 export function resolveTemplatePath(tPath, brand, folder) {
   if (!tPath) return tPath;
   if (fs.existsSync(tPath)) return tPath;
-  const linuxPath = path.join("/var/www/Landingpages", brand || "", folder || path.basename(tPath));
+  const linuxPath = path.join(LANDING_ROOT, brand || "", folder || path.basename(tPath));
   if (fs.existsSync(linuxPath)) return linuxPath;
-  const linuxDirect = path.join("/var/www/Landingpages", path.basename(tPath));
+  const linuxDirect = path.join(LANDING_ROOT, path.basename(tPath));
   if (fs.existsSync(linuxDirect)) return linuxDirect;
   return tPath;
 }
@@ -533,14 +692,16 @@ export function listTemplates() {
 
 export function getTemplate(idOrFolder) {
   const templates = listTemplates();
-  if (!idOrFolder) return templates[0];
-  const found = templates.find(
-    (t) =>
-      t.id?.toLowerCase() === idOrFolder.toLowerCase() ||
-      t.folder?.toLowerCase() === idOrFolder.toLowerCase() ||
-      t.pagesProject?.toLowerCase() === idOrFolder.toLowerCase()
+  if (!idOrFolder) return null;
+  const key = String(idOrFolder).toLowerCase();
+  return (
+    templates.find(
+      (t) =>
+        t.id?.toLowerCase() === key ||
+        t.folder?.toLowerCase() === key ||
+        t.pagesProject?.toLowerCase() === key
+    ) || null
   );
-  return found || templates[0];
 }
 
 export function findTemplateByDomain(domain) {
@@ -560,6 +721,48 @@ export function findTemplateByDomain(domain) {
 }
 
 const templateLocks = new Map();
+
+/** Đưa thư mục mẫu về đúng bản origin rồi mới sửa. Không commit trên bản lệch. */
+export async function alignRepoToOrigin(cwd) {
+  await execAsync("git rebase --abort", { cwd }).catch(() => {});
+  await execAsync("git merge --abort", { cwd }).catch(() => {});
+  await gitExec("git fetch origin", cwd, { auth: true });
+  const showRef = await execAsync("git show-ref", { cwd }).catch(() => ({ stdout: "" }));
+  const refs = String(showRef.stdout || "");
+  const branch = refs.includes("refs/remotes/origin/main")
+    ? "main"
+    : refs.includes("refs/remotes/origin/master")
+      ? "master"
+      : null;
+  if (!branch) throw new Error("Repo không có origin/main");
+  await execAsync(`git checkout -f -B ${branch} origin/${branch}`, { cwd });
+  return branch;
+}
+
+export async function publishRepoChanges(cwd, { commitMsg, prepare }) {
+  let lastErr = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const branch = await alignRepoToOrigin(cwd);
+      if (prepare) await prepare();
+      const rels = ["domains.json", "data/domains.json", "config.js", "js/config.js", "index.html", "_redirects"].filter((rel) =>
+        fs.existsSync(path.join(cwd, rel))
+      );
+      if (rels.length) await execAsync(`git add -- ${rels.join(" ")}`, { cwd });
+      const st = await execAsync("git status --porcelain -- domains.json config.js js/config.js index.html _redirects", { cwd });
+      if (String(st.stdout || "").trim()) {
+        const safeMsg = String(commitMsg || "Update domain link").replace(/"/g, "'");
+        await execAsync(`git commit -m "${safeMsg}"`, { cwd });
+      }
+      const gitPush = await pushTemplateRemotes(cwd, branch);
+      if (gitPush.originOk) return gitPush;
+      lastErr = gitPush.errors.join(" | ");
+    } catch (err) {
+      lastErr = err.message || String(err);
+    }
+  }
+  throw new Error(lastErr || "git push origin thất bại");
+}
 
 function withTemplateLock(tplPath, fn) {
   const currentLock = templateLocks.get(tplPath) || Promise.resolve();
@@ -589,81 +792,41 @@ export async function updateTemplateDomainsJson(template, domain, mainUrl, messe
       );
     }
 
-    // Đồng bộ domains.json với origin — KHÔNG bao giờ git reset --hard
-    // (reset --hard sẽ mất domain khác / thay đổi local chưa push)
-    try {
-      const rebaseMerge = path.join(tplObj.path, ".git", "rebase-merge");
-      const rebaseApply = path.join(tplObj.path, ".git", "rebase-apply");
-      if (fs.existsSync(rebaseMerge) || fs.existsSync(rebaseApply)) {
-        await execAsync(`git rebase --abort`, { cwd: tplObj.path }).catch(() => {});
-      }
-      await execAsync(`git fetch origin`, { cwd: tplObj.path });
-      const showRef = await execAsync(`git show-ref`, { cwd: tplObj.path }).catch(() => ({ stdout: "" }));
-      const refs = String(showRef.stdout || "");
-      const pick = refs.includes("refs/remotes/origin/main")
-        ? "origin/main"
-        : refs.includes("refs/remotes/origin/master")
-          ? "origin/master"
-          : null;
-      if (pick) {
-        // Merge key từ remote domains.json vào file local (giữ hết domain 2 phía)
-        let remoteObj = {};
-        let localObj = {};
-        try {
-          const remoteDj = await execAsync(`git show ${pick}:domains.json`, { cwd: tplObj.path });
-          remoteObj = JSON.parse(remoteDj.stdout || "{}");
-        } catch {}
-        if (fs.existsSync(djPath)) {
-          try {
-            localObj = JSON.parse(fs.readFileSync(djPath, "utf8"));
-          } catch {}
-        }
-        const merged = { ...remoteObj, ...localObj };
-        fs.writeFileSync(djPath, JSON.stringify(merged, null, 2), "utf8");
-        // Cập nhật nhánh local với commit remote (merge, không hard reset)
-        await execAsync(`git merge --no-edit -X ours ${pick}`, { cwd: tplObj.path }).catch(async () => {
-          await execAsync(`git merge --abort`, { cwd: tplObj.path }).catch(() => {});
-        });
-      }
-    } catch (syncErr) {
-      throw new Error(`Không sync được origin trước khi ghi link: ${syncErr.message}`);
-    }
-
-    // Đọc domains.json SAU sync rồi ghi entry domain
-    let dj = {};
     let isExisting = false;
-    if (fs.existsSync(djPath)) {
-      try {
-        dj = JSON.parse(fs.readFileSync(djPath, "utf8"));
-        if (norm in dj) isExisting = true;
-      } catch {}
-    }
-    dj[norm] = entry;
-    dj[`www.${norm}`] = entry;
-    stripDomainsJsonFallbacks(dj);
-    fs.writeFileSync(djPath, JSON.stringify(dj, null, 2), "utf8");
-
-    const jsConfigRel = updateJsConfigFile(tplObj.path, norm, mainUrl, teleUrl);
-    updateJsConfigFile(tplObj.path, `www.${norm}`, mainUrl, teleUrl);
-
-    let gitPush = { ok: false, originOk: false, errors: [] };
+    let jsConfigRel = null;
+    let gitPush;
     try {
-      const commitMsg = isExisting ? `Update link & telegram for domain ${norm}` : `Auto add domain ${norm}`;
-      const files = new Set(["domains.json"]);
-      if (jsConfigRel) files.add(jsConfigRel);
-      if (fs.existsSync(path.join(tplObj.path, "index.html"))) files.add("index.html");
-      await execAsync(`git add ${[...files].join(" ")}`, { cwd: tplObj.path });
-      await execAsync(`git commit -m "${commitMsg}"`, { cwd: tplObj.path }).catch(() => {});
-      gitPush = await pushTemplateRemotes(tplObj.path);
+      gitPush = await publishRepoChanges(tplObj.path, {
+        commitMsg: `Update link for domain ${norm}`,
+        prepare() {
+          let dj = {};
+          if (fs.existsSync(djPath)) {
+            try {
+              dj = JSON.parse(fs.readFileSync(djPath, "utf8"));
+            } catch {}
+          }
+          isExisting = norm in dj;
+          dj[norm] = entry;
+          dj[`www.${norm}`] = entry;
+          stripDomainsJsonFallbacks(dj);
+          fs.writeFileSync(djPath, JSON.stringify(dj, null, 2), "utf8");
+          const dataDjPath = path.join(tplObj.path, "data", "domains.json");
+          if (fs.existsSync(dataDjPath)) {
+            try {
+              const nested = JSON.parse(fs.readFileSync(dataDjPath, "utf8"));
+              if (nested && typeof nested.domains === "object") {
+                const prev = nested.domains[norm] && typeof nested.domains[norm] === "object" ? nested.domains[norm] : {};
+                nested.domains[norm] = { ...prev, targetUrl: mainUrl };
+                fs.writeFileSync(dataDjPath, JSON.stringify(nested, null, 2), "utf8");
+              }
+            } catch {}
+          }
+          jsConfigRel = updateJsConfigFile(tplObj.path, norm, mainUrl, teleUrl);
+          updateJsConfigFile(tplObj.path, `www.${norm}`, mainUrl, teleUrl);
+        },
+      });
     } catch (err) {
-      gitPush.errors.push(err.message);
-      throw new Error(`Git sync lỗi [${norm}]: ${err.message}`);
-    }
-
-    if (!gitPush.originOk) {
-      throw new Error(
-        `git push origin thất bại — live Pages chưa nhận [${norm}]. ${gitPush.errors.join(" | ")}`
-      );
+      throw new Error(`git push origin thất bại — live Pages chưa nhận [${norm}]. ${err.message}`);
     }
 
     if (tplObj.pagesProject) {
@@ -672,7 +835,7 @@ export async function updateTemplateDomainsJson(template, domain, mainUrl, messe
       });
     }
 
-    // Force deploy đúng project CNAME + verify live — tránh báo xong khi Pages queue kẹt
+    // Git push xong thì đợi domains.json live khớp. Không upload folder.
     let liveEnsure = null;
     if (opts.skipLiveEnsure !== true) {
       try {
@@ -704,29 +867,25 @@ export async function updateTemplateDomainsJson(template, domain, mainUrl, messe
   });
 }
 
-/** Push theo thứ tự origin trước (Pages Git), rồi remote phụ. Thử rebase 1 lần nếu rejected. */
-async function pushTemplateRemotes(cwd) {
-  // Clear stuck rebase state if any
-  const rebaseMerge = path.join(cwd, ".git", "rebase-merge");
-  const rebaseApply = path.join(cwd, ".git", "rebase-apply");
-  if (fs.existsSync(rebaseMerge) || fs.existsSync(rebaseApply)) {
-    await execAsync(`git rebase --abort`, { cwd }).catch(() => {});
-  }
+/** Push origin trước. Không rebase — commit đã nằm trên origin. */
+async function pushTemplateRemotes(cwd, branch) {
+  await execAsync("git rebase --abort", { cwd }).catch(() => {});
+  await execAsync("git merge --abort", { cwd }).catch(() => {});
 
-  // Detect nhánh remote thật (master|main) — KHÔNG hardcode main
-  let branch = "main";
-  try {
-    const showRef = await execAsync(`git show-ref`, { cwd });
-    const refs = String(showRef.stdout || "");
-    if (refs.includes("refs/remotes/origin/master")) branch = "master";
-    else if (refs.includes("refs/remotes/origin/main")) branch = "main";
-    else {
-      branch = (await execAsync(`git rev-parse --abbrev-ref HEAD`, { cwd })).stdout.trim() || "main";
-    }
-  } catch {
+  if (!branch) {
     try {
-      branch = (await execAsync(`git rev-parse --abbrev-ref HEAD`, { cwd })).stdout.trim() || "main";
+      const showRef = await execAsync("git show-ref", { cwd });
+      const refs = String(showRef.stdout || "");
+      if (refs.includes("refs/remotes/origin/main")) branch = "main";
+      else if (refs.includes("refs/remotes/origin/master")) branch = "master";
     } catch {}
+    if (!branch) {
+      try {
+        branch = (await execAsync("git rev-parse --abbrev-ref HEAD", { cwd })).stdout.trim() || "main";
+      } catch {
+        branch = "main";
+      }
+    }
   }
 
   const remotes = await execAsync(`git remote`, { cwd }).catch(() => ({ stdout: "origin" }));
@@ -740,20 +899,16 @@ async function pushTemplateRemotes(cwd) {
   const errors = [];
   let originOk = false;
   for (const r of ordered) {
+    if (r !== "origin" && !originOk) continue;
     try {
-      await execAsync(`git push ${r} HEAD:${branch}`, { cwd });
+      const remoteUrl = await execAsync(`git remote get-url ${r}`, { cwd }).then((x) => x.stdout).catch(() => "");
+      const auth = /github\.com/i.test(remoteUrl);
+      await gitExec(`git push ${r} HEAD:${branch}`, cwd, { auth });
       if (r === "origin") originOk = true;
     } catch (e1) {
-      try {
-        await execAsync(`git pull --rebase ${r} ${branch}`, { cwd });
-        await execAsync(`git push ${r} HEAD:${branch}`, { cwd });
-        if (r === "origin") originOk = true;
-      } catch (e2) {
-        const msg = `${r}/${branch}: ${(e2.stderr || e2.message || "").toString().slice(0, 300)}`;
-        errors.push(msg);
-        console.warn(`[Template] git push ${r} ${branch} thất bại:`, msg);
-        await execAsync(`git rebase --abort`, { cwd }).catch(() => {});
-      }
+      const msg = `${r}/${branch}: ${(e1.stderr || e1.message || "").toString().slice(0, 300)}`;
+      errors.push(msg);
+      console.warn(`[Template] git push ${r} ${branch} thất bại:`, msg);
     }
   }
   return { ok: errors.length === 0 || originOk, originOk, errors, branch };
@@ -766,38 +921,6 @@ export async function updateTemplateBatchDomains(template, domainEntries) {
 
   return withTemplateLock(tplObj.path, async () => {
     const djPath = path.join(tplObj.path, "domains.json");
-    let dj = {};
-    if (fs.existsSync(djPath)) {
-      try {
-        dj = JSON.parse(fs.readFileSync(djPath, "utf8"));
-      } catch {}
-    }
-
-    let hasJsConfig = false;
-    let jsConfigRel = null;
-
-    for (const item of domainEntries) {
-      const norm = item.domain.trim().toLowerCase().replace(/^www\./, "");
-      const mainUrl = item.link;
-      const teleUrl = item.tele || "";
-      const entry = {
-        main_url: mainUrl,
-        messenger_url: teleUrl || mainUrl,
-        telegram_url: teleUrl || undefined,
-      };
-      dj[norm] = entry;
-      dj[`www.${norm}`] = entry;
-
-      const rel = updateJsConfigFile(tplObj.path, norm, mainUrl, teleUrl);
-      updateJsConfigFile(tplObj.path, `www.${norm}`, mainUrl, teleUrl);
-      if (rel) {
-        hasJsConfig = true;
-        jsConfigRel = rel;
-      }
-    }
-
-    fs.writeFileSync(djPath, JSON.stringify(dj, null, 2), "utf8");
-
     const gitDir = path.join(tplObj.path, ".git");
     if (!fs.existsSync(gitDir)) {
       throw new Error(
@@ -807,13 +930,33 @@ export async function updateTemplateBatchDomains(template, domainEntries) {
 
     try {
       const commitMsg = `Auto batch add ${domainEntries.length} domains [${domainEntries.map((d) => d.domain).slice(0, 3).join(", ")}...]`;
-      const filesToAdd = hasJsConfig && jsConfigRel ? `domains.json ${jsConfigRel}` : "domains.json";
-      await execAsync(`git add ${filesToAdd}`, { cwd: tplObj.path });
-      await execAsync(`git commit -m "${commitMsg}"`, { cwd: tplObj.path }).catch(() => {});
-      const gitPush = await pushTemplateRemotes(tplObj.path);
-      if (!gitPush.originOk) {
-        throw new Error(`git push origin thất bại (batch). ${gitPush.errors.join(" | ")}`);
-      }
+      await publishRepoChanges(tplObj.path, {
+        commitMsg,
+        prepare() {
+          let dj = {};
+          if (fs.existsSync(djPath)) {
+            try {
+              dj = JSON.parse(fs.readFileSync(djPath, "utf8"));
+            } catch {}
+          }
+          for (const item of domainEntries) {
+            const norm = item.domain.trim().toLowerCase().replace(/^www\./, "");
+            const mainUrl = item.link;
+            const teleUrl = item.tele || "";
+            const entry = {
+              main_url: mainUrl,
+              messenger_url: teleUrl || mainUrl,
+              telegram_url: teleUrl || undefined,
+            };
+            dj[norm] = entry;
+            dj[`www.${norm}`] = entry;
+            updateJsConfigFile(tplObj.path, norm, mainUrl, teleUrl);
+            updateJsConfigFile(tplObj.path, `www.${norm}`, mainUrl, teleUrl);
+          }
+          stripDomainsJsonFallbacks(dj);
+          fs.writeFileSync(djPath, JSON.stringify(dj, null, 2), "utf8");
+        },
+      });
     } catch (err) {
       throw new Error(`Batch git sync lỗi: ${err.message}`);
     }

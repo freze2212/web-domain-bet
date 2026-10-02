@@ -1,10 +1,5 @@
 import { config } from "./config.js";
 import { poll, sleep } from "./utils.js";
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
-
-const execAsync = promisify(exec);
-
 function getPrimaryToken() {
   const token = config.cloudflare.token();
   if (!token) {
@@ -19,10 +14,6 @@ function getPrimaryAccountId() {
     throw new Error("Thiếu CLOUDFLARE_ACCOUNT_ID");
   }
   return accountId;
-}
-
-function isWranglerDeployEnabled() {
-  return process.env.ALLOW_WRANGLER_DEPLOY === "true";
 }
 
 function getAdminToken() {
@@ -110,6 +101,8 @@ export async function cfRequestFull(path, { method = "GET", headers = {}, body, 
   const data = await response.json();
   if (!response.ok || data.success === false) {
     const errors = data.errors?.map((e) => e.message).join("; ") || response.statusText;
+    const extra = (data.messages || []).map((m) => m.message).filter(Boolean).join("; ");
+    const detail = [errors, extra].filter(Boolean).join(" — ");
     if (response.status === 429 && _retry429 < 6) {
       const waitMs = Math.min(90000, 6000 * 2 ** _retry429);
       console.warn(
@@ -118,7 +111,7 @@ export async function cfRequestFull(path, { method = "GET", headers = {}, body, 
       await sleep(waitMs);
       return cfRequestFull(path, { method, headers, body, token: tokenOpt, _retry429: _retry429 + 1 });
     }
-    throw new Error(`Cloudflare API ${response.status}: ${errors}`);
+    throw new Error(`Cloudflare API ${response.status}: ${detail}`);
   }
   return data;
 }
@@ -286,10 +279,7 @@ export async function createNextGitPagesInstance(rootBase, targetAccountId = nul
   const tok = pagesTokenForAccount(accId);
   const tOpts = { token: tok, ...opts };
 
-  let list = [];
-  try {
-    list = (await getAllPagesProjectsForAccount(accId, tOpts)) || [];
-  } catch {}
+  const list = (await getAllPagesProjectsForAccount(accId, tOpts)) || [];
 
   const matching = list.filter((p) => p.name === rootBase || p.name.startsWith(`${rootBase}-`));
   let maxIndex = 0;
@@ -494,23 +484,61 @@ export async function getAllPagesProjectsForAccount(accId, opts = {}) {
   let page = 1;
   const allProjects = [];
   const reqOpts = opts.token ? { token: opts.token } : {};
-  while (true) {
+  // CF Pages list chỉ nhận per_page tối đa 10. per_page=25 trả 400 và danh sách rỗng.
+  while (page <= 40) {
+    let res;
     try {
-      const res = await cfRequestFull(
+      res = await cfRequestFull(
         `/accounts/${accId}/pages/projects?page=${page}&per_page=10`,
         reqOpts
       );
-      const items = res?.result;
-      if (!items || !Array.isArray(items) || items.length === 0) break;
-      allProjects.push(...items);
-      const totalPages = res?.result_info?.total_pages || 1;
-      if (page >= totalPages) break;
-      page++;
-    } catch {
+    } catch (err) {
+      if (allProjects.length === 0) throw err;
+      console.warn(`[Pages] list dừng ở page ${page}:`, err.message);
       break;
     }
+    const items = res?.result;
+    if (!items || !Array.isArray(items) || items.length === 0) break;
+    allProjects.push(...items);
+    const totalPages = res?.result_info?.total_pages || 1;
+    if (page >= totalPages || items.length < 10) break;
+    page++;
   }
   return allProjects;
+}
+
+/** Các instance gg88-lp-5uae, gg88-lp-5uae-2, … — không liệt kê cả account. */
+async function listFamilyPagesProjects(accId, rootBase, token) {
+  const tOpts = token ? { token } : {};
+  const names = [rootBase];
+  for (let i = 2; i <= 20; i++) names.push(`${rootBase}-${i}`);
+  const found = [];
+  let misses = 0;
+  for (const name of names) {
+    try {
+      const proj = await cfRequest(
+        `/accounts/${accId}/pages/projects/${encodeURIComponent(name)}`,
+        tOpts
+      );
+      if (!proj?.name) {
+        misses++;
+      } else {
+        found.push(proj);
+        misses = 0;
+      }
+    } catch (err) {
+      const msg = String(err.message || "");
+      if (!/404|not found|10007|does not exist/i.test(msg)) throw err;
+      misses++;
+    }
+    if (name !== rootBase && misses >= 2) break;
+  }
+  return found;
+}
+
+function customDomainCount(project) {
+  const domains = Array.isArray(project?.domains) ? project.domains : [];
+  return domains.filter((d) => !String(d).endsWith(".pages.dev")).length;
 }
 
 /**
@@ -525,10 +553,7 @@ export async function getAvailablePagesProject(baseProjectName, templatePath = "
     base = base.replace(".pages.dev", "").trim();
   }
 
-  let list = [];
-  try {
-    list = (await getAllPagesProjectsForAccount(accId, tOpts)) || [];
-  } catch {}
+  const list = (await getAllPagesProjectsForAccount(accId, tOpts)) || [];
 
   const rootBase = base.replace(/-\d+$/, "");
   const matchingProjects = list.filter(
@@ -566,112 +591,14 @@ export async function getAvailablePagesProject(baseProjectName, templatePath = "
   return createNextGitPagesInstance(rootBase, accId, tOpts);
 }
 
-/**
- * Deploy wrangler từ folder — CHỈ khi bật ALLOW_WRANGLER_DEPLOY=true.
- * Luồng chuẩn: git push → Cloudflare Pages (Git-connected) tự build.
- * Không dùng Direct Upload folder cho instance mở rộng.
- */
-export async function deployToAllPagesInstances(baseProjectName, templatePath, targetAccountId = null) {
-  if (!isWranglerDeployEnabled()) {
-    console.log("[Deploy] Bỏ qua wrangler folder deploy (Git-only — đồng bộ qua git push)");
-    return;
-  }
-  if (!templatePath || !baseProjectName) return;
-  const accId = targetAccountId || getPrimaryAccountId();
-  let base = baseProjectName.replace(".pages.dev", "").trim();
-  const rootBase = base.replace(/-\d+$/, "");
-
-  let projects = [];
-  try {
-    const list = await getAllPagesProjectsForAccount(accId);
-    projects = (list || []).filter(
-      (p) => p.name === rootBase || p.name.startsWith(`${rootBase}-`)
-    );
-  } catch (e) {
-    projects = [{ name: rootBase }];
-  }
-
-  if (projects.length === 0) {
-    projects = [{ name: rootBase }];
-  }
-
-  const token = getPrimaryToken();
-  const finalAccId = accId || getPrimaryAccountId();
-
-  const wranglerEnv = {
-    ...process.env,
-    CLOUDFLARE_API_TOKEN: token,
-    CLOUDFLARE_ACCOUNT_ID: finalAccId,
-  };
-
-  for (const p of projects) {
-    try {
-      console.log(`[Deploy] Wrangler (cờ ALLOW_WRANGLER_DEPLOY) → ${p.name}...`);
-      await execAsync(
-        `npx -y wrangler pages deploy "${templatePath}" --project-name "${p.name}" --commit-dirty=true`,
-        { env: wranglerEnv, timeout: 120000 }
-      );
-      console.log(`[Deploy] ✅ Đã deploy thành công lên Pages: ${p.name}`);
-    } catch (err) {
-      console.warn(`[Deploy] ⚠️ Cảnh báo deploy ${p.name}:`, err.message);
-    }
-  }
+/** Pages nhận bản mới từ git push. Không upload folder bằng wrangler. */
+export async function deployToAllPagesInstances() {
+  return;
 }
 
-/**
- * Force wrangler deploy 1 project cụ thể (bỏ qua ALLOW_WRANGLER_DEPLOY).
- * Dùng khi Git Pages queue kẹt — live cần domains.json ngay.
- */
-export async function forceDeployPagesProject(projectName, templatePath, opts = {}) {
-  let project = String(projectName || "")
-    .trim()
-    .replace(/\.pages\.dev$/i, "");
-  if (!project || !templatePath) {
-    throw new Error("Thiếu projectName hoặc templatePath để force deploy");
-  }
-  const fs = await import("node:fs");
-  if (!fs.existsSync(templatePath)) {
-    throw new Error(`Template path không tồn tại: ${templatePath}`);
-  }
-
-  const adminAcc = getAdminAccountId();
-  let accId = opts.accountId || null;
-  if (!accId) {
-    // Đoán account: thử Freze trước (vip-* nằm Freze), rồi Admin
-    for (const cand of [getPrimaryAccountId(), adminAcc]) {
-      try {
-        const tok = pagesTokenForAccount(cand);
-        const meta = await cfRequest(`/accounts/${cand}/pages/projects/${encodeURIComponent(project)}`, {
-          token: tok,
-        });
-        if (meta?.name) {
-          accId = cand;
-          break;
-        }
-      } catch {}
-    }
-  }
-  accId = accId || getPrimaryAccountId();
-  const token = opts.token || pagesTokenForAccount(accId);
-
-  // Chỉ truyền token/account cần thiết — tránh wrangler dính account Admin từ env PM2
-  const wranglerEnv = {
-    PATH: process.env.PATH,
-    HOME: process.env.HOME || "/root",
-    LANG: process.env.LANG || "C.UTF-8",
-    NODE_OPTIONS: process.env.NODE_OPTIONS || "",
-    npm_config_yes: "true",
-    CLOUDFLARE_API_TOKEN: token,
-    CLOUDFLARE_ACCOUNT_ID: accId,
-  };
-
-  console.log(`[Deploy] FORCE wrangler → ${project} (account ${String(accId).slice(0, 8)}…)`);
-  await execAsync(
-    `npx -y wrangler@3 pages deploy "${templatePath}" --project-name "${project}" --commit-dirty=true`,
-    { env: wranglerEnv, timeout: opts.timeoutMs || 180000, cwd: templatePath }
-  );
-  console.log(`[Deploy] ✅ FORCE deploy xong: ${project}`);
-  return { ok: true, project, accountId: accId };
+/** Giữ export để script cũ không crash. Không bao giờ upload folder. */
+export async function forceDeployPagesProject() {
+  throw new Error("Đã tắt wrangler. Pages chỉ cập nhật bằng git push, không upload folder.");
 }
 
 /** Đọc CNAME Pages đang trỏ từ DNS zone (apex/www). */
@@ -726,10 +653,8 @@ async function probeDomainJsonLink(domain) {
 }
 
 /**
- * Đảm bảo live domains.json đã có đúng link:
- * 1) force wrangler lên đúng Pages project (DNS CNAME / hint)
- * 2) purge cache
- * 3) poll live tới khi khớp (hoặc hết timeout)
+ * Đợi domains.json live khớp link sau git push.
+ * Không deploy folder lên project CNAME.
  */
 export async function ensureLiveDomainLink(domain, claimedLink, opts = {}) {
   const norm = String(domain || "")
@@ -757,22 +682,6 @@ export async function ensureLiveDomainLink(domain, claimedLink, opts = {}) {
   }
 
   const deployLog = { project: project || null, deployed: false, error: null };
-  if (project && opts.templatePath) {
-    try {
-      await forceDeployPagesProject(project, opts.templatePath, {
-        accountId: opts.accountId,
-        timeoutMs: opts.deployTimeoutMs || 180000,
-      });
-      deployLog.deployed = true;
-    } catch (err) {
-      deployLog.error = err.message;
-      console.warn(`[ensureLive] Force deploy ${project} lỗi:`, err.message);
-    }
-  } else {
-    console.warn(
-      `[ensureLive] Bỏ qua force deploy — project=${project || "?"} path=${opts.templatePath || "?"}`
-    );
-  }
 
   // Purge CF cache zone
   try {
@@ -866,6 +775,23 @@ export async function removeDomainFromAllPagesProjects(domain, targetAccountId =
   const reqOpts = opts.token ? { token: opts.token } : {};
   const hintProjects = opts.hintProjects || [];
 
+  const removedFrom = [];
+  const onlyProjects = (opts.onlyProjects || []).map((p) => String(p || "").trim()).filter(Boolean);
+  if (onlyProjects.length > 0) {
+    let hasDeleted = false;
+    for (const accId of uniqueAccs) {
+      for (const name of onlyProjects) {
+        if (except.has(name.toLowerCase())) continue;
+        const deleted = await deleteDomainFromPagesProject(accId, name, norm, reqOpts).catch(() => false);
+        if (deleted) {
+          hasDeleted = true;
+          removedFrom.push(name);
+        }
+      }
+    }
+    return { hasDeleted, removedFrom };
+  }
+
   let hasDeleted = false;
   for (const accId of uniqueAccs) {
     try {
@@ -885,7 +811,10 @@ export async function removeDomainFromAllPagesProjects(domain, targetAccountId =
           if (!key || except.has(key) || tried.has(key)) continue;
           tried.add(key);
           const deleted = await deleteDomainFromPagesProject(accId, p.name, norm, reqOpts);
-          if (deleted) hasDeleted = true;
+          if (deleted) {
+            hasDeleted = true;
+            removedFrom.push(p.name);
+          }
         }
         if (hasDeleted && hintProjects.length > 0) break;
         if (hintProjects.length === 0) break;
@@ -896,7 +825,7 @@ export async function removeDomainFromAllPagesProjects(domain, targetAccountId =
   if (hasDeleted) {
     await sleep(2000);
   }
-  return { hasDeleted };
+  return { hasDeleted, removedFrom };
 }
 
 /**
@@ -905,6 +834,7 @@ export async function removeDomainFromAllPagesProjects(domain, targetAccountId =
  * (tránh Error 1014 CNAME Cross-User Banned).
  */
 export async function addPagesDomain(domain, projectName, templatePath = "", opts = {}) {
+  domain = String(domain || "").trim().toLowerCase().replace(/^www\./, "");
   let project = projectName || config.cloudflare.pagesProject();
   if (project && project.includes(".pages.dev")) {
     project = project.replace(".pages.dev", "").trim();
@@ -923,11 +853,10 @@ export async function addPagesDomain(domain, projectName, templatePath = "", opt
   const rootBase = project.replace(/-\d+$/, "");
   let candidateProjects = [];
   try {
-    const list = (await getAllPagesProjectsForAccount(targetAccountId, tOpts)) || [];
-    candidateProjects = list.filter(
-      (p) => p.name === rootBase || p.name.startsWith(`${rootBase}-`)
-    );
-  } catch {}
+    candidateProjects = await listFamilyPagesProjects(targetAccountId, rootBase, pagesToken);
+  } catch (err) {
+    console.warn(`[Pages Add Domain] Không đọc được family ${rootBase}: ${err.message}`);
+  }
 
   if (candidateProjects.length === 0) {
     candidateProjects = [{ name: project }];
@@ -942,13 +871,18 @@ export async function addPagesDomain(domain, projectName, templatePath = "", opt
     );
   }
 
+  // Instance mới (số lớn) còn chỗ. Instance cũ thường đã đầy 100 — đừng POST thử từng cái.
   candidateProjects.sort((a, b) => {
-    const countA = Array.isArray(a.domains) ? a.domains.length : 0;
-    const countB = Array.isArray(b.domains) ? b.domains.length : 0;
-    return countA - countB;
+    const diff = customDomainCount(a) - customDomainCount(b);
+    if (diff !== 0) return diff;
+    const na = parseInt(String(a.name).match(/-(\d+)$/)?.[1] || "1", 10);
+    const nb = parseInt(String(b.name).match(/-(\d+)$/)?.[1] || "1", 10);
+    return nb - na;
   });
+  const withRoom = candidateProjects.filter((p) => customDomainCount(p) < 98);
+  if (withRoom.length > 0) candidateProjects = withRoom;
 
-  const namesToAdd = [domain, `www.${domain}`];
+  const namesToAdd = [domain];
   let successfulProject = null;
   let lastError = null;
 
@@ -1024,48 +958,82 @@ export async function addPagesDomain(domain, projectName, templatePath = "", opt
     }
   }
 
-  // 2) Nếu bị chặn do domain đang ở project khác: gỡ chỗ khác rồi add lại ngay
-  if (!successfulProject) {
-    console.warn(`[Pages Add Domain] Add trực tiếp fail (${lastError}), dọn project khác rồi retry...`);
-    const keepNames = candidateProjects.map((p) => p.name);
-    await removeDomainFromAllPagesProjects(domain, targetAccountId, {
-      exceptProjects: keepNames,
+  function domainCount(p) {
+    return Array.isArray(p?.domains) ? p.domains.length : 0;
+  }
+
+  // CF chỉ cho một custom domain trên một project. except mọi project anh em
+  // khiến domain kẹt ở instance đầy (apex một nơi, www một nơi) và add luôn 400.
+  const removedDuringMove = [];
+
+  async function consolidateOnto(proj) {
+    if (!proj?.name) return null;
+    console.warn(`[Pages Add Domain] Chuyển ${domain} về ${proj.name} (gỡ khỏi project khác)`);
+    const removed = await removeDomainFromAllPagesProjects(domain, targetAccountId, {
+      exceptProjects: [proj.name],
       token: pagesToken,
-    }).catch(() => {});
-    for (const p of candidateProjects) {
-      const added = await tryAddToProject(p.name, p.subdomain || p.name);
-      if (added) {
-        successfulProject = added;
-        break;
-      }
+    }).catch(() => ({ removedFrom: [] }));
+    const added = await tryAddToProject(proj.name, proj.subdomain || proj.canonicalSubdomain || proj.name);
+    if (!added) {
+      for (const name of removed?.removedFrom || []) removedDuringMove.push(name);
     }
+    return added;
+  }
+
+  async function restoreRemovedHosts() {
+    const names = [...new Set(removedDuringMove.filter(Boolean))];
+    if (!names.length) return;
+    const apex = String(domain).toLowerCase().replace(/^www\./, "");
+    for (const projName of names) {
+      for (const host of [apex]) {
+        try {
+          await cfRequest(
+            `/accounts/${targetAccountId}/pages/projects/${encodeURIComponent(projName)}/domains`,
+            { method: "POST", body: { name: host }, ...tOpts }
+          );
+        } catch (err) {
+          const msg = String(err.message || "");
+          if (!/already exists|duplicate|already (been )?added|already been registered/i.test(msg)) {
+            console.warn(`[Pages Add Domain] Không gắn lại ${host} vào ${projName}: ${msg}`);
+          }
+        }
+      }
+      console.warn(`[Pages Add Domain] Gắn mới thất bại — đã gắn lại ${apex} vào ${projName} để CNAME cũ không bị 522`);
+    }
+  }
+
+  // 2) Đã nằm ở project anh em: gom apex + www vào project Git còn chỗ
+  if (!successfulProject) {
+    console.warn(`[Pages Add Domain] Add trực tiếp fail (${lastError}), gom về một project...`);
+    const dest = [...candidateProjects]
+      .filter((p) => domainCount(p) <= 98)
+      .sort((a, b) => domainCount(a) - domainCount(b))[0];
+    if (dest) successfulProject = await consolidateOnto(dest);
   }
 
   if (!successfulProject) {
     console.warn(`[Pages Add Domain] Vẫn fail, tạo instance mới...`);
     const targetProject = await getAvailablePagesProject(project, templatePath, targetAccountId);
-    const actualProjectName = targetProject.name;
-    const added = await tryAddToProject(actualProjectName, targetProject.canonicalSubdomain || actualProjectName);
-    if (added) {
-      successfulProject = added;
-    }
+    successfulProject = await consolidateOnto(targetProject);
   }
 
   if (!successfulProject) {
+    await restoreRemovedHosts();
     throw new Error(
       `Không gắn được custom domain [${domain}] lên Pages [${project}] (acc ${targetAccountId.slice(0, 8)}…). ${lastError || "unknown"}`
     );
   }
 
-  // 3) Sau khi đã có trên project đích: gỡ khỏi project khác
+  // Chỉ gỡ khỏi instance cùng mẫu. Không DELETE lần lượt mọi project của account.
   await removeDomainFromAllPagesProjects(domain, targetAccountId, {
     exceptProjects: [successfulProject.name],
+    onlyProjects: candidateProjects.map((p) => p.name),
     token: pagesToken,
   }).catch(() => {});
 
   // Chờ active nếu DNS đã trỏ — với cross-account thường cần CNAME trước nên chỉ soft-wait ở đây
   try {
-    await waitForPagesDomainActive(successfulProject.name, domain, targetAccountId, 45000, pagesToken);
+    await waitForPagesDomainActive(successfulProject.name, domain, targetAccountId, 8000, pagesToken);
   } catch (waitErr) {
     console.warn(`[Pages Add Domain] Chưa active (sẽ active sau CNAME): ${waitErr.message}`);
   }
@@ -1081,7 +1049,6 @@ export async function addPagesDomain(domain, projectName, templatePath = "", opt
 export async function waitForPagesDomainActive(projectName, domain, accountId = null, timeoutMs = 90000, token = null) {
   const accId = accountId || getPrimaryAccountId();
   const apexName = String(domain || "").toLowerCase().replace(/^www\./, "");
-  const wwwName = `www.${apexName}`;
   const started = Date.now();
   let last = [];
   const reqOpts = token ? { token } : {};
@@ -1100,12 +1067,10 @@ export async function waitForPagesDomainActive(projectName, domain, accountId = 
   while (Date.now() - started < timeoutMs) {
     try {
       const apex = await getOne(apexName);
-      const www = await getOne(wwwName);
-      last = [apex, www].filter(Boolean);
+      last = [apex].filter(Boolean);
       const apexOk = apex && apex.status === "active";
-      // www có thể chưa add — chỉ bắt buộc khi GET thấy
-      const wwwOk = !www || www.status === "active";
-      if (apexOk && wwwOk) {
+      // Apex active là đủ để đi tiếp. www pending không được giữ job thêm 2 phút.
+      if (apexOk) {
         return { ok: true, domains: last };
       }
     } catch {}
@@ -1349,38 +1314,12 @@ export async function ensurePagesCname(domain, customTarget) {
     });
   }
 
-  // 4. Cập nhật hoặc tạo CNAME cho www
-  const existingWwwCname = records?.find(
-    (r) => (r.name === `www.${domain}` || r.name === `www.${domain}.`) && r.type === "CNAME"
-  );
-  if (existingWwwCname) {
-    if (existingWwwCname.content !== target || !existingWwwCname.proxied) {
-      await cfRequest(`/zones/${zone.id}/dns_records/${existingWwwCname.id}`, {
-        method: "PUT",
-        ...zOpts,
-        body: {
-          type: "CNAME",
-          name: `www.${domain}`,
-          content: target,
-          proxied: true,
-          ttl: 1,
-        },
-      });
-    }
-  } else {
-    try {
-      await cfRequest(`/zones/${zone.id}/dns_records`, {
-        method: "POST",
-        ...zOpts,
-        body: {
-          type: "CNAME",
-          name: `www.${domain}`,
-          content: target,
-          proxied: true,
-          ttl: 1,
-        },
-      });
-    } catch {}
+  // Không giữ www. Bản ghi www khiến Pages tốn slot và www.domain ra 522 khi không còn custom hostname.
+  const wwwHost = `www.${domain}`.toLowerCase();
+  for (const rec of records || []) {
+    const recName = String(rec.name || "").toLowerCase().replace(/\.$/, "");
+    if (recName !== wwwHost) continue;
+    await cfRequest(`/zones/${zone.id}/dns_records/${rec.id}`, { method: "DELETE", ...zOpts }).catch(() => {});
   }
 
   // Admin DNS → Freze Pages: nếu custom domain chưa active sau CNAME thì gắn lại (clear Cross-User Banned)
@@ -1421,15 +1360,15 @@ export async function reassertPagesCustomDomain(projectName, domain, accountId =
   const tOpts = { token: tok };
   const proj = String(projectName || "").replace(/\.pages\.dev$/i, "").trim();
   if (!proj || !domain) return { ok: false, detail: "missing project/domain" };
-  const names = [domain, `www.${domain}`];
-  for (const name of names) {
+  const apex = String(domain || "").trim().toLowerCase().replace(/^www\./, "");
+  for (const name of [apex, `www.${apex}`]) {
     await cfRequest(
       `/accounts/${acc}/pages/projects/${encodeURIComponent(proj)}/domains/${encodeURIComponent(name)}`,
       { method: "DELETE", ...tOpts }
     ).catch(() => {});
   }
   await sleep(1200);
-  for (const name of names) {
+  for (const name of [apex]) {
     try {
       await cfRequest(
         `/accounts/${acc}/pages/projects/${encodeURIComponent(proj)}/domains`,
@@ -1509,8 +1448,7 @@ export async function pagesAccountHasDomain(accountId, domain, preferredProject 
 
   async function checkProject(projectName) {
     const apex = await getDomain(projectName, norm);
-    const www = await getDomain(projectName, `www.${norm}`);
-    const hit = [apex, www].filter(Boolean);
+    const hit = [apex].filter(Boolean);
     if (hit.length === 0) return null;
     return {
       ok: true,
@@ -1548,8 +1486,6 @@ export async function setupCloudflare(domain, customTarget, templatePath = "") {
   const zone = await getOrCreateZone(domain);
   const nameservers = getZoneNameservers(zone);
 
-  await deleteForwardingPageRules(zone.id, { token: tokenForZone(zone) });
-
   let projectName = "";
   if (customTarget && customTarget.includes(".pages.dev")) {
     projectName = customTarget.replace(".pages.dev", "").trim();
@@ -1563,6 +1499,8 @@ export async function setupCloudflare(domain, customTarget, templatePath = "") {
   }
 
   const cname = await ensurePagesCname(domain, finalTarget);
+  // Chỉ gỡ 302 sau khi CNAME đã thay A 8.8.8.8. Gỡ trước đó thì request rơi vào dns.google.
+  await deleteForwardingPageRules(zone.id, { token: tokenForZone(zone) });
 
   // ensurePagesCname đã re-assert cross-user nếu cần; ở đây chỉ chờ SSL active
   if (isAdminAccountZone(zone) && pagesResult?.projectName) {
@@ -1592,9 +1530,6 @@ export async function setupCloudflare(domain, customTarget, templatePath = "") {
 export async function finishCloudflareAfterNs(domain, customTarget, templatePath = "") {
   await waitForZoneActive(domain);
   const zone = await findZoneByName(domain);
-  if (zone) {
-    await deleteForwardingPageRules(zone.id, { token: tokenForZone(zone) });
-  }
 
   let projectName = "";
   if (customTarget && customTarget.includes(".pages.dev")) {
@@ -1602,15 +1537,20 @@ export async function finishCloudflareAfterNs(domain, customTarget, templatePath
   }
 
   let finalTarget = customTarget;
+  let pagesOk = false;
   try {
     const pagesResult = await addPagesDomain(domain, projectName, templatePath);
     if (pagesResult?.canonicalSubdomain) {
       finalTarget = pagesResult.canonicalSubdomain;
     }
+    pagesOk = true;
   } catch {}
 
   await sleep(2000);
   const cname = await ensurePagesCname(domain, finalTarget);
+  if (pagesOk && zone) {
+    await deleteForwardingPageRules(zone.id, { token: tokenForZone(zone) });
+  }
   return { pagesDomain: domain, cname, target: finalTarget };
 }
 
@@ -1645,6 +1585,12 @@ export async function updateOrCreatePageRule(domain, targetUrl, statusCode = 302
     throw new Error(`Không tìm thấy Zone Cloudflare cho tên miền ${domain}`);
   }
 
+  if (zone.status && zone.status !== "active") {
+    throw new Error(
+      `Zone Cloudflare của [${domain}] đang "${zone.status}". Page Rule 302 chỉ tạo được khi zone active — chờ nameserver trỏ xong rồi đổi lại.`
+    );
+  }
+
   const rules = await getPageRulesForZone(zone);
   const forwardingRule = rules.find((r) =>
     r.actions?.some((a) => a.id === "forwarding_url")
@@ -1673,23 +1619,33 @@ export async function updateOrCreatePageRule(domain, targetUrl, statusCode = 302
     status: "active",
   };
 
-  if (forwardingRule) {
-    const updated = await cfRequestZoneFallback(
+  try {
+    if (forwardingRule) {
+      const updated = await cfRequestZoneFallback(
+        zone,
+        `/zones/${zone.id}/pagerules/${forwardingRule.id}`,
+        { method: "PUT", body: ruleBody },
+        tokensForPageRules(zone)
+      );
+      return { action: "updated", rule: updated, zone, cfAccount: isAdminAccountZone(zone) ? "admin" : "freze" };
+    }
+
+    const created = await cfRequestZoneFallback(
       zone,
-      `/zones/${zone.id}/pagerules/${forwardingRule.id}`,
-      { method: "PUT", body: ruleBody },
+      `/zones/${zone.id}/pagerules`,
+      { method: "POST", body: ruleBody },
       tokensForPageRules(zone)
     );
-    return { action: "updated", rule: updated, zone, cfAccount: isAdminAccountZone(zone) ? "admin" : "freze" };
+    return { action: "created", rule: created, zone, cfAccount: isAdminAccountZone(zone) ? "admin" : "freze" };
+  } catch (err) {
+    if (/403|Unauthorized to access requested resource/i.test(String(err.message || ""))) {
+      const account = isAdminAccountZone(zone) ? "Admin" : "Freze";
+      throw new Error(
+        `Token Cloudflare ${account} đọc được Page Rule của [${domain}] nhưng không có quyền sửa. Bật Page Rules Edit cho token ${account} rồi đổi link lại.`
+      );
+    }
+    throw err;
   }
-
-  const created = await cfRequestZoneFallback(
-    zone,
-    `/zones/${zone.id}/pagerules`,
-    { method: "POST", body: ruleBody },
-    tokensForPageRules(zone)
-  );
-  return { action: "created", rule: created, zone, cfAccount: isAdminAccountZone(zone) ? "admin" : "freze" };
 }
 
 // ── Cài đặt trỏ 302 trực tiếp (Direct 302 Redirect) ─────────────────────────
@@ -1743,39 +1699,11 @@ export async function setupDirect302Redirect(domain, targetUrl, opts = {}) {
       });
     }
 
-    const wwwA = records?.find((r) => r.name === `www.${domain}` || r.name === `www.${domain}.`);
-    if (!wwwA) {
-      await cfRequest(`/zones/${zone.id}/dns_records`, {
-        method: "POST",
-        ...zOpts,
-        body: {
-          type: "A",
-          name: "www",
-          content: "8.8.8.8",
-          proxied: true,
-          ttl: 1,
-        },
-      });
-    } else {
-      await cfRequest(`/zones/${zone.id}/dns_records/${wwwA.id}`, {
-        method: "PUT",
-        ...zOpts,
-        body: {
-          type: "A",
-          name: "www",
-          content: "8.8.8.8",
-          proxied: true,
-          ttl: 1,
-        },
-      }).catch(async () => {
-        if (!wwwA.proxied) {
-          await cfRequest(`/zones/${zone.id}/dns_records/${wwwA.id}`, {
-            method: "PATCH",
-            ...zOpts,
-            body: { proxied: true },
-          });
-        }
-      });
+    const wwwHost = `www.${domain}`.toLowerCase();
+    for (const rec of records || []) {
+      const recName = String(rec.name || "").toLowerCase().replace(/\.$/, "");
+      if (recName !== wwwHost) continue;
+      await cfRequest(`/zones/${zone.id}/dns_records/${rec.id}`, { method: "DELETE", ...zOpts }).catch(() => {});
     }
   } catch (err) {
     console.error(`Lỗi tạo DNS dummy 8.8.8.8 cho 302 trên ${domain}:`, err.message);

@@ -69,10 +69,7 @@ export async function inspectDomainHealth(rawDomain) {
     const apexCname = dnsRecords.find(
       (r) => (r.name === domain || r.name === `${domain}.`) && r.type === "CNAME"
     );
-    const wwwCname = dnsRecords.find(
-      (r) => (r.name === `www.${domain}` || r.name === `www.${domain}.`) && r.type === "CNAME"
-    );
-    const hasCorrectDns = !!apexCname && !!wwwCname;
+    const hasCorrectDns = !!apexCname;
 
     // 5. Kiểm tra vị trí mã nguồn Repo / Template
     const repoMatches = findDomainInRepos(domain);
@@ -184,13 +181,13 @@ export async function inspectDomainHealth(rawDomain) {
     const isDnsOk = hasCorrectDns && isCnameProjectMatched;
     result.checklist.push({
       id: "dns_cname",
-      title: "4. Bản Ghi DNS CNAME (@ & www)",
+      title: "4. Bản Ghi DNS CNAME (@)",
       passed: isDnsOk,
       statusText: isDnsOk
-        ? `Đã có CNAME Proxied (@ & www ➔ ${apexCname.content})`
-        : (!hasCorrectDns ? "Thiếu bản ghi CNAME @ hoặc www" : `⚠️ Lệch CNAME so với Pages Project [${boundProjectName || "N/A"}]`),
-      detail: `Apex (@): ${apexCname ? `CNAME -> ${apexCname.content} (Proxy: ${apexCname.proxied})` : "❌ Thiếu"} | WWW: ${wwwCname ? `CNAME -> ${wwwCname.content}` : "❌ Thiếu"}`,
-      actionGuide: isDnsOk ? null : (hasCorrectDns ? `Đổi CNAME trỏ về [${boundProjectName}.pages.dev] để khớp với dự án Pages.` : "Cần tạo 2 bản ghi CNAME cho @ và www trỏ về subdomain Pages."),
+        ? `Đã có CNAME Proxied (@ ➔ ${apexCname.content})`
+        : (!hasCorrectDns ? "Thiếu bản ghi CNAME @" : `⚠️ Lệch CNAME so với Pages Project [${boundProjectName || "N/A"}]`),
+      detail: `Apex (@): ${apexCname ? `CNAME -> ${apexCname.content} (Proxy: ${apexCname.proxied})` : "❌ Thiếu"}`,
+      actionGuide: isDnsOk ? null : (hasCorrectDns ? `Đổi CNAME trỏ về [${boundProjectName}.pages.dev] để khớp với dự án Pages.` : "Cần tạo bản ghi CNAME cho @ trỏ về subdomain Pages."),
       severity: isDnsOk ? "success" : "critical",
     });
 

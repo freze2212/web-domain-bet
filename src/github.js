@@ -201,7 +201,37 @@ export async function upsertDomainEntryInRepo(fullRepo, domain, entry, { message
     }
   }
 
-  return { updated: true, repo: `${owner}/${repo}`, domain: norm, indexHtml };
+  const link = payload.main_url || payload.messenger_url || "";
+  const dataDomains = link
+    ? await patchDataDomainsJson(owner, repo, branch, norm, link).catch((err) => ({ updated: false, error: err.message }))
+    : null;
+
+  return { updated: true, repo: `${owner}/${repo}`, domain: norm, indexHtml, dataDomains };
+}
+
+async function patchDataDomainsJson(owner, repo, branch, norm, link) {
+  const apiPath = `/repos/${owner}/${repo}/contents/data/domains.json`;
+  let file;
+  try {
+    file = await githubRequest(`${apiPath}?ref=${encodeURIComponent(branch)}`);
+  } catch (err) {
+    if (/404/.test(err.message)) return { updated: false };
+    throw err;
+  }
+  const data = JSON.parse(Buffer.from(file.content, "base64").toString("utf8"));
+  if (!data?.domains || typeof data.domains !== "object") return { updated: false };
+  const prev = data.domains[norm] && typeof data.domains[norm] === "object" ? data.domains[norm] : {};
+  data.domains[norm] = { ...prev, targetUrl: link };
+  await githubRequest(apiPath, {
+    method: "PUT",
+    body: {
+      message: `Update link for domain ${norm}`,
+      content: Buffer.from(`${JSON.stringify(data, null, 2)}\n`, "utf8").toString("base64"),
+      branch,
+      sha: file.sha,
+    },
+  });
+  return { updated: true };
 }
 
 export async function upsertDomainEntriesInRepo(fullRepo, entries, { message } = {}) {

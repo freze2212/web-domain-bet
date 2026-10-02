@@ -18,10 +18,10 @@ import {
   removeDomainFromAllPagesProjects,
   getAllPagesProjectsForAccount,
 } from "./cloudflare.js";
-import { ACTIVE_TEMPLATES, updateTemplateDomainsJson, getTemplate, listTemplates, resolveTemplatePath } from "./templates.js";
+import { ACTIVE_TEMPLATES, updateTemplateDomainsJson, getTemplate, listTemplates, resolveTemplatePath, publishRepoChanges } from "./templates.js";
 import { getHistory, addHistoryItem, updateHistoryItem, getLastDomainHistoryMeta, setHistoryProgress } from "./history.js";
 import { verifyHistoryItem, waitForLiveLinkMatch, waitFor302RedirectMatch } from "./verifier.js";
-import { normalizeDomain, normalizeUrl } from "./utils.js";
+import { normalizeDomain, normalizeUrl, LANDING_ROOT } from "./utils.js";
 import { listHubZonesFromCache, isAdminCfZone, adminSkipPayload, isFrezeHubDomain } from "./cf-account-guard.js";
 import { patchIndexHtmlLinks } from "./lp-link-patch.js";
 
@@ -29,6 +29,7 @@ const execAsync = promisify(exec);
 
 export const SEARCH_ROOTS = [
   "C:\\Landingpages",
+  LANDING_ROOT,
   "/var/www/Landingpages",
   "/var/www/web-ten-mien/Landingpages",
   "C:\\Landingpage",
@@ -234,22 +235,26 @@ function normalizePagesCnameHost(cnameTarget) {
   return target.endsWith(".pages.dev") ? target : `${target}.pages.dev`;
 }
 
+function pagesProjectRoot(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\.$/, "")
+    .replace(/\.pages\.dev$/, "")
+    .replace(/-\d+$/, "");
+}
+
 function templateMatchesPagesCname(tpl, cnameTarget) {
   if (!tpl || !cnameTarget) return !cnameTarget;
   const host = normalizePagesCnameHost(cnameTarget);
-  const candidates = new Set(
-    [
-      tpl.cnameTarget,
-      tpl.pagesProject ? `${tpl.pagesProject}.pages.dev` : "",
-      tpl.pagesProject,
-    ]
-      .filter(Boolean)
-      .map((s) => String(s).trim().toLowerCase().replace(/\.$/, ""))
-  );
   const project = host.replace(/\.pages\.dev$/, "");
-  candidates.add(host);
-  candidates.add(project);
-  return candidates.has(host) || candidates.has(project);
+  const names = [tpl.cnameTarget, tpl.pagesProject]
+    .filter(Boolean)
+    .map((s) => String(s).trim().toLowerCase().replace(/\.$/, "").replace(/\.pages\.dev$/, ""));
+  if (names.some((n) => n === project || `${n}.pages.dev` === host)) return true;
+  const root = pagesProjectRoot(project);
+  if (!root) return false;
+  return names.some((n) => pagesProjectRoot(n) === root);
 }
 
 /** Khi CNAME đã biết nhưng chưa có trong templates — lấy Git repo từ Pages API */
@@ -288,7 +293,7 @@ async function resolveTemplateFromPagesCname(cnameTarget, cfInfo) {
     const brand = "GG88";
     const folder = gitRepoName;
     const resolvedPath = resolveTemplatePath(
-      path.join("/var/www/Landingpages", brand, folder),
+      path.join(LANDING_ROOT, brand, folder),
       brand,
       folder
     );
@@ -510,7 +515,8 @@ export function updateJsConfigFile(folderPath, domain, newLink, newTele) {
 
       // Ensure dynamic domains.json fetch exists without fallback
       if (!code.includes("fetch('/domains.json')") && !code.includes('fetch("/domains.json")')) {
-        code += `\n// Dynamic real-time sync (No fallback)\n(function(){try{fetch('/domains.json').then(function(r){return r.json();}).then(function(d){if(!d)return;var h=(window.location.hostname||'').toLowerCase();var nh=h.replace(/^www\\./,'');var e=d[h]||d[nh];if(e){var u=e.main_url||e.url||e.link||(typeof e==='string'?e:'');if(u){window.REDIRECT_URL=u;var l=document.querySelectorAll('a.redirect-link,a.btn-register,a.cta-btn');for(var i=0;i<l.length;i++){l[i].href=u;}}}}).catch(function(){});}catch(e){}})();\n`;
+        // typeof string TRƯỚC — tránh String.prototype.link (native) khi entry là string
+        code += `\n// Dynamic real-time sync (No fallback)\n(function(){try{fetch('/domains.json').then(function(r){return r.json();}).then(function(d){if(!d)return;var h=(window.location.hostname||'').toLowerCase();var nh=h.replace(/^www\\./,'');var e=d[h]||d[nh];if(!e)return;var u=typeof e==='string'?e:(e.main_url||e.url||e.messenger_url||e.target_url||'');if(typeof u==='string'&&/^https?:\\/\\//i.test(u)){window.REDIRECT_URL=u;var l=document.querySelectorAll('a.redirect-link,a.btn-register,a.cta-btn');for(var i=0;i<l.length;i++){l[i].href=u;}}}).catch(function(){});}catch(e){}})();\n`;
         changed = true;
       }
 
@@ -546,16 +552,6 @@ export function updateJsConfigFile(folderPath, domain, newLink, newTele) {
     }
   }
 
-  // Cập nhật 07124351/index.html nếu có
-  const subHtml = path.join(folderPath, "07124351", "index.html");
-  if (fs.existsSync(subHtml) && newLink) {
-    try {
-      let h = fs.readFileSync(subHtml, "utf8");
-      h = h.replace(/https:\/\/(?:www\.)?gg88\d+\.com[^\s"']*/g, newLink);
-      fs.writeFileSync(subHtml, h, "utf8");
-    } catch {}
-  }
-
   return updatedRelPath;
 }
 
@@ -582,66 +578,55 @@ export async function updateDomainInExactRepos(domain, newLink, newTele = "") {
       console.warn(`[SetLink] Bỏ qua folder không có .git: ${m.folderPath}`);
       continue;
     }
+    let jsConfigRel = null;
+    let gitPushed = false;
+    let gitError = null;
     try {
-      const dj = JSON.parse(fs.readFileSync(m.filePath, "utf8"));
-      const existing = typeof dj[norm] === "object" ? dj[norm] : {};
-
-      const mainUrl = newLink || existing.main_url || existing.url || "";
-      const teleUrl =
-        newTele ||
-        existing.telegram_url ||
-        existing.tele ||
-        (existing.messenger_url && existing.messenger_url !== mainUrl ? existing.messenger_url : "") ||
-        "";
-
-      const entry = {
-        main_url: mainUrl,
-        messenger_url: teleUrl || mainUrl,
-        telegram_url: teleUrl || undefined,
-      };
-      dj[norm] = entry;
-      dj[`www.${norm}`] = entry;
-      fs.writeFileSync(m.filePath, JSON.stringify(dj, null, 2), "utf8");
-
-      const jsConfigRel = updateJsConfigFile(m.folderPath, norm, mainUrl, teleUrl);
-      updateJsConfigFile(m.folderPath, `www.${norm}`, mainUrl, teleUrl);
-
-      let gitPushed = false;
-      let gitError = null;
-      try {
-        let currentBranch = "main";
-        try {
-          const bRes = await execAsync("git branch --show-current", { cwd: m.folderPath });
-          if (bRes.stdout.trim()) currentBranch = bRes.stdout.trim();
-        } catch {}
-        const filesToAdd = jsConfigRel ? `domains.json ${jsConfigRel}` : "domains.json";
-        await execAsync(`git add ${filesToAdd}`, { cwd: m.folderPath });
-        await execAsync(`git commit -m "Update link & telegram for ${norm}"`, { cwd: m.folderPath }).catch(() => {});
-        await execAsync(`git push origin ${currentBranch}`, { cwd: m.folderPath });
-        gitPushed = true;
-      } catch (gitErr) {
-        gitError = gitErr.message;
-        console.warn(`[Git] Lỗi push tại ${m.folderPath}:`, gitErr.message);
-      }
-
-      const projectName = getPagesProjectForFolder(m.folderPath);
-      if (gitPushed) {
-        await deployToAllPagesInstances(projectName, m.folderPath).catch((err) => {
-          console.warn(`[Deploy] Deploy warning for ${projectName}:`, err.message);
-        });
-      }
-
-      updatedRepos.push({
-        folderPath: m.folderPath,
-        filePath: m.filePath,
-        projectName,
-        gitPushed,
-        gitError,
-        jsConfigUpdated: !!jsConfigRel,
+      await publishRepoChanges(m.folderPath, {
+        commitMsg: `Update link & telegram for ${norm}`,
+        prepare() {
+          const dj = JSON.parse(fs.readFileSync(m.filePath, "utf8"));
+          const existing = typeof dj[norm] === "object" ? dj[norm] : {};
+          const mainUrl = newLink || existing.main_url || existing.url || "";
+          const teleUrl =
+            newTele ||
+            existing.telegram_url ||
+            existing.tele ||
+            (existing.messenger_url && existing.messenger_url !== mainUrl ? existing.messenger_url : "") ||
+            "";
+          const entry = {
+            main_url: mainUrl,
+            messenger_url: teleUrl || mainUrl,
+            telegram_url: teleUrl || undefined,
+          };
+          dj[norm] = entry;
+          dj[`www.${norm}`] = entry;
+          fs.writeFileSync(m.filePath, JSON.stringify(dj, null, 2), "utf8");
+          jsConfigRel = updateJsConfigFile(m.folderPath, norm, mainUrl, teleUrl);
+          updateJsConfigFile(m.folderPath, `www.${norm}`, mainUrl, teleUrl);
+        },
       });
-    } catch (err) {
-      console.error(`Lỗi cập nhật file ${m.filePath}:`, err.message);
+      gitPushed = true;
+    } catch (gitErr) {
+      gitError = gitErr.message;
+      console.warn(`[Git] Lỗi push tại ${m.folderPath}:`, gitErr.message);
     }
+
+    const projectName = getPagesProjectForFolder(m.folderPath);
+    if (gitPushed) {
+      await deployToAllPagesInstances(projectName, m.folderPath).catch((err) => {
+        console.warn(`[Deploy] Deploy warning for ${projectName}:`, err.message);
+      });
+    }
+
+    updatedRepos.push({
+      folderPath: m.folderPath,
+      filePath: m.filePath,
+      projectName,
+      gitPushed,
+      gitError,
+      jsConfigUpdated: !!jsConfigRel,
+    });
   }
 
   const anyPush = updatedRepos.some((r) => r.gitPushed);
@@ -665,59 +650,41 @@ export async function removeDomainFromRepo(domain, folderOrFilePath) {
 
   const folderPath = path.dirname(filePath);
 
-  if (fs.existsSync(filePath)) {
-    try {
-      const dj = JSON.parse(fs.readFileSync(filePath, "utf8"));
-      let changed = false;
-      for (const key of variants) {
-        if (key in dj) {
-          delete dj[key];
-          changed = true;
-        }
-      }
-      if (changed) {
-        fs.writeFileSync(filePath, JSON.stringify(dj, null, 2), "utf8");
-      }
-    } catch (err) {
-      console.error(`Lỗi xoá domain ${norm} khỏi ${filePath}:`, err.message);
-    }
-  }
+  const gitDir = path.join(folderPath, ".git");
+  if (!fs.existsSync(gitDir)) return false;
 
-  // Xoá domain khỏi config.js / js/config.js nếu có
   const possiblePaths = [
     { full: path.join(folderPath, "js", "config.js"), rel: "js/config.js" },
     { full: path.join(folderPath, "config.js"), rel: "config.js" },
   ];
-  let configRelCleaned = null;
 
-  for (const item of possiblePaths) {
-    if (!fs.existsSync(item.full)) continue;
-    try {
-      let code = fs.readFileSync(item.full, "utf8");
-      let changed = false;
-      for (const key of variants) {
-        const linePattern = new RegExp(`^.*["']${key.replace(/\./g, "\\.")}["'].*$\\r?\\n?`, "gmi");
-        if (linePattern.test(code)) {
-          code = code.replace(linePattern, "");
-          changed = true;
+  try {
+    await publishRepoChanges(folderPath, {
+      commitMsg: `Remove domain ${norm}`,
+      prepare() {
+        if (fs.existsSync(filePath)) {
+          const dj = JSON.parse(fs.readFileSync(filePath, "utf8"));
+          for (const key of variants) delete dj[key];
+          fs.writeFileSync(filePath, JSON.stringify(dj, null, 2), "utf8");
         }
-      }
-      if (changed) {
-        fs.writeFileSync(item.full, code, "utf8");
-        configRelCleaned = item.rel;
-      }
-    } catch {}
-  }
-
-  const gitDir = path.join(folderPath, ".git");
-  if (fs.existsSync(gitDir)) {
-    try {
-      const filesToAdd = configRelCleaned ? `domains.json ${configRelCleaned}` : "domains.json";
-      await execAsync(
-        `git add ${filesToAdd} && git commit -m "Remove domain ${norm}" && git push origin main`,
-        { cwd: folderPath }
-      );
-    } catch {}
+        for (const item of possiblePaths) {
+          if (!fs.existsSync(item.full)) continue;
+          let code = fs.readFileSync(item.full, "utf8");
+          let changed = false;
+          for (const key of variants) {
+            const linePattern = new RegExp(`^.*["']${key.replace(/\./g, "\\.")}["'].*$\\r?\\n?`, "gmi");
+            if (linePattern.test(code)) {
+              code = code.replace(linePattern, "");
+              changed = true;
+            }
+          }
+          if (changed) fs.writeFileSync(item.full, code, "utf8");
+        }
+      },
+    });
+  } catch (err) {
+    console.error(`Lỗi xoá domain ${norm} khỏi ${filePath}:`, err.message);
+    return false;
   }
   return true;
 }
@@ -731,6 +698,7 @@ export function listAllDomains() {
 
   const allFiles = getAllDomainsJsonFiles();
   const domainMap = new Map();
+  const apexOf = (raw) => String(raw || "").trim().toLowerCase().replace(/^www\./, "");
 
   // A. Quét từ tất cả file domains.json trong các folder mã nguồn
   for (const f of allFiles) {
@@ -740,7 +708,9 @@ export function listAllDomains() {
       const folderName = path.basename(folder);
 
       for (const [dom, conf] of Object.entries(dj)) {
-        const norm = dom.trim().toLowerCase();
+        const raw = dom.trim().toLowerCase();
+        const norm = apexOf(raw);
+        const fromWww = raw.startsWith("www.");
         if (!norm) continue;
 
         const mainUrl = conf.main_url || conf.url || conf.link || (typeof conf === "string" ? conf : "");
@@ -765,7 +735,7 @@ export function listAllDomains() {
             existing.repos.push(folder);
             existing.filePaths.push(f);
           }
-          if (!existing.mainUrl && mainUrl) {
+          if (mainUrl && (!fromWww || !existing.mainUrl)) {
             existing.mainUrl = mainUrl;
             existing.messengerUrl = messengerUrl;
             existing.telegramUrl = telegramUrl;
@@ -775,19 +745,22 @@ export function listAllDomains() {
     } catch {}
   }
 
-  // B. Quét gộp từ Lịch Sử Triển Khai (Bao gồm 302 Redirect, Deploy, Mua miền...)
+  // B. Lịch sử mới nhất (success) thắng link đang nằm trong domains.json cũ.
   try {
     const history = getHistory();
+    const historyLinkApplied = new Set();
     for (const h of history) {
-      const norm = (h.domain || "").trim().toLowerCase();
+      const norm = apexOf(h.domain);
       if (!norm || norm === "n/a") continue;
-
+      const histLink = h.link && !/^n\/a$/i.test(String(h.link)) ? h.link : "";
+      const successLink = h.status === "success" && histLink;
       const is302 = h.actionType?.includes("302");
+
       if (!domainMap.has(norm)) {
         domainMap.set(norm, {
           domain: norm,
-          mainUrl: h.link || "",
-          messengerUrl: h.tele || h.link || "",
+          mainUrl: histLink,
+          messengerUrl: h.tele || histLink,
           telegramUrl: h.tele || "",
           repos: [],
           filePaths: [],
@@ -798,17 +771,26 @@ export function listAllDomains() {
           cfAccount: h.cfAccount,
           liveStatus: h.liveStatus,
         });
-      } else {
-        const existing = domainMap.get(norm);
-        if (!existing.mainUrl && h.link) {
-          existing.mainUrl = h.link;
-        }
-        if (!existing.telegramUrl && h.tele) {
+        if (successLink) historyLinkApplied.add(norm);
+        continue;
+      }
+
+      const existing = domainMap.get(norm);
+      if (successLink && !historyLinkApplied.has(norm)) {
+        existing.mainUrl = histLink;
+        if (h.tele) {
           existing.telegramUrl = h.tele;
+          existing.messengerUrl = h.tele;
         }
-        if (h.liveStatus && !existing.liveStatus) {
-          existing.liveStatus = h.liveStatus;
-        }
+        historyLinkApplied.add(norm);
+      } else if (!existing.mainUrl && histLink && h.status !== "failed") {
+        existing.mainUrl = histLink;
+      }
+      if (!existing.telegramUrl && h.tele) {
+        existing.telegramUrl = h.tele;
+      }
+      if (h.liveStatus && !existing.liveStatus) {
+        existing.liveStatus = h.liveStatus;
       }
     }
   } catch {}
@@ -816,7 +798,7 @@ export function listAllDomains() {
   // C. Cloudflare Zones — Freze + Admin (khi có ADMIN token)
   try {
     for (const z of listHubZonesFromCache({ includeAdmin: true })) {
-      const norm = (z.name || "").trim().toLowerCase();
+      const norm = apexOf(z.name);
       if (!norm) continue;
       const isAdmin = isAdminCfZone(z);
 

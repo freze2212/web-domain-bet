@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20260915-mobile">
+  <link rel="stylesheet" href="style.css?v=20261001-assistant">
   <script>document.documentElement.classList.add("auth-pending");</script>
 </head>
 <body class="auth-pending">
@@ -54,6 +54,12 @@
       </div>
 
       <div class="nav-actions">
+        <!-- Guest Login (Spaceship-style: search free, buy needs login) -->
+        <button type="button" id="btnGuestLogin" class="btn btn-primary btn-guest-login" onclick="openLoginModal()" title="Đăng nhập để mua miền / quản lý">
+          <span>🔐</span>
+          <span>Đăng Nhập</span>
+        </button>
+
         <!-- Wallet Balance Pill -->
         <div class="wallet-badge-pill" id="walletBadgeBtn" onclick="openTopupModal()" title="Bấm để nạp tiền vào ví qua VietQR">
           <span class="wallet-icon">💰</span>
@@ -98,53 +104,62 @@
           <span class="nav-tab-icon">🚀</span>
           <span id="navTabBuyLabel">Tra Cứu & Mua Miền</span>
         </button>
-        <button class="nav-tab" data-tab="tab-point" data-role="admin">
+        <button class="nav-tab" data-tab="tab-point" data-role="admin" data-auth="required">
           <span class="nav-tab-icon">⚡</span>
           <span>Trỏ Miền Có Sẵn</span>
         </button>
-        <button class="nav-tab" data-tab="tab-cloner">
+        <button class="nav-tab" data-tab="tab-cloner" data-auth="required" data-closed="1" hidden style="display:none" aria-hidden="true">
           <span class="nav-tab-icon">🥷</span>
           <span>VIP Web Cloner</span>
           <span class="tab-badge" style="background: rgba(99,102,241,0.2); color:#818cf8; border:1px solid rgba(99,102,241,0.4);">Pro</span>
         </button>
-        <button class="nav-tab" data-tab="tab-batch" data-role="admin">
+        <button class="nav-tab" data-tab="tab-batch" data-role="admin" data-auth="required">
           <span class="nav-tab-icon">🪄</span>
           <span>Chạy Hàng Loạt</span>
         </button>
-        <button class="nav-tab" data-tab="tab-domains">
+        <button class="nav-tab" data-tab="tab-domains" data-auth="required">
           <span class="nav-tab-icon">📋</span>
           <span id="navTabDomainsLabel">Quản Lý Domain</span>
           <span class="tab-badge" id="badgeDomainsCount">0</span>
         </button>
-        <button class="nav-tab" data-tab="tab-domain-perms">
+        <button class="nav-tab" data-tab="tab-domain-perms" data-auth="required">
           <span class="nav-tab-icon">🔑</span>
           <span>Tra Cứu & Xin Quyền</span>
           <span class="tab-badge" id="badgePendingPermsCount" style="display: none; background: #ef4444; color: #fff;">0</span>
         </button>
-        <button class="nav-tab" data-tab="tab-tasks">
+        <button class="nav-tab" data-tab="tab-tasks" data-auth="required">
           <span class="nav-tab-icon">⏳</span>
           <span id="navTabTasksLabel">Tiến Trình</span>
           <span class="tab-badge" id="badgeTasksCount">0</span>
         </button>
-        <button class="nav-tab" data-tab="tab-check" data-role="admin">
+        <button class="nav-tab" data-tab="tab-check" data-role="admin" data-auth="required">
           <span class="nav-tab-icon">🩺</span>
           <span>Kiểm Tra & Tự Sửa</span>
         </button>
-        <button class="nav-tab" data-tab="tab-wallet">
+        <button class="nav-tab" data-tab="tab-wallet" data-auth="required">
           <span class="nav-tab-icon">💳</span>
-          <span id="navTabWalletLabel">Ví & Thành Viên</span>
+          <span id="navTabWalletLabel">Ví của tôi</span>
         </button>
-        <button class="nav-tab" data-tab="tab-orders" data-role="admin" id="navTabOrders">
+        <button class="nav-tab" data-tab="tab-members" data-role="staff" data-auth="required">
+          <span class="nav-tab-icon">👥</span>
+          <span>Thành Viên</span>
+          <span class="tab-badge" id="badgeMembersCount">0</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-ledger" data-auth="required">
+          <span class="nav-tab-icon">📒</span>
+          <span>Giao Dịch Ví</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-orders" data-role="admin" id="navTabOrders" data-auth="required">
           <span class="nav-tab-icon">📥</span>
           <span>Yêu Cầu Mua Miền</span>
           <span class="tab-badge" id="badgeOrdersPending">0</span>
         </button>
-        <button class="nav-tab" data-tab="tab-history">
+        <button class="nav-tab" data-tab="tab-history" data-auth="required">
           <span class="nav-tab-icon">📜</span>
           <span>Lịch Sử</span>
           <span class="tab-badge" id="badgeHistoryCount">0</span>
         </button>
-        <button class="nav-tab" data-tab="tab-settings" data-role="admin">
+        <button class="nav-tab" data-tab="tab-settings" data-role="admin" data-auth="required">
           <span class="nav-tab-icon">⚙️</span>
           <span>Cài Đặt & API</span>
         </button>
@@ -219,9 +234,17 @@
         </div>
       </div>
 
+      <div id="guestSearchHint" class="guest-search-hint" style="display: none;">
+        <strong>Tra cứu miễn phí</strong> — nhập / dán danh sách tên miền để xem còn trống & giá. Chỉ khi bấm <em>Đặt Mua</em> hoặc gửi đơn mới cần đăng nhập.
+      </div>
+
       <div class="wizard-container">
-        <!-- Sub Mode Switcher -->
+        <!-- Sub Mode Switcher — Tra cứu trước (Spaceship-style) -->
         <div class="sub-nav-pills">
+          <button class="sub-pill" data-sub="check-batch">
+            <span class="pill-icon">🔍</span>
+            <span>Tra Cứu & Check Giá</span>
+          </button>
           <button class="sub-pill active" data-sub="buy-lp">
             <span class="pill-icon">🎨</span>
             <span>Mua & Gán Landing Page</span>
@@ -229,10 +252,6 @@
           <button class="sub-pill" data-sub="buy-302">
             <span class="pill-icon">⚡</span>
             <span>Mua & Trỏ 302 Trực Tiếp</span>
-          </button>
-          <button class="sub-pill" data-sub="check-batch">
-            <span class="pill-icon">🔍</span>
-            <span>Tra Cứu & Check Giá Hàng Loạt</span>
           </button>
         </div>
 
@@ -364,6 +383,9 @@
               </div>
             </div>
           </div>
+
+          <!-- Domain suggestions (Namecheap-style) -->
+          <div id="domainSuggestPanel" class="domain-suggest-panel" style="display: none;"></div>
 
           <!-- Results Table -->
           <div id="batchCheckResultsWrapper" style="display: none; margin-top: 20px;">
@@ -542,16 +564,24 @@
           <div class="batch-mode-selector">
             <span class="control-label"><b>Chế độ thực thi:</b></span>
             <label class="radio-label">
-              <input type="radio" name="batchDeployMode" value="buy" checked>
+              <input type="radio" name="batchDeployMode" value="buy" checked onchange="syncBatchKeepLandingUi()">
               <span>🛒 Mua Mới Trên Spaceship & Cài Đặt</span>
             </label>
             <label class="radio-label">
-              <input type="radio" name="batchDeployMode" value="point">
+              <input type="radio" name="batchDeployMode" value="point" onchange="syncBatchKeepLandingUi()">
               <span>⚡ Trỏ Tên Miền Có Sẵn</span>
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="batchDeployMode" value="setlink" onchange="syncBatchKeepLandingUi()">
+              <span>🔗 Chỉ đổi link — giữ nguyên landing đang gắn</span>
             </label>
           </div>
 
-          <div class="batch-bulk-assign">
+          <div id="batchKeepLandingNote" style="display: none; margin-top: 10px; padding: 10px 14px; border-radius: 8px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.35); color: #a7f3d0; font-size: 13px;">
+            Mỗi dòng một link riêng. Hệ thống chỉ sửa link đích trên mẫu đang chạy (kể cả 302). Không mua miền, không đổi landing.
+          </div>
+
+          <div class="batch-bulk-assign" id="batchBulkAssign">
             <span class="control-label"><b>Áp dụng nhanh 1 mẫu cho tất cả:</b></span>
             <div class="batch-global-picker-group">
               <div id="batchGlobalTplThumbWrapper" class="batch-global-thumb" title="Bấm để mở kho ảnh mẫu trực quan" onclick="openVisualPickerForGlobalBatch()">
@@ -1422,8 +1452,8 @@
     <section id="tab-wallet" class="tab-pane">
       <div class="section-header">
         <div>
-          <h2>💳 Ví Số Dư & Phân Quyền Thành Viên</h2>
-          <p class="section-desc">Quản lý số dư, lịch sử giao dịch nạp/trừ tiền và phân quyền gán domain cho từng người dùng.</p>
+          <h2>💳 Ví của tôi</h2>
+          <p class="section-desc">Số dư, nạp VietQR và đơn mua của tài khoản đang đăng nhập. Danh sách thành viên và sổ giao dịch nằm ở tab riêng.</p>
         </div>
         <div class="header-tools">
           <button class="btn btn-primary btn-sm" onclick="openTopupModal()">
@@ -1451,45 +1481,9 @@
         </div>
       </div>
 
-      <!-- Admin Only: User Management & Domain Assignment -->
-      <div id="adminUserManagementSection" style="margin-bottom: 24px;">
-        <div class="card" style="padding: 20px; margin-bottom: 20px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
-            <div>
-              <h3 style="font-size: 16px; font-weight: 700; color: #fff;">👥 Quản Lý Thành Viên & Phân Quyền (Admin Panel)</h3>
-              <span style="font-size: 12px; color: var(--text-dim);">Thêm, sửa, xóa tài khoản, nạp tiền và gán tên miền cho từng đại lý</span>
-            </div>
-            <div style="display: flex; gap: 8px;">
-              <a class="btn btn-secondary btn-sm" href="/admin-audit.html" target="_blank" rel="noopener" title="Nhật ký tạo/sửa/xóa user, Xu, quyền miền">
-                📜 Lịch Sử Quản Trị
-              </a>
-              <button class="btn btn-primary btn-sm" onclick="openCreateUserModal()">
-                ➕ Thêm Thành Viên
-              </button>
-              <button class="btn btn-secondary btn-sm" onclick="openDomainAssignModal()">
-                🔗 Gán Tên Miền
-              </button>
-            </div>
-          </div>
-          <div class="table-wrapper">
-            <table class="domains-table">
-              <thead>
-                <tr>
-                  <th>Username</th>
-                  <th>Họ Tên</th>
-                  <th>Vai Trò</th>
-                  <th>Trạng Thái</th>
-                  <th>Số Dư</th>
-                  <th>Domain Quản Lý</th>
-                  <th>Thao Tác</th>
-                </tr>
-              </thead>
-              <tbody id="usersTableBody">
-                <!-- Rendered by JS -->
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <div class="dir-jump-row">
+        <button type="button" class="btn btn-secondary btn-sm" data-role="admin" onclick="switchToTab('tab-members')">👥 Mở trang Thành Viên</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="switchToTab('tab-ledger')">📒 Mở sổ Giao Dịch Ví</button>
       </div>
 
       <!-- Domain Purchase Orders (User — đơn của mình) -->
@@ -1525,25 +1519,147 @@
         </div>
       </div>
 
-      <!-- Transaction History -->
-      <div class="card" style="padding: 20px;">
-        <h3 style="font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 12px;">📜 Lịch Sử Giao Dịch Ví</h3>
+    </section>
+
+    <section id="tab-members" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>👥 Thành Viên</h2>
+          <p class="section-desc">Tổng hợp tài khoản, số dư và số miền đang giữ. Tìm theo tên, lọc vai trò và trạng thái.</p>
+        </div>
+        <div class="header-tools" style="display:flex;gap:8px;flex-wrap:wrap;">
+          <a class="btn btn-secondary btn-sm assistant-hide" href="/admin-audit.html" target="_blank" rel="noopener">📜 Lịch Sử Quản Trị</a>
+          <button class="btn btn-secondary btn-sm assistant-hide" onclick="openDomainAssignModal()">🔗 Gán Tên Miền</button>
+          <button class="btn btn-secondary btn-sm assistant-hide" onclick="openCreateUserModal('assistant')">🛡️ Tạo Trợ Lý</button>
+          <button class="btn btn-primary btn-sm" onclick="openCreateUserModal('user')">➕ Thêm Thành Viên</button>
+        </div>
+      </div>
+
+      <div class="dir-stats" id="memberStats"></div>
+
+      <div class="card" style="padding: 16px 16px 8px;">
+        <div class="dir-toolbar">
+          <input type="search" id="memberSearch" class="form-input dir-search" placeholder="Tìm username, họ tên, mã user…" autocomplete="off">
+          <select id="memberRoleFilter" class="form-input dir-select">
+            <option value="all">Mọi vai trò</option>
+            <option value="admin">Admin</option>
+            <option value="assistant">Trợ lý</option>
+            <option value="user">Thành viên</option>
+          </select>
+          <select id="memberStatusFilter" class="form-input dir-select">
+            <option value="all">Mọi trạng thái</option>
+            <option value="active">Đang hoạt động</option>
+            <option value="locked">Không hoạt động</option>
+          </select>
+          <select id="memberPageSize" class="form-input dir-select">
+            <option value="10">10 / trang</option>
+            <option value="20">20 / trang</option>
+            <option value="50">50 / trang</option>
+          </select>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="loadUsersList()">🔄 Làm mới</button>
+        </div>
         <div class="table-wrapper">
           <table class="domains-table">
             <thead>
               <tr>
-                <th>Thời Gian</th>
-                <th>Loại Giao Dịch</th>
-                <th>Số Tiền</th>
-                <th>Số Dư Sau GD</th>
-                <th>Nội Dung / Ghi Chú</th>
+                <th>Username</th>
+                <th>Họ tên</th>
+                <th>Vai trò</th>
+                <th>Trạng thái</th>
+                <th class="assistant-hide">Số dư</th>
+                <th class="assistant-hide">Miền đang giữ</th>
+                <th>Ngày tạo</th>
+                <th>Thao tác</th>
               </tr>
             </thead>
-            <tbody id="transactionsTableBody">
-              <!-- Rendered by JS -->
-            </tbody>
+            <tbody id="membersTableBody"></tbody>
+          </table>
+          <div id="membersEmpty" class="state-container" style="display:none;padding:28px;">
+            <div style="font-size:28px;">🔎</div>
+            <h4 style="margin:6px 0 2px;color:#fff;">Không có thành viên khớp bộ lọc</h4>
+            <p style="font-size:12px;color:var(--text-dim);">Đổi từ khóa hoặc xóa bộ lọc để xem lại toàn bộ.</p>
+          </div>
+        </div>
+        <div id="membersPagination" class="pagination-host"></div>
+      </div>
+
+      <div class="card" style="padding: 16px; margin-top: 16px;">
+        <div class="section-header" style="margin-bottom: 10px;">
+          <div>
+            <h3 style="margin:0;">Lịch sử thêm / sửa / xóa user</h3>
+            <p class="section-desc" style="margin:4px 0 0;">Ghi lại ai tạo, sửa hoặc xóa tài khoản.</p>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="loadUserAudit()">🔄 Làm mới</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="domains-table">
+            <thead>
+              <tr>
+                <th>Thời gian</th>
+                <th>Việc</th>
+                <th>Người làm</th>
+                <th>Tài khoản</th>
+                <th>Chi tiết</th>
+              </tr>
+            </thead>
+            <tbody id="userAuditBody"></tbody>
           </table>
         </div>
+      </div>
+    </section>
+
+    <section id="tab-ledger" class="tab-pane">
+      <div class="section-header">
+        <div>
+          <h2>📒 Giao Dịch Ví</h2>
+          <p class="section-desc" id="ledgerSectionDesc">Sổ nạp và trừ Xu. Admin xem mọi thành viên, thành viên chỉ thấy giao dịch của mình.</p>
+        </div>
+        <div class="header-tools">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="loadTransactions()">🔄 Làm mới</button>
+        </div>
+      </div>
+
+      <div class="dir-stats" id="ledgerStats"></div>
+
+      <div class="card" style="padding: 16px 16px 8px;">
+        <div class="dir-toolbar">
+          <input type="search" id="ledgerSearch" class="form-input dir-search" placeholder="Tìm nội dung, username, số Xu…" autocomplete="off">
+          <select id="ledgerTypeFilter" class="form-input dir-select">
+            <option value="all">Mọi loại</option>
+            <option value="TOPUP">Nạp Xu</option>
+            <option value="PURCHASE">Trừ Xu</option>
+            <option value="other">Loại khác</option>
+          </select>
+          <select id="ledgerUserFilter" class="form-input dir-select">
+            <option value="all">Mọi thành viên</option>
+          </select>
+          <select id="ledgerPageSize" class="form-input dir-select">
+            <option value="10">10 / trang</option>
+            <option value="20">20 / trang</option>
+            <option value="50">50 / trang</option>
+          </select>
+        </div>
+        <div class="table-wrapper">
+          <table class="domains-table">
+            <thead>
+              <tr>
+                <th>Thời gian</th>
+                <th id="ledgerUserCol">Thành viên</th>
+                <th>Loại</th>
+                <th>Số Xu</th>
+                <th>Số dư sau</th>
+                <th>Nội dung</th>
+              </tr>
+            </thead>
+            <tbody id="transactionsTableBody"></tbody>
+          </table>
+          <div id="ledgerEmpty" class="state-container" style="display:none;padding:28px;">
+            <div style="font-size:28px;">📒</div>
+            <h4 style="margin:6px 0 2px;color:#fff;">Không có giao dịch khớp bộ lọc</h4>
+            <p style="font-size:12px;color:var(--text-dim);">Đổi từ khóa, loại giao dịch hoặc thành viên.</p>
+          </div>
+        </div>
+        <div id="ledgerPagination" class="pagination-host"></div>
       </div>
     </section>
 
@@ -1747,6 +1863,7 @@
             <label>Vai trò (Role)</label>
             <select id="crudRole" class="form-input">
               <option value="user">User (Thành viên / Đại lý)</option>
+              <option value="assistant">Trợ lý (chỉ thêm / sửa / xóa user)</option>
               <option value="admin">Admin (Quản trị viên)</option>
             </select>
           </div>
@@ -2659,8 +2776,8 @@
         <div style="display: flex; align-items: center; gap: 10px;">
           <span style="font-size: 26px;">🛒</span>
           <div>
-            <h3 style="margin: 0; color: #fff; font-size: 18px; font-weight: 800;">Xác Nhận Đơn Đặt Mua Tên Miền</h3>
-            <span class="modal-subtitle" style="color: #f59e0b;">Xem giá và xác nhận gửi yêu cầu mua</span>
+            <h3 id="confirmOrderTitle" style="margin: 0; color: #fff; font-size: 18px; font-weight: 800;">Xác Nhận Đơn Đặt Mua Tên Miền</h3>
+            <span id="confirmOrderSubtitle" class="modal-subtitle" style="color: #f59e0b;">Xem giá và xác nhận gửi yêu cầu mua</span>
           </div>
         </div>
         <button class="modal-close" onclick="closeModal('confirmDomainPurchaseModal')">&times;</button>
@@ -2716,7 +2833,7 @@
               Bạn xác nhận sẽ sử dụng <span style="color: #10b981;">350 Xu</span> để mua tên miền <span style="color: #fbbf24; font-family: var(--font-mono);">domain.com</span>?
             </div>
             <div style="font-size: 12px; color: var(--text-dim); line-height: 1.5;">
-              Xu chỉ bị trừ khi quản trị viên duyệt đơn. Bạn có thể theo dõi trạng thái tại tab Ví.
+              Ví phải đủ Xu mới gửi được đơn. Xu chỉ bị trừ khi quản trị viên duyệt. Theo dõi trạng thái tại tab Ví.
             </div>
           </div>
 
@@ -2762,7 +2879,7 @@
     <div class="toast-message" id="toastMessage">Thông báo</div>
   </div>
 
-  <script src="app.js?v=20260920-user-buy-lp302"></script>
+  <script src="app.js?v=20261002-linklist"></script>
 </body>
 </html>
 

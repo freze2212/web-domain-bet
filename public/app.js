@@ -15,6 +15,27 @@ function authHeaders() {
   return h;
 }
 
+const PUBLIC_API_PATHS = [
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/templates",
+  "/api/check-domain",
+  "/api/check-domains-batch",
+  "/api/suggest-domains",
+  "/api/wallet/webhook-pay",
+];
+
+function isPublicApiUrl(url) {
+  if (typeof url !== "string") return false;
+  try {
+    const path = url.startsWith("http") ? new URL(url).pathname : url.split("?")[0];
+    // /api/templates exact = list public; /api/templates/:id/* vẫn cần login
+    return PUBLIC_API_PATHS.some((p) => path === p);
+  } catch {
+    return false;
+  }
+}
+
 // ── FREZE DOMAIN HUB - CORE APPLICATION LOGIC ─────────────────────────────
 // Global fetch interceptor to automatically attach JWT token to all /api/ calls
 const _nativeFetch = window.fetch;
@@ -38,9 +59,18 @@ window.fetch = async function (url, options = {}) {
     }
   }
   const response = await _nativeFetch(url, options);
-  if (response.status === 401 && typeof url === "string" && !url.includes("/api/auth/login")) {
+  if (
+    response.status === 401 &&
+    typeof url === "string" &&
+    url.startsWith("/api/") &&
+    !isPublicApiUrl(url)
+  ) {
     localStorage.removeItem("freze_auth_token");
-    window.location.href = "/login";
+    // Guest / hết phiên: mở modal đăng nhập, không đá sang /login (giữ tra cứu)
+    if (typeof openLoginModal === "function") {
+      showToast("⚠️ Cần đăng nhập để tiếp tục thao tác này", "warning");
+      openLoginModal();
+    }
   }
   return response;
 };
@@ -50,6 +80,8 @@ let allDomains = [];
 let allHistory = [];
 let currentUser = null;
 let authReady = false;
+let guestMode = false;
+let pendingAfterLogin = null;
 let currentFilter = "all";
 let currentSearch = "";
 let currentDomainSearch = "";
@@ -164,11 +196,48 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }, 250);
 
-  const authed = await checkAuth();
-  if (!authed) return;
-
+  await checkAuth();
   bootHubApp();
+  if (guestMode) applyGuestUi();
 });
+
+function isLoggedIn() {
+  return !!(authReady && currentUser && !guestMode);
+}
+
+/** Spaceship-style: tra cứu free; mua / thao tác ghi cần login */
+function requireLogin(message = "Đăng nhập để tiếp tục mua / đặt miền") {
+  if (isLoggedIn()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    pendingAfterLogin = () => resolve(true);
+    showToast(`🔐 ${message}`, "warning");
+    openLoginModal();
+    // Nếu đóng modal không login → resolve false lần sau khi họ thử lại
+    const modal = document.getElementById("loginModal");
+    if (modal) {
+      const onClose = () => {
+        if (!isLoggedIn() && pendingAfterLogin) {
+          pendingAfterLogin = null;
+          resolve(false);
+        }
+        modal.removeEventListener("freze-modal-closed", onClose);
+      };
+      // fallback timeout nếu user bỏ modal
+      setTimeout(() => {
+        if (!isLoggedIn() && pendingAfterLogin) {
+          // giữ pending — lần login sau vẫn chạy; không resolve false sớm
+        }
+      }, 0);
+    }
+  });
+}
+
+async function requireLoginOrAbort(message) {
+  if (isLoggedIn()) return true;
+  showToast(`🔐 ${message}`, "warning");
+  openLoginModal();
+  return false;
+}
 
 async function fetchHistoryBadgeCount() {
   try {
@@ -185,14 +254,62 @@ function bootHubApp() {
   setupSubPills();
   setupBatchTab();
   fetchTemplates();
+  setupForms();
+  setupPickerListeners();
+  if (guestMode) return;
   fetchDomainBadgeCount();
   fetchHistoryBadgeCount();
   loadCurrentCfToken();
-  setupForms();
-  setupPickerListeners();
   loadTasksList();
   if (typeof startTaskPolling === "function") startTaskPolling();
   if (typeof startHistoryPolling === "function") startHistoryPolling();
+}
+
+function applyGuestUi() {
+  document.body.classList.remove("auth-pending", "user-is-admin", "user-is-member");
+  document.body.classList.add("auth-ready", "guest-mode");
+  document.documentElement.classList.remove("auth-pending");
+  document.documentElement.classList.add("auth-ready", "guest-mode");
+
+  const bootMsg = document.querySelector("#authBootScreen p");
+  if (bootMsg) bootMsg.textContent = "Đang tải trang tra cứu...";
+
+  const nameEl = document.getElementById("userNameText");
+  const roleEl = document.getElementById("userRoleTag");
+  const balEl = document.getElementById("userBalanceText");
+  if (nameEl) nameEl.textContent = "Khách";
+  if (roleEl) {
+    roleEl.textContent = "GUEST";
+    roleEl.className = "user-role-tag user";
+  }
+  if (balEl) balEl.textContent = "— Xu";
+
+  document.querySelectorAll('.nav-tab[data-auth="required"]').forEach((tab) => {
+    tab.style.display = "none";
+  });
+  document.querySelectorAll('.nav-tab[data-role="admin"]').forEach((tab) => {
+    tab.style.display = "none";
+  });
+
+  const buyLabel = document.getElementById("navTabBuyLabel");
+  if (buyLabel) buyLabel.textContent = "Tra Cứu & Mua Miền";
+
+  const buySectionDesc = document.getElementById("tabBuySectionDesc");
+  if (buySectionDesc) {
+    buySectionDesc.textContent =
+      "Tra cứu tên miền & xem giá miễn phí — không cần đăng nhập. Ấn mua / gửi đơn mới cần đăng nhập.";
+  }
+
+  const guestHint = document.getElementById("guestSearchHint");
+  if (guestHint) guestHint.style.display = "block";
+
+  // Mặc định mở Tra cứu hàng loạt (Spaceship-style search first)
+  switchToTab("tab-buy");
+  setTimeout(() => {
+    const buyTab = document.getElementById("tab-buy");
+    const batchPill = buyTab?.querySelector('.sub-pill[data-sub="check-batch"]');
+    if (batchPill) batchPill.click();
+  }, 0);
 }
 
 function renderPaginationBar(containerEl, { page, totalPages, total, limit, onPage, label = "mục" }) {
@@ -251,8 +368,8 @@ function setupNavigation() {
       const activePane = document.getElementById(targetTabId);
       if (activePane) activePane.classList.add("active");
 
-      if (targetTabId === "tab-domains" && allDomains.length === 0) {
-        fetchDomains(1);
+      if (targetTabId === "tab-domains") {
+        fetchDomains(domainsPage || 1);
       }
       if (targetTabId === "tab-history" && allHistory.length === 0) {
         fetchHistory(1);
@@ -260,6 +377,14 @@ function setupNavigation() {
       if (targetTabId === "tab-wallet") {
         loadWalletData();
         loadDomainOrdersList();
+      }
+      if (targetTabId === "tab-members") {
+        loadUsersList();
+        loadUserAudit();
+      }
+      if (targetTabId === "tab-ledger") {
+        if (currentUser?.role === "admin") loadUsersList();
+        loadTransactions();
       }
       if (targetTabId === "tab-tasks") {
         loadTasksList();
@@ -269,6 +394,8 @@ function setupNavigation() {
       }
     });
   });
+
+  bindDirectoryControls();
 
   globalRefreshBtn.addEventListener("click", () => {
     fetchTemplates();
@@ -437,11 +564,11 @@ function renderTemplates() {
     const brandBadgeClass = `badge-${brand}`;
     const previewUrl = getTemplateLiveUrl(t);
     const liveName = getTemplateLiveName(t);
-    const screenshotSrc = t.screenshotUrl || getFallbackPlaceholder(t.name);
+    const screenshotSrc = templateShotSrc(t);
 
     card.innerHTML = `
       <div class="card-preview">
-        <img src="${screenshotSrc}" alt="${t.title || t.name}" class="preview-img" onerror="this.src='${getFallbackPlaceholder(t.name)}'" loading="lazy">
+        <img src="${screenshotSrc}" alt="${escapeHtml(t.title || t.name)}" class="preview-img" data-ph="${encodeURIComponent(t.name || "")}" onerror="this.onerror=null;this.src=templateShotFallback(this.dataset.ph)">
         <div class="card-overlay">
           <button class="btn btn-sm btn-secondary btn-preview" data-id="${t.id}">Xem trước</button>
         </div>
@@ -541,39 +668,94 @@ async function resolveUiCurrentLink(domain, fallbackLink = "", fallbackTele = ""
   return { link: link === "Chưa gán link" ? "" : link || "", tele: tele || "" };
 }
 
+function syncSwitchTemplateLinkFields(resolved) {
+  const linkInput = document.getElementById("switchTemplateLinkInput");
+  const teleInput = document.getElementById("switchTemplateTeleInput");
+  if (linkInput) {
+    // Không đè nếu user đã gõ
+    if (!linkInput.dataset.userEdited) {
+      linkInput.value = resolved.link || "";
+      linkInput.placeholder = resolved.link
+        ? resolved.link
+        : "Để trống = giữ link cũ (tự kế thừa)";
+    }
+    linkInput.disabled = false;
+  }
+  if (teleInput) {
+    if (!teleInput.dataset.userEdited) teleInput.value = resolved.tele || "";
+    teleInput.disabled = false;
+  }
+}
+
 async function openSwitchTemplateModal(domain, currentTplId = "", currentLink = "", currentTele = "") {
   activeDomainToEdit = domain;
   const subtitleEl = document.getElementById("switchTemplateDomainSubtitle");
   if (subtitleEl) subtitleEl.textContent = `Tên miền: ${domain}`;
-
-  if (!allTemplates || allTemplates.length === 0) {
-    await fetchTemplates();
-  }
-  populateTemplateSelects();
 
   const select = document.getElementById("switchTemplateSelect");
   const preview = document.getElementById("switchTemplatePreview");
   const linkInput = document.getElementById("switchTemplateLinkInput");
   const teleInput = document.getElementById("switchTemplateTeleInput");
 
+  // Prefill tức thì từ list/args — mở modal ngay, không chờ API
+  const fromList = (typeof allDomains !== "undefined" ? allDomains : [])?.find?.(
+    (d) => d.domain?.toLowerCase() === String(domain || "").toLowerCase()
+  );
+  const quickLink =
+    (currentLink && currentLink !== "Chưa gán link" ? currentLink : "") ||
+    fromList?.mainUrl ||
+    "";
+  const quickTele = currentTele || fromList?.teleUrl || fromList?.telegramUrl || "";
+
+  if (linkInput) {
+    delete linkInput.dataset.userEdited;
+    linkInput.value = quickLink || "";
+    linkInput.placeholder = quickLink
+      ? quickLink
+      : "Đang lấy link hiện tại… (có thể để trống)";
+    linkInput.oninput = () => {
+      linkInput.dataset.userEdited = "1";
+    };
+  }
+  if (teleInput) {
+    delete teleInput.dataset.userEdited;
+    teleInput.value = quickTele || "";
+    teleInput.oninput = () => {
+      teleInput.dataset.userEdited = "1";
+    };
+  }
+
+  if (allTemplates && allTemplates.length > 0) {
+    populateTemplateSelects();
+  }
   if (select) {
-    if (currentTplId) {
-      select.value = currentTplId;
-    }
+    if (currentTplId) select.value = currentTplId;
     triggerTemplatePreviewChange(select.value, preview);
     select.onchange = () => triggerTemplatePreviewChange(select.value, preview);
   }
 
-  const resolved = await resolveUiCurrentLink(domain, currentLink, currentTele);
-  if (linkInput) {
-    linkInput.value = resolved.link || "";
-    linkInput.placeholder = resolved.link
-      ? resolved.link
-      : "Để trống = giữ link cũ (tự kế thừa)";
-  }
-  if (teleInput) teleInput.value = resolved.tele || "";
-
   openModal("switchTemplateModal");
+
+  // Nạp mẫu / resolve link nền — không chặn UI
+  if (!allTemplates || allTemplates.length === 0) {
+    fetchTemplates()
+      .then(() => {
+        populateTemplateSelects();
+        if (select && currentTplId) {
+          select.value = currentTplId;
+          triggerTemplatePreviewChange(select.value, preview);
+        }
+      })
+      .catch(() => {});
+  }
+
+  resolveUiCurrentLink(domain, quickLink, quickTele)
+    .then((resolved) => syncSwitchTemplateLinkFields(resolved))
+    .catch(() => {
+      if (linkInput && !linkInput.value) {
+        linkInput.placeholder = "Để trống = giữ link cũ (tự kế thừa)";
+      }
+    });
 }
 
 function triggerTemplatePreviewChange(templateId, previewContainer) {
@@ -585,8 +767,9 @@ function triggerTemplatePreviewChange(templateId, previewContainer) {
     return;
   }
   previewContainer.style.display = "flex";
+  const imgSrc = templateShotSrc(t);
   previewContainer.innerHTML = `
-    <img src="${t.screenshotUrl || getFallbackPlaceholder(t.name)}" alt="${t.name}">
+    <img src="${imgSrc}" alt="${t.name}" loading="lazy" decoding="async" width="160" height="100" style="object-fit:cover;background:#0f172a;">
     <div class="template-inline-preview-info">
       <div><b>${t.name}</b></div>
       <div style="color: var(--accent-cyan); font-family: var(--font-mono);">
@@ -595,6 +778,23 @@ function triggerTemplatePreviewChange(templateId, previewContainer) {
       <div style="color: var(--text-dim);">${t.folder || ""}</div>
     </div>
   `;
+}
+
+function templateShotSrc(t) {
+  const url = t?.screenshotUrl;
+  if (!url) return getFallbackPlaceholder(t?.name);
+  const join = url.includes("?") ? "&" : "?";
+  return `${url}${join}v=20260930-fly88`;
+}
+
+function templateShotFallback(encodedName) {
+  let name = "";
+  try {
+    name = decodeURIComponent(encodedName || "");
+  } catch {
+    name = encodedName || "";
+  }
+  return getFallbackPlaceholder(name);
 }
 
 function getFallbackPlaceholder(text) {
@@ -849,6 +1049,11 @@ function setupForms() {
         showToast("⚠️ Vui lòng điền đầy đủ thông tin tên miền, link và chọn mẫu!");
         return;
       }
+      if (!isLoggedIn()) {
+        pendingAfterLogin = () => buyLpForm.requestSubmit();
+        await requireLoginOrAbort("Đăng nhập để gửi yêu cầu mua & gắn Landing Page");
+        return;
+      }
       if (!isAdminUser()) {
         const priceInfo = await fetchDomainOrderPrice(domain);
         openConfirmDomainPurchaseModal(domain, priceInfo.priceXu, priceInfo.ruleApplied, {
@@ -875,6 +1080,11 @@ function setupForms() {
 
       if (!domain || !link) {
         showToast("⚠️ Vui lòng điền đầy đủ tên miền và link!");
+        return;
+      }
+      if (!isLoggedIn()) {
+        pendingAfterLogin = () => buy302Form.requestSubmit();
+        await requireLoginOrAbort("Đăng nhập để gửi yêu cầu mua & trỏ 302");
         return;
       }
       if (!isAdminUser()) {
@@ -938,6 +1148,7 @@ function setupForms() {
 
       // Đóng modal ngay lập tức để người dùng tiếp tục thao tác khác
       closeModal("editLinkModal");
+      markHubInflight(domain, true);
       startHubProgressWatch({ domain, label: "Đang cập nhật link" });
 
       // Xử lý ngầm (background)
@@ -961,6 +1172,8 @@ function setupForms() {
         } catch (err) {
           showToast(`❌ Lỗi kết nối khi cập nhật [${domain}]: ${err.message}`, "error");
         } finally {
+          markHubInflight(domain, false);
+          releaseOptimisticHubTask(domain);
           loadTasksList();
         }
       })();
@@ -980,6 +1193,7 @@ function setupForms() {
 
       // Đóng modal ngay lập tức để người dùng làm việc tiếp
       closeModal("switchTemplateModal");
+      markHubInflight(domain, true);
       startHubProgressWatch({ domain, label: "Đang đổi mẫu LP" });
 
       // Xử lý ngầm (background)
@@ -1007,6 +1221,8 @@ function setupForms() {
         } catch (err) {
           showToast(`❌ Lỗi kết nối khi đổi mẫu [${domain}]: ${err.message}`, "error");
         } finally {
+          markHubInflight(domain, false);
+          releaseOptimisticHubTask(domain);
           loadTasksList();
         }
       })();
@@ -1140,7 +1356,6 @@ async function checkDomainAvailabilityLive(domain, statusEl) {
           statusEl.className = "field-feedback available";
           const formatted = `${data.priceXu || 250} Xu (≈ ${((data.priceVnd || 250000) / 1000).toLocaleString("vi-VN")}k đ)`;
           const ruleLabel = escapeHtmlText(data.ruleApplied || "Quy chuẩn");
-          const domainAttr = escapeHtmlText(data.domain || domain);
           statusEl.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
               <div>
@@ -1170,9 +1385,152 @@ async function checkDomainAvailabilityLive(domain, statusEl) {
           }
         }
       }
+      // Gợi ý đuôi khác kèm giá (Namecheap-style)
+      loadDomainSuggestions(data.domain || domain, statusEl);
     }
   } catch (err) {
     if (statusEl) statusEl.innerHTML = `❌ Không kiểm tra được: ${err.message}`;
+  }
+}
+
+async function loadDomainSuggestions(seedDomain, anchorEl) {
+  const host =
+    document.getElementById("domainSuggestPanel") ||
+    ensureDomainSuggestPanel(anchorEl);
+  if (!host || !seedDomain) return;
+  host.style.display = "block";
+  host.innerHTML = `
+    <div class="suggest-head">
+      <div>
+        <span class="suggest-kicker">Gợi ý còn trống</span>
+        <h4>Đuôi khác cho <em>${escapeHtmlText(String(seedDomain).split(".")[0] || seedDomain)}</em></h4>
+      </div>
+      <span class="suggest-loading">Đang quét TLD…</span>
+    </div>
+    <div class="suggest-grid suggest-grid--skeleton">
+      ${Array.from({ length: 8 }).map(() => `<div class="suggest-card is-skeleton"></div>`).join("")}
+    </div>
+  `;
+  try {
+    const res = await fetch("/api/suggest-domains", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ domain: seedDomain }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      host.innerHTML = `<div class="suggest-empty">Không lấy được gợi ý: ${escapeHtmlText(data.error || "lỗi")}</div>`;
+      return;
+    }
+    renderDomainSuggestions(host, data);
+  } catch (err) {
+    host.innerHTML = `<div class="suggest-empty">Lỗi gợi ý: ${escapeHtmlText(err.message)}</div>`;
+  }
+}
+
+function ensureDomainSuggestPanel(anchorEl) {
+  let panel = document.getElementById("domainSuggestPanel");
+  if (panel) return panel;
+  panel = document.createElement("div");
+  panel.id = "domainSuggestPanel";
+  panel.className = "domain-suggest-panel";
+  panel.style.display = "none";
+  const batchWrap = document.getElementById("batchCheckResultsWrapper");
+  if (batchWrap && batchWrap.parentNode) {
+    batchWrap.parentNode.insertBefore(panel, batchWrap);
+  } else if (anchorEl && anchorEl.parentNode) {
+    anchorEl.parentNode.insertBefore(panel, anchorEl.nextSibling);
+  } else {
+    const buyTab = document.getElementById("tab-buy");
+    if (buyTab) buyTab.appendChild(panel);
+  }
+  return panel;
+}
+
+function renderDomainSuggestions(host, data) {
+  const list = Array.isArray(data.suggestions) ? data.suggestions : [];
+  const available = list.filter((s) => s.isAvailable);
+  const taken = list.filter((s) => !s.isAvailable);
+  host.innerHTML = `
+    <div class="suggest-head">
+      <div>
+        <span class="suggest-kicker">Gợi ý còn trống</span>
+        <h4>${available.length} đuôi khả dụng · từ <em>${escapeHtmlText(data.seed || "")}</em></h4>
+      </div>
+      <span class="suggest-meta">${list.length} TLD đã quét</span>
+    </div>
+    ${
+      available.length
+        ? `<div class="suggest-grid">${available.map((s) => suggestCardHtml(s)).join("")}</div>`
+        : `<div class="suggest-empty">Không còn đuôi trống phổ biến cho tên này — thử SLD khác.</div>`
+    }
+    ${
+      taken.length
+        ? `<details class="suggest-taken"><summary>Đã có chủ (${taken.length})</summary><div class="suggest-grid suggest-grid--muted">${taken.map((s) => suggestCardHtml(s)).join("")}</div></details>`
+        : ""
+    }
+  `;
+  host.querySelectorAll("[data-suggest-domain]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const dom = btn.getAttribute("data-suggest-domain");
+      const mode = btn.getAttribute("data-suggest-mode") || "fill";
+      applySuggestedDomain(dom, mode);
+    });
+  });
+}
+
+function suggestCardHtml(s) {
+  const avail = !!s.isAvailable;
+  const price = escapeHtmlText(s.priceLabel || s.priceFormatted || `${s.priceXu || "—"} Xu`);
+  const tld = escapeHtmlText(s.tld || "");
+  const domain = escapeHtmlText(s.domain || "");
+  return `
+    <article class="suggest-card ${avail ? "is-available" : "is-taken"}">
+      <div class="suggest-card-top">
+        <span class="suggest-tld">${tld}</span>
+        <span class="suggest-status">${avail ? "Còn trống" : "Đã có chủ"}</span>
+      </div>
+      <div class="suggest-name">${domain}</div>
+      <div class="suggest-price">${price}</div>
+      ${
+        avail
+          ? `<div class="suggest-actions">
+              <button type="button" class="btn btn-secondary btn-sm" data-suggest-domain="${domain}" data-suggest-mode="fill">Chọn</button>
+              <button type="button" class="btn btn-primary btn-sm" data-suggest-domain="${domain}" data-suggest-mode="lp">LP</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-suggest-domain="${domain}" data-suggest-mode="302">302</button>
+            </div>`
+          : `<div class="suggest-actions"><span class="suggest-locked">Không mua được</span></div>`
+      }
+    </article>
+  `;
+}
+
+function applySuggestedDomain(domain, mode = "fill") {
+  if (!domain) return;
+  if (mode === "lp" || mode === "302") {
+    quickSelectBuyFromBatch(domain, mode);
+    return;
+  }
+  const batchInput = document.getElementById("batchCheckDomainInput");
+  if (batchInput && document.getElementById("form-check-batch")?.style.display !== "none") {
+    const lines = batchInput.value.split(/\n/).map((l) => l.trim()).filter(Boolean);
+    if (!lines.includes(domain)) {
+      batchInput.value = lines.length ? `${lines.join("\n")}\n${domain}` : domain;
+    }
+    showToast(`➕ Đã thêm ${domain} vào danh sách tra cứu`);
+    return;
+  }
+  const lp = document.getElementById("buyLpDomain");
+  const o302 = document.getElementById("buy302Domain");
+  const formLp = document.getElementById("form-buy-lp");
+  if (formLp && formLp.style.display !== "none" && lp) {
+    lp.value = domain;
+    checkDomainAvailabilityLive(domain, document.getElementById("buyLpDomainStatus"));
+    return;
+  }
+  if (o302) {
+    o302.value = domain;
+    checkDomainAvailabilityLive(domain, document.getElementById("buy302DomainStatus"));
   }
 }
 
@@ -1262,6 +1620,8 @@ function goToTasksFromProcessingModal() {
 
 /** Bật theo dõi tab Tiến trình — dùng cho mọi thao tác dài (mua, đổi link, LP, 302, đơn...) */
 function startHubProgressWatch({ domain, title, label, switchTab = true } = {}) {
+  tasksQueueFilter = "active";
+  tasksQueuePage = 1;
   if (domain) {
     pushOptimisticHubTask({
       domain,
@@ -1607,10 +1967,11 @@ async function executeDeployFlow({ domain, link, tele, templateId, isBuy, type, 
     monitoredDomainsFor200.add(d.toLowerCase());
   }
 
-  startTaskPolling();
-  loadTasksList();
-  switchToTab("tab-tasks");
-  showToast(`⏳ Đang xử lý [${d}] — tab Tiến trình`, "info");
+  markHubInflight(d, true);
+  startHubProgressWatch({
+    domain: d,
+    label: buy ? "Đang mua & cài" : "Đang cài đặt",
+  });
 
   const endpoint = tp === "lp" ? "/api/deploy-lp" : "/api/deploy-302";
   const ownerFields = {};
@@ -1634,6 +1995,8 @@ async function executeDeployFlow({ domain, link, tele, templateId, isBuy, type, 
       if (d) monitoredDomainsFor200.delete(d.toLowerCase());
       showToast(`⏳ [${d}] lỗi kết nối — kiểm tra tab Tiến trình (job có thể vẫn chạy)`, "warning");
     } finally {
+      markHubInflight(d, false);
+      releaseOptimisticHubTask(d);
       fetchDomains();
       fetchHistory();
       if (typeof checkAuth === "function") checkAuth();
@@ -2381,7 +2744,7 @@ function openPreviewModal(templateId) {
 
   document.getElementById("modalTitle").textContent = t.title || t.name;
   document.getElementById("modalTarget").textContent = `Mẫu · ${getTemplateLiveName(t)}`;
-  document.getElementById("modalImage").src = t.screenshotUrl || getFallbackPlaceholder(t.name);
+  document.getElementById("modalImage").src = templateShotSrc(t);
   document.getElementById("modalLiveDemo").href = getTemplateLiveUrl(t);
 
   const selectBtn = document.getElementById("modalSelectBtn");
@@ -2428,6 +2791,10 @@ function openBatchSetLinkModal() {
 }
 
 function openQuickDeployModal() {
+  if (!isLoggedIn()) {
+    requireLoginOrAbort("Đăng nhập để cài đặt mẫu nhanh");
+    return;
+  }
   openVisualTemplatePicker("buy");
 }
 
@@ -2549,7 +2916,7 @@ function renderPickerTemplates() {
     .map((t) => {
       const brand = t.brand || "GG88";
       const brandBadgeClass = `badge-${brand.toLowerCase()}`;
-      const imgSrc = t.screenshotUrl || getFallbackPlaceholder(t.name);
+      const imgSrc = templateShotSrc(t);
 
       return `
         <div class="template-card" onclick="openConfirmSelectTemplateModal('${t.id}')" style="cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; border: 1px solid var(--border-subtle);">
@@ -2584,7 +2951,7 @@ function openConfirmSelectTemplateModal(templateId) {
   const liveDemoBtn = document.getElementById("confirmTplLiveDemoBtn");
   const contextBox = document.getElementById("confirmTplContextBox");
 
-  if (imgEl) imgEl.src = t.screenshotUrl || getFallbackPlaceholder(t.name);
+  if (imgEl) imgEl.src = templateShotSrc(t);
   if (nameEl) nameEl.textContent = t.name;
   if (brandEl) {
     const brand = t.brand || "GG88";
@@ -3041,7 +3408,7 @@ function updateBatchGlobalThumbnail(tplId) {
   }
   const t = allTemplates.find((x) => x.id === tplId);
   if (t) {
-    imgEl.src = t.screenshotUrl || getFallbackPlaceholder(t.name);
+    imgEl.src = templateShotSrc(t);
   }
 }
 
@@ -3079,6 +3446,24 @@ function populateBatchGlobalTemplateSelect() {
   gSelect.onchange = function () {
     updateBatchGlobalThumbnail(this.value);
   };
+}
+
+function isBatchSetLinkMode() {
+  const modeRadio = document.querySelector('input[name="batchDeployMode"]:checked');
+  return modeRadio ? modeRadio.value === "setlink" : false;
+}
+
+function syncBatchKeepLandingUi() {
+  const keep = isBatchSetLinkMode();
+  const note = document.getElementById("batchKeepLandingNote");
+  const bulk = document.getElementById("batchBulkAssign");
+  const btn = document.getElementById("btnStartBatchExecution");
+  if (note) note.style.display = keep ? "block" : "none";
+  if (bulk) bulk.style.display = keep ? "none" : "";
+  if (btn && !isBatchRunning) {
+    btn.textContent = keep ? "🔗 ĐỔI LINK, GIỮ NGUYÊN LANDING" : "🚀 BẮT ĐẦU CHẠY CÀI ĐẶT HÀNG LOẠT";
+  }
+  renderBatchTable();
 }
 
 function renderBatchTable() {
@@ -3133,14 +3518,16 @@ function renderBatchTable() {
             <input type="text" class="batch-tele-inp" data-index="${index}" value="${item.tele}" placeholder="https://t.me/..." ${isBatchRunning ? "disabled" : ""}>
           </td>
           <td class="batch-cell-tpl" data-label="Mẫu / Chế độ">
-            <div class="batch-tpl-select-cell">
+            ${isBatchSetLinkMode()
+              ? `<span style="color:#a7f3d0;font-size:12px;font-weight:600;">Giữ nguyên landing đang gắn</span>`
+              : `<div class="batch-tpl-select-cell">
               <select class="batch-tpl-select" data-index="${index}" ${isBatchRunning ? "disabled" : ""}>
                 ${tplOptionsHtml}
               </select>
               <button type="button" class="btn btn-secondary btn-sm" onclick="openVisualPickerForBatchRow(${index})" title="Mở kho ảnh mẫu trực quan" ${isBatchRunning ? "disabled" : ""}>
                 🎨
               </button>
-            </div>
+            </div>`}
           </td>
           <td class="batch-cell-status" data-label="Trạng thái">
             ${statusBadge}
@@ -3225,9 +3612,20 @@ async function startBatchExecution() {
   }
 
   const modeRadio = document.querySelector('input[name="batchDeployMode"]:checked');
-  const isBuy = modeRadio ? modeRadio.value === "buy" : true;
+  const mode = modeRadio ? modeRadio.value : "buy";
+  const isBuy = mode === "buy";
+  const isSetLink = mode === "setlink";
 
-  if (isBuy) {
+  if (isSetLink) {
+    const missing = selectedList.filter((i) => !i.link || i.link === "https://" || !/^https?:\/\//i.test(i.link));
+    if (missing.length) {
+      showToast("⚠️ Mỗi dòng cần một link đích đầy đủ (https://...)", "warning");
+      return;
+    }
+    if (!confirm(`Đổi link cho ${selectedList.length} tên miền?\n\nLanding / 302 đang gắn sẽ được giữ nguyên. Mỗi miền dùng đúng link của dòng đó.`)) {
+      return;
+    }
+  } else if (isBuy) {
     if (!isAdminUser()) {
       showToast("⚠️ Chế độ mua hàng loạt chỉ dành cho Admin.", "warning");
       return;
@@ -3284,9 +3682,11 @@ async function startBatchExecution() {
   };
 
   const concurrencySetting = parseInt(document.getElementById("batchConcurrencySelect")?.value || "15", 10);
-  const concurrency = isNaN(concurrencySetting) || concurrencySetting <= 0 ? 15 : concurrencySetting;
+  let concurrency = isNaN(concurrencySetting) || concurrencySetting <= 0 ? 15 : concurrencySetting;
+  if (isSetLink) concurrency = Math.min(concurrency, 3);
 
-  addLog(`🚀 BẮT ĐẦU CHẠY HÀNG LOẠT: ${selectedList.length} tên miền (Chế độ: ${isBuy ? "Mua Spaceship & Cài Đặt" : "Trỏ Miền Có Sẵn"} | Tốc độ: Song song tối đa ${concurrency} cùng lúc)`, "step");
+  const modeLabel = isSetLink ? "Chỉ đổi link, giữ landing" : isBuy ? "Mua Spaceship & Cài Đặt" : "Trỏ Miền Có Sẵn";
+  addLog(`🚀 BẮT ĐẦU CHẠY HÀNG LOẠT: ${selectedList.length} tên miền (Chế độ: ${modeLabel} | Tốc độ: Song song tối đa ${concurrency} cùng lúc)`, "step");
 
   let completedCount = 0;
   let successCount = 0;
@@ -3315,15 +3715,21 @@ async function startBatchExecution() {
       const templateId = item.templateId || "gg88_lp_5uae";
 
       item.status = "running";
-      item.statusText = isBuy ? "Đang mua Spaceship..." : "Đang cài đặt DNS...";
+      item.statusText = isSetLink ? "Đang đổi link, giữ mẫu..." : isBuy ? "Đang mua Spaceship..." : "Đang cài đặt DNS...";
       renderBatchTable();
 
-      addLog(`👉 [${itemIdx + 1}/${selectedList.length}] Bắt đầu: ${domain} ➔ ${link} (${templateId})`, "step");
+      addLog(`👉 [${itemIdx + 1}/${selectedList.length}] Bắt đầu: ${domain} ➔ ${link}${isSetLink ? " (giữ landing)" : ` (${templateId})`}`, "step");
 
       try {
         let res;
         let resData = {};
-        if (templateId === "302_DIRECT") {
+        if (isSetLink) {
+          res = await fetch("/api/set-link", {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ domain, link, tele }),
+          });
+        } else if (templateId === "302_DIRECT") {
           item.statusText = "Cài Page Rule 302...";
           renderBatchTable();
           res = await fetch("/api/deploy-302", {
@@ -3420,6 +3826,7 @@ async function startBatchExecution() {
     btnRetry.style.display = failCount > 0 ? "inline-block" : "none";
   }
   isBatchRunning = false;
+  syncBatchKeepLandingUi();
 
   addLog(`🏁 HOÀN TẤT TIẾN TRÌNH! Thành công: ${successCount} | Thất bại: ${failCount}`, successCount > 0 ? "success" : "error");
 
@@ -3535,12 +3942,33 @@ async function fetchHistory(page = historyPage, opts = {}) {
   }
 }
 
+function applyHistoryLinksToDomainRows(historyList) {
+  if (!Array.isArray(historyList) || !Array.isArray(allDomains) || !allDomains.length) return;
+  const applied = new Set();
+  let changed = false;
+  for (const h of historyList) {
+    if (h.status !== "success" || !h.domain || !h.link || /^n\/a$/i.test(String(h.link))) continue;
+    const key = String(h.domain).toLowerCase().replace(/^www\./, "");
+    if (applied.has(key)) continue;
+    applied.add(key);
+    const row = allDomains.find((d) => String(d.domain || "").toLowerCase() === key);
+    if (!row || row.mainUrl === h.link) continue;
+    row.mainUrl = h.link;
+    if (h.tele) row.telegramUrl = h.tele;
+    changed = true;
+  }
+  if (changed) renderDomainsTable();
+}
+
 async function fetchHistorySilent() {
   try {
     const res = await fetch("/api/history/watch", { headers: authHeaders() });
     const data = await res.json();
     if (data.success && Array.isArray(data.history)) {
+      hubWatchHistory = data.history;
+      hubWatchLoaded = true;
       checkAndTrigger200Popups(data.history);
+      applyHistoryLinksToDomainRows(data.history);
     }
     const histTabActive = document
       .querySelector('.nav-tab[data-tab="tab-history"]')
@@ -3560,6 +3988,12 @@ function startHistoryPolling() {
   }, 5000);
 }
 
+function isOwnActor(userId) {
+  const myId = currentUser?.id || currentUser?.userId || "";
+  if (!myId || !userId) return false;
+  return String(userId) === String(myId);
+}
+
 function checkAndTrigger200Popups(historyList) {
   if (!Array.isArray(historyList)) return;
 
@@ -3570,12 +4004,12 @@ function checkAndTrigger200Popups(historyList) {
     const createdAt = h.timestamp ? new Date(h.timestamp).getTime() : 0;
     const ageMinutes = (Date.now() - createdAt) / 60000;
 
-    // 1. Popup khi 200 OK
+    // Popup 200 OK chỉ cho phiên vừa thao tác, hoặc đúng tài khoản đã đổi (không bắn sang admin/user khác).
     if (h.liveStatus === "200_OK" && !notified200Domains.has(domLower)) {
-      const isRecent = ageMinutes < 15;
       const isMonitored = monitoredDomainsFor200.has(domLower);
+      const isMineRecent = isOwnActor(h.userId) && ageMinutes < 15;
 
-      if (isMonitored || isRecent) {
+      if (isMonitored || isMineRecent) {
         monitoredDomainsFor200.delete(domLower);
         showDomainReady200Modal(h);
         break;
@@ -4041,11 +4475,18 @@ async function checkAuth() {
   authToken = localStorage.getItem("freze_auth_token") || "";
   authReady = false;
   currentUser = null;
-  document.body.classList.remove("auth-ready", "user-is-admin", "user-is-member");
+  guestMode = false;
+  document.body.classList.remove("auth-ready", "user-is-admin", "user-is-member", "guest-mode");
+  document.documentElement.classList.remove("auth-ready", "guest-mode");
 
   if (!authToken) {
-    window.location.href = "/login";
-    return false;
+    guestMode = true;
+    authReady = false;
+    document.body.classList.remove("auth-pending");
+    document.documentElement.classList.remove("auth-pending");
+    document.body.classList.add("auth-ready", "guest-mode");
+    document.documentElement.classList.add("auth-ready", "guest-mode");
+    return { ok: false, guest: true };
   }
 
   try {
@@ -4054,27 +4495,54 @@ async function checkAuth() {
     if (data.success && data.user) {
       currentUser = { ...data.user, balance: data.balance || 0 };
       authReady = true;
-      document.body.classList.remove("auth-pending");
+      guestMode = false;
+      document.body.classList.remove("auth-pending", "guest-mode");
+      document.documentElement.classList.remove("auth-pending", "guest-mode");
       document.body.classList.add("auth-ready");
-      document.body.classList.add(currentUser.role === "admin" ? "user-is-admin" : "user-is-member");
+      document.documentElement.classList.add("auth-ready");
+      document.body.classList.remove("user-is-admin", "user-is-member", "user-is-assistant");
+      document.body.classList.add(
+        currentUser.role === "admin" ? "user-is-admin" : currentUser.role === "assistant" ? "user-is-assistant" : "user-is-member"
+      );
       updateUserUI();
-      return true;
+      return { ok: true, guest: false };
     }
     localStorage.removeItem("freze_auth_token");
-    window.location.href = "/login";
-    return false;
+    guestMode = true;
+    document.body.classList.remove("auth-pending");
+    document.documentElement.classList.remove("auth-pending");
+    document.body.classList.add("auth-ready", "guest-mode");
+    document.documentElement.classList.add("auth-ready", "guest-mode");
+    return { ok: false, guest: true };
   } catch {
     localStorage.removeItem("freze_auth_token");
-    window.location.href = "/login";
-    return false;
+    guestMode = true;
+    document.body.classList.remove("auth-pending");
+    document.documentElement.classList.remove("auth-pending");
+    document.body.classList.add("auth-ready", "guest-mode");
+    document.documentElement.classList.add("auth-ready", "guest-mode");
+    return { ok: false, guest: true };
   }
 }
 
 function handleLogout() {
-  if (confirm("❓ Bạn có chắc chắn muốn đăng xuất khỏi hệ thống không?")) {
-    localStorage.removeItem("freze_auth_token");
-    window.location.href = "/login";
+  if (!confirm("❓ Bạn có chắc chắn muốn đăng xuất khỏi hệ thống không?")) return;
+  localStorage.removeItem("freze_auth_token");
+  authToken = "";
+  currentUser = null;
+  authReady = false;
+  guestMode = true;
+  pendingAfterLogin = null;
+  if (historyPollingInterval) {
+    clearInterval(historyPollingInterval);
+    historyPollingInterval = null;
   }
+  if (typeof taskPollingInterval !== "undefined" && taskPollingInterval) {
+    clearInterval(taskPollingInterval);
+    taskPollingInterval = null;
+  }
+  applyGuestUi();
+  showToast("👋 Đã đăng xuất — vẫn tra cứu được không cần login", "info");
 }
 
 function switchToTab(tabId) {
@@ -4084,6 +4552,11 @@ function switchToTab(tabId) {
 
 function updateUserUI() {
   if (!authReady || !currentUser) return;
+
+  document.body.classList.remove("guest-mode");
+  document.documentElement.classList.remove("guest-mode");
+  const guestHint = document.getElementById("guestSearchHint");
+  if (guestHint) guestHint.style.display = "none";
 
   const userNameText = document.getElementById("userNameText");
   const userRoleTag = document.getElementById("userRoleTag");
@@ -4095,11 +4568,13 @@ function updateUserUI() {
   const clonerCurrentBalanceText = document.getElementById("clonerCurrentBalanceText");
 
   const isAdmin = currentUser.role === "admin";
+  const isAssistant = currentUser.role === "assistant";
+  const canManageUsers = isAdmin || isAssistant;
 
   if (userNameText) userNameText.textContent = currentUser.username || "—";
   if (userRoleTag) {
-    userRoleTag.textContent = (currentUser.role || "user").toUpperCase();
-    userRoleTag.className = `user-role-tag ${currentUser.role === "admin" ? "admin" : "user"}`;
+    userRoleTag.textContent = isAssistant ? "TRỢ LÝ" : (currentUser.role || "user").toUpperCase();
+    userRoleTag.className = `user-role-tag ${isAdmin ? "admin" : isAssistant ? "assistant" : "user"}`;
   }
   const balNum = typeof currentUser.balance === "number" ? currentUser.balance : 0;
   const balFormatted = balNum.toLocaleString("vi-VN");
@@ -4124,16 +4599,42 @@ function updateUserUI() {
   if (navTabBuyLabel) navTabBuyLabel.textContent = isAdmin ? "Mua Tên Miền" : "Tra Cứu & Mua Miền";
   if (navTabDomainsLabel) navTabDomainsLabel.textContent = isAdmin ? "Quản Lý Domain" : "Tên Miền Của Tôi";
   if (navTabTasksLabel) navTabTasksLabel.textContent = isAdmin ? "Tiến Trình" : "Tiến Trình";
-  if (navTabWalletLabel) navTabWalletLabel.textContent = isAdmin ? "Ví & Thành Viên" : "Ví & Nạp VietQR";
+  if (navTabWalletLabel) navTabWalletLabel.textContent = "Ví của tôi";
+  document.querySelectorAll("#tab-wallet [data-role='admin']").forEach((el) => {
+    el.style.display = isAdmin ? "" : "none";
+  });
+  const ledgerUserFilter = document.getElementById("ledgerUserFilter");
+  if (ledgerUserFilter) ledgerUserFilter.style.display = isAdmin ? "" : "none";
 
   // Hide or Show admin tabs
   document.querySelectorAll('.nav-tab[data-role="admin"]').forEach((tab) => {
     tab.style.display = isAdmin ? "inline-flex" : "none";
   });
+  document.querySelectorAll('.nav-tab[data-auth="required"]').forEach((tab) => {
+    if (tab.dataset.closed) {
+      tab.style.display = "none";
+      return;
+    }
+    if (isAssistant) {
+      tab.style.display = tab.dataset.tab === "tab-members" ? "inline-flex" : "none";
+      return;
+    }
+    if (tab.dataset.role === "admin" && !isAdmin) {
+      tab.style.display = "none";
+    } else if (tab.dataset.role !== "admin") {
+      tab.style.display = "inline-flex";
+    }
+  });
+  if (isAssistant) {
+    document.querySelectorAll(".nav-tab").forEach((tab) => {
+      if (tab.dataset.tab !== "tab-members") tab.style.display = "none";
+    });
+  }
 
-  // If user is currently on an admin-only tab, automatically switch to tab-buy
   const activeTab = document.querySelector('.nav-tab.active');
-  if (!isAdmin && activeTab && activeTab.dataset.role === "admin") {
+  if (isAssistant) {
+    if (!activeTab || activeTab.dataset.tab !== "tab-members") switchToTab("tab-members");
+  } else if (!isAdmin && activeTab && (activeTab.dataset.role === "admin" || activeTab.dataset.role === "staff")) {
     switchToTab("tab-buy");
   }
 
@@ -4242,6 +4743,9 @@ async function runBatchDomainCheck() {
       batchCheckResults = data.results;
       renderBatchCheckResultsTable(data);
       showToast(`✨ Đã kiểm tra xong ${data.count} tên miền (${data.availableCount} tên miền còn trống)!`);
+      // 1 tên → hiện gợi ý đuôi kèm giá
+      const lines = text.split(/[\n,;\s]+/).map((x) => x.trim()).filter(Boolean);
+      if (lines.length === 1) loadDomainSuggestions(lines[0]);
     } else {
       showToast(`❌ Lỗi: ${data.error || "Không thể kiểm tra"}`);
     }
@@ -4408,7 +4912,7 @@ async function handleAuthSubmit(e) {
   try {
     const res = await fetch(endpoint, {
       method: "POST",
-      headers: authHeaders(),
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password, fullName: username }),
     });
     const data = await res.json();
@@ -4416,11 +4920,39 @@ async function handleAuthSubmit(e) {
       authToken = data.token;
       localStorage.setItem("freze_auth_token", authToken);
       currentUser = { ...data.user, balance: data.balance || 0 };
+      authReady = true;
+      guestMode = false;
+      document.body.classList.remove("guest-mode", "auth-pending");
+      document.documentElement.classList.remove("guest-mode", "auth-pending");
+      document.body.classList.add("auth-ready");
+      document.documentElement.classList.add("auth-ready");
+      document.body.classList.remove("user-is-admin", "user-is-member", "user-is-assistant");
+      document.body.classList.add(currentUser.role === "admin" ? "user-is-admin" : currentUser.role === "assistant" ? "user-is-assistant" : "user-is-member");
+
+      const guestHint = document.getElementById("guestSearchHint");
+      if (guestHint) guestHint.style.display = "none";
+      document.querySelectorAll('.nav-tab[data-auth="required"]').forEach((tab) => {
+        tab.style.display = tab.dataset.closed ? "none" : "";
+      });
+
       updateUserUI();
       closeModal("loginModal");
       showToast(`🎉 Đăng nhập thành công: ${currentUser.fullName || currentUser.username}`);
-      loadDomains();
+      if (currentUser.role === "assistant") {
+        switchToTab("tab-members");
+        return;
+      }
+      fetchDomainBadgeCount();
+      fetchHistoryBadgeCount();
       loadTasksList();
+      if (typeof startTaskPolling === "function") startTaskPolling();
+      if (typeof startHistoryPolling === "function") startHistoryPolling();
+      if (typeof loadDomains === "function") loadDomains();
+      else if (typeof fetchDomains === "function") fetchDomains(1);
+
+      const cb = pendingAfterLogin;
+      pendingAfterLogin = null;
+      if (typeof cb === "function") setTimeout(() => cb(), 150);
     } else {
       showToast(`❌ Lỗi: ${data.error}`);
     }
@@ -4430,9 +4962,268 @@ async function handleAuthSubmit(e) {
 }
 
 async function loadWalletData() {
-  loadTransactions();
+  if (!isLoggedIn()) return;
   if (currentUser.role === "admin") {
     loadUsersList();
+  }
+}
+
+const memberListState = { page: 1 };
+const ledgerListState = { page: 1 };
+let allTxCache = [];
+let directoryControlsBound = false;
+
+function bindDirectoryControls() {
+  if (directoryControlsBound) return;
+  directoryControlsBound = true;
+  const resetMembers = () => {
+    memberListState.page = 1;
+    renderMembersPage();
+  };
+  const resetLedger = () => {
+    ledgerListState.page = 1;
+    renderLedgerPage();
+  };
+  document.getElementById("memberSearch")?.addEventListener("input", resetMembers);
+  document.getElementById("memberRoleFilter")?.addEventListener("change", resetMembers);
+  document.getElementById("memberStatusFilter")?.addEventListener("change", resetMembers);
+  document.getElementById("memberPageSize")?.addEventListener("change", resetMembers);
+  document.getElementById("ledgerSearch")?.addEventListener("input", resetLedger);
+  document.getElementById("ledgerTypeFilter")?.addEventListener("change", resetLedger);
+  document.getElementById("ledgerUserFilter")?.addEventListener("change", resetLedger);
+  document.getElementById("ledgerPageSize")?.addEventListener("change", resetLedger);
+}
+
+function memberQuery() {
+  return {
+    q: (document.getElementById("memberSearch")?.value || "").trim().toLowerCase(),
+    role: document.getElementById("memberRoleFilter")?.value || "all",
+    status: document.getElementById("memberStatusFilter")?.value || "all",
+    limit: parseInt(document.getElementById("memberPageSize")?.value || "10", 10) || 10,
+  };
+}
+
+function filteredMembers() {
+  const f = memberQuery();
+  return allUsersCache.filter((u) => {
+    if (f.role !== "all" && u.role !== f.role) return false;
+    if (f.status === "active" && u.status !== "active") return false;
+    if (f.status === "locked" && u.status === "active") return false;
+    if (!f.q) return true;
+    const blob = `${u.username || ""} ${u.fullName || ""} ${u.id || ""} ${u.role || ""}`.toLowerCase();
+    return blob.includes(f.q);
+  });
+}
+
+function renderMemberStats() {
+  const host = document.getElementById("memberStats");
+  if (!host) return;
+  const list = allUsersCache;
+  const active = list.filter((u) => u.status === "active").length;
+  const xu = list.reduce((sum, u) => sum + (Number(u.balance) || 0), 0);
+  const domains = list.reduce((sum, u) => sum + (Number(u.domainCount) || 0), 0);
+  const cards = [
+    ["Tổng thành viên", list.length],
+    ["Đang hoạt động", active],
+    ["Không hoạt động", list.length - active],
+  ];
+  if (currentUser?.role !== "assistant") {
+    cards.push(["Tổng Xu", `${xu.toLocaleString("vi-VN")}`], ["Miền đã gán", domains]);
+  }
+  host.innerHTML = cards.map(([label, value]) => `
+    <div class="dir-stat">
+      <span class="dir-stat-label">${label}</span>
+      <span class="dir-stat-value">${value}</span>
+    </div>
+  `).join("");
+}
+
+function renderMembersPage() {
+  const tbody = document.getElementById("membersTableBody");
+  if (!tbody) return;
+  const f = memberQuery();
+  const rows = filteredMembers();
+  const totalPages = Math.max(1, Math.ceil(rows.length / f.limit) || 1);
+  if (memberListState.page > totalPages) memberListState.page = totalPages;
+  if (memberListState.page < 1) memberListState.page = 1;
+  const page = memberListState.page;
+  const slice = rows.slice((page - 1) * f.limit, page * f.limit);
+  const empty = document.getElementById("membersEmpty");
+  renderMemberStats();
+  const badge = document.getElementById("badgeMembersCount");
+  if (badge) badge.textContent = String(allUsersCache.length);
+
+  if (!slice.length) {
+    tbody.innerHTML = "";
+    if (empty) empty.style.display = "block";
+  } else if (empty) empty.style.display = "none";
+
+  tbody.innerHTML = slice.map((u) => {
+    const created = u.createdAt ? new Date(u.createdAt).toLocaleDateString("vi-VN") : "—";
+    const id = escapeHtml(u.id);
+    const username = escapeHtml(u.username);
+    const roleClass = u.role === "admin" ? "admin" : u.role === "assistant" ? "assistant" : "user";
+    const roleText = u.role === "assistant" ? "TRỢ LÝ" : escapeHtml(String(u.role || "").toUpperCase());
+    const assistant = currentUser?.role === "assistant";
+    const canEdit = !assistant || u.role === "user";
+    return `
+      <tr>
+        <td style="font-weight:700;color:#fff;">${username}</td>
+        <td>${escapeHtml(u.fullName || "—")}</td>
+        <td><span class="user-role-tag ${roleClass}">${roleText}</span></td>
+        <td><span class="badge-status ${u.status === "active" ? "badge-success" : "badge-danger"}">${u.status === "active" ? "Hoạt động" : "Tạm khóa"}</span></td>
+        <td class="assistant-hide" style="font-weight:700;color:var(--accent-emerald);">${(Number(u.balance) || 0).toLocaleString("vi-VN")} Xu</td>
+        <td class="assistant-hide" style="font-weight:600;color:var(--accent-cyan);">${u.domainCount || 0}</td>
+        <td style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);">${created}</td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${canEdit ? `<button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${id}')">Sửa</button>` : ""}
+            ${canEdit && !assistant ? `<button class="btn btn-secondary btn-sm" onclick="quickTopupForUser('${id}', '${username}')">Cộng Xu</button>` : ""}
+            ${canEdit && u.username !== "admin" ? `<button class="btn btn-danger btn-sm" onclick="deleteUser('${id}', '${username}')">Xóa</button>` : ""}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  renderPaginationBar(document.getElementById("membersPagination"), {
+    page,
+    totalPages: rows.length ? totalPages : 1,
+    total: rows.length,
+    limit: f.limit,
+    label: "thành viên",
+    onPage: (next) => {
+      memberListState.page = next;
+      renderMembersPage();
+    },
+  });
+}
+
+function txUserName(userId) {
+  const u = allUsersCache.find((item) => item.id === userId);
+  return u?.username || userId || "—";
+}
+
+function txTypeLabel(type) {
+  if (type === "TOPUP") return "Nạp Xu";
+  if (type === "PURCHASE") return "Trừ Xu";
+  return type || "Khác";
+}
+
+function ledgerQuery() {
+  return {
+    q: (document.getElementById("ledgerSearch")?.value || "").trim().toLowerCase(),
+    type: document.getElementById("ledgerTypeFilter")?.value || "all",
+    userId: document.getElementById("ledgerUserFilter")?.value || "all",
+    limit: parseInt(document.getElementById("ledgerPageSize")?.value || "10", 10) || 10,
+  };
+}
+
+function filteredLedger() {
+  const f = ledgerQuery();
+  const isAdmin = currentUser?.role === "admin";
+  return allTxCache.filter((t) => {
+    if (f.type === "TOPUP" && t.type !== "TOPUP") return false;
+    if (f.type === "PURCHASE" && t.type !== "PURCHASE") return false;
+    if (f.type === "other" && (t.type === "TOPUP" || t.type === "PURCHASE")) return false;
+    if (isAdmin && f.userId !== "all" && t.userId !== f.userId) return false;
+    if (!f.q) return true;
+    const who = txUserName(t.userId);
+    const blob = `${who} ${t.note || ""} ${t.type || ""} ${t.createdBy || ""} ${t.amount ?? ""}`.toLowerCase();
+    return blob.includes(f.q);
+  });
+}
+
+function renderLedgerStats(rows) {
+  const host = document.getElementById("ledgerStats");
+  if (!host) return;
+  const inn = rows.filter((t) => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0);
+  const out = rows.filter((t) => Number(t.amount) < 0).reduce((s, t) => s + Number(t.amount), 0);
+  const cards = [
+    ["Giao dịch", rows.length],
+    ["Tổng nạp", `+${inn.toLocaleString("vi-VN")}`],
+    ["Tổng trừ", out.toLocaleString("vi-VN")],
+  ];
+  host.innerHTML = cards.map(([label, value]) => `
+    <div class="dir-stat">
+      <span class="dir-stat-label">${label}</span>
+      <span class="dir-stat-value">${value}</span>
+    </div>
+  `).join("");
+}
+
+function fillLedgerUserFilter() {
+  const select = document.getElementById("ledgerUserFilter");
+  if (!select || currentUser?.role !== "admin") return;
+  const current = select.value || "all";
+  const options = ['<option value="all">Mọi thành viên</option>'].concat(
+    allUsersCache.map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.username)}</option>`)
+  );
+  select.innerHTML = options.join("");
+  select.value = [...select.options].some((o) => o.value === current) ? current : "all";
+}
+
+function renderLedgerPage() {
+  const tbody = document.getElementById("transactionsTableBody");
+  if (!tbody) return;
+  bindDirectoryControls();
+  fillLedgerUserFilter();
+  const isAdmin = currentUser?.role === "admin";
+  document.querySelectorAll(".ledger-user-col, #ledgerUserCol").forEach((el) => {
+    el.style.display = isAdmin ? "" : "none";
+  });
+  const f = ledgerQuery();
+  const rows = filteredLedger();
+  const totalPages = Math.max(1, Math.ceil(rows.length / f.limit) || 1);
+  if (ledgerListState.page > totalPages) ledgerListState.page = totalPages;
+  if (ledgerListState.page < 1) ledgerListState.page = 1;
+  const page = ledgerListState.page;
+  const slice = rows.slice((page - 1) * f.limit, page * f.limit);
+  const empty = document.getElementById("ledgerEmpty");
+  renderLedgerStats(rows);
+
+  if (!slice.length) {
+    tbody.innerHTML = "";
+    if (empty) empty.style.display = "block";
+  } else if (empty) empty.style.display = "none";
+
+  tbody.innerHTML = slice.map((t) => {
+    const amount = Number(t.amount) || 0;
+    const positive = amount > 0;
+    const color = positive ? "var(--accent-emerald)" : "var(--accent-rose)";
+    const sign = positive ? "+" : "";
+    const when = t.timestamp ? new Date(t.timestamp).toLocaleString("vi-VN") : "—";
+    const who = isAdmin
+      ? `<td class="ledger-user-col" style="font-weight:700;color:#fff;">${escapeHtml(txUserName(t.userId))}</td>`
+      : "";
+    const by = t.createdBy ? `<div style="font-size:11px;color:var(--text-dim);">bởi ${escapeHtml(t.createdBy)}</div>` : "";
+    return `
+      <tr>
+        <td><span style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);">${when}</span></td>
+        ${who}
+        <td><span class="user-role-tag ${t.type === "TOPUP" ? "admin" : "user"}">${escapeHtml(txTypeLabel(t.type))}</span></td>
+        <td style="font-weight:700;color:${color};">${sign}${amount.toLocaleString("vi-VN")} Xu</td>
+        <td style="font-weight:600;color:#fff;">${Number(t.newBalance || 0).toLocaleString("vi-VN")} Xu</td>
+        <td style="color:var(--text-muted);">${escapeHtml(t.note || "—")}${by}</td>
+      </tr>
+    `;
+  }).join("");
+  if (!slice.length) tbody.innerHTML = "";
+
+  renderPaginationBar(document.getElementById("ledgerPagination"), {
+    page,
+    totalPages: rows.length ? totalPages : 1,
+    total: rows.length,
+    limit: f.limit,
+    label: "giao dịch",
+    onPage: (next) => {
+      ledgerListState.page = next;
+      renderLedgerPage();
+    },
+  });
+  if (!rows.length) {
+    const bar = document.getElementById("ledgerPagination");
+    if (bar) bar.innerHTML = "";
   }
 }
 
@@ -4440,28 +5231,8 @@ async function loadTransactions() {
   try {
     const res = await fetch("/api/wallet/transactions", { headers: authHeaders() });
     const data = await res.json();
-    const tbody = document.getElementById("transactionsTableBody");
-    if (!tbody) return;
-
-    if (!data.success || !data.transactions || data.transactions.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 20px;">Chưa có giao dịch nào phát sinh.</td></tr>`;
-      return;
-    }
-
-    tbody.innerHTML = data.transactions.map((t) => {
-      const isPositive = t.amount > 0;
-      const color = isPositive ? "var(--accent-emerald)" : "var(--accent-rose)";
-      const sign = isPositive ? "+" : "";
-      return `
-        <tr>
-          <td><span style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">${new Date(t.timestamp).toLocaleString("vi-VN")}</span></td>
-          <td><span class="user-role-tag ${t.type === "TOPUP" ? "admin" : "user"}">${t.type}</span></td>
-          <td style="font-weight: 700; color: ${color};">${sign}${Number(t.amount).toLocaleString("vi-VN")} Xu</td>
-          <td style="font-weight: 600; color: #fff;">${Number(t.newBalance).toLocaleString("vi-VN")} Xu</td>
-          <td style="color: var(--text-muted);">${t.note || "-"}</td>
-        </tr>
-      `;
-    }).join("");
+    allTxCache = data.success && Array.isArray(data.transactions) ? data.transactions : [];
+    renderLedgerPage();
   } catch {}
 }
 
@@ -4472,12 +5243,13 @@ async function loadUsersList() {
   try {
     const res = await fetch("/api/admin/users", { headers: authHeaders() });
     const data = await res.json();
-    const tbody = document.getElementById("usersTableBody");
     const topupUserSelect = document.getElementById("topupUserSelect");
     const assignUserSelect = document.getElementById("assignUserSelect");
-    if (!tbody || !data.success) return;
+    if (!data.success) return;
 
     allUsersCache = data.users || [];
+    renderMembersPage();
+    fillLedgerUserFilter();
 
     if (topupUserSelect) {
       topupUserSelect.innerHTML = allUsersCache.map((u) => `
@@ -4490,43 +5262,28 @@ async function loadUsersList() {
         <option value="${u.id}">${u.username} (${u.fullName})</option>
       `).join("");
     }
-
-    tbody.innerHTML = allUsersCache.map((u) => `
-      <tr>
-        <td style="font-weight: 700; color: #fff;">👤 ${u.username}</td>
-        <td>${u.fullName || "-"}</td>
-        <td><span class="user-role-tag ${u.role}">${u.role.toUpperCase()}</span></td>
-        <td><span class="badge-status ${u.status === 'active' ? 'badge-success' : 'badge-danger'}">${u.status === 'active' ? '🟢 Hoạt Động' : '🔴 Tạm Khóa'}</span></td>
-        <td style="font-weight: 700; color: var(--accent-emerald);">${(u.balance || 0).toLocaleString("vi-VN")} Xu</td>
-        <td style="font-weight: 600; color: var(--accent-cyan);">${u.domainCount || 0} tên miền</td>
-        <td>
-          <div style="display: flex; gap: 6px;">
-            <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.id}')" title="Sửa thông tin hoặc đổi mật khẩu">
-              ✏️ Sửa
-            </button>
-            <button class="btn btn-secondary btn-sm" onclick="quickTopupForUser('${u.id}', '${u.username}')" title="Admin cộng Xu trực tiếp cho user này">
-              💵 Cộng Xu
-            </button>
-            ${u.username !== "admin" ? `
-            <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}', '${u.username}')" title="Xóa tài khoản">
-              🗑️
-            </button>` : ""}
-          </div>
-        </td>
-      </tr>
-    `).join("");
   } catch {}
 }
 
-function openCreateUserModal() {
+function openCreateUserModal(kind = "user") {
   const form = document.getElementById("userCrudForm");
   if (form) form.reset();
-  document.getElementById("userCrudTitle").textContent = "Thêm Thành Viên Mới";
+  const assistantActor = currentUser?.role === "assistant";
+  const creatingAssistant = kind === "assistant" && !assistantActor;
+  document.getElementById("userCrudTitle").textContent = creatingAssistant ? "Tạo Tài Khoản Trợ Lý" : "Thêm Thành Viên Mới";
   document.getElementById("crudUserId").value = "";
   document.getElementById("crudUsername").disabled = false;
   document.getElementById("crudPassword").required = true;
   document.getElementById("crudPasswordReq").style.display = "inline";
-  document.getElementById("crudInitialBalanceGroup").style.display = "block";
+  document.getElementById("crudInitialBalanceGroup").style.display = assistantActor || creatingAssistant ? "none" : "block";
+  const roleSelect = document.getElementById("crudRole");
+  if (roleSelect) {
+    roleSelect.value = creatingAssistant ? "assistant" : "user";
+    roleSelect.disabled = assistantActor || creatingAssistant;
+    for (const opt of roleSelect.options) {
+      opt.hidden = assistantActor && opt.value !== "user";
+    }
+  }
   openModal("userCrudModal");
 }
 
@@ -4545,7 +5302,15 @@ function openEditUserModal(userId) {
   document.getElementById("crudPassword").value = "";
   document.getElementById("crudPassword").required = false;
   document.getElementById("crudPasswordReq").style.display = "none";
-  document.getElementById("crudInitialBalanceGroup").style.display = "none"; // Ẩn cấp vốn khi sửa
+  document.getElementById("crudInitialBalanceGroup").style.display = "none";
+  const roleSelect = document.getElementById("crudRole");
+  const assistantActor = currentUser?.role === "assistant";
+  if (roleSelect) {
+    roleSelect.disabled = assistantActor;
+    for (const opt of roleSelect.options) {
+      opt.hidden = assistantActor && opt.value !== "user";
+    }
+  }
 
   openModal("userCrudModal");
 }
@@ -4577,11 +5342,49 @@ async function handleUserCrudSubmit(e) {
       showToast(`🎉 ${isEdit ? "Đã cập nhật thông tin thành viên!" : "Đã tạo thành viên mới thành công!"}`);
       closeModal("userCrudModal");
       loadUsersList();
+      loadUserAudit();
     } else {
       showToast(`❌ Lỗi: ${data.error}`);
     }
   } catch (err) {
     showToast(`❌ Lỗi kết nối: ${err.message}`);
+  }
+}
+
+const USER_AUDIT_LABELS = {
+  USER_CREATE: "Thêm user",
+  USER_UPDATE: "Sửa user",
+  USER_DELETE: "Xóa user",
+  PASSWORD_RESET: "Đổi mật khẩu",
+  ROLE_CHANGE: "Đổi vai trò",
+  STATUS_CHANGE: "Đổi trạng thái",
+};
+
+async function loadUserAudit() {
+  const body = document.getElementById("userAuditBody");
+  if (!body || (currentUser?.role !== "admin" && currentUser?.role !== "assistant")) return;
+  try {
+    const res = await fetch("/api/admin/audit-log?limit=80", { headers: authHeaders() });
+    const data = await res.json();
+    const items = (data.items || []).filter((item) => USER_AUDIT_LABELS[item.action]);
+    if (!items.length) {
+      body.innerHTML = `<tr><td colspan="5" style="color:var(--text-dim);padding:14px;">Chưa có lịch sử thêm, sửa hoặc xóa user.</td></tr>`;
+      return;
+    }
+    body.innerHTML = items.map((item) => {
+      const when = item.at ? new Date(item.at).toLocaleString("vi-VN") : "—";
+      const who = item.actor?.username || "—";
+      const target = item.target?.username || item.target?.userId || "—";
+      return `<tr>
+        <td style="font-family:var(--font-mono);font-size:12px;">${escapeHtml(when)}</td>
+        <td>${escapeHtml(USER_AUDIT_LABELS[item.action] || item.action)}</td>
+        <td>@${escapeHtml(who)}</td>
+        <td>@${escapeHtml(target)}</td>
+        <td>${escapeHtml(item.summary || "")}</td>
+      </tr>`;
+    }).join("");
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="5" style="color:var(--accent-rose);">Không tải được lịch sử: ${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -4600,6 +5403,7 @@ async function deleteUser(userId, username) {
     if (data.success) {
       showToast(`🗑️ Đã xóa thành công tài khoản [${username}]!`);
       loadUsersList();
+      loadUserAudit();
     } else {
       showToast(`❌ Lỗi: ${data.error}`);
     }
@@ -4675,8 +5479,41 @@ async function openDomainAssignModal(domainToPreselect = "") {
   openModal("domainAssignModal");
 }
 
-async function handleDomainAssignSubmit(e) {
-  e.preventDefault();
+function isHubAdminAccount(userId, username) {
+  const id = String(userId || "");
+  const name = String(username || "").toLowerCase();
+  return id === "u_admin" || id === "admin" || name === "admin";
+}
+
+function confirmCenter(message) {
+  return new Promise((resolve) => {
+    const old = document.getElementById("ownerTransferConfirm");
+    if (old) old.remove();
+    const box = document.createElement("div");
+    box.id = "ownerTransferConfirm";
+    box.style.cssText = "position:fixed;inset:0;z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.55);";
+    box.innerHTML = `
+      <div style="width:min(440px,100%);background:#141824;border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.45);">
+        <div style="font-size:16px;font-weight:700;margin-bottom:10px;">Đổi chủ tên miền?</div>
+        <div id="ownerTransferConfirmText" style="white-space:pre-wrap;color:#d6d8e0;font-size:14px;line-height:1.45;"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;">
+          <button type="button" id="ownerTransferCancel" class="btn btn-secondary">Hủy</button>
+          <button type="button" id="ownerTransferOk" class="btn btn-primary">Xác nhận đổi chủ</button>
+        </div>
+      </div>`;
+    document.body.appendChild(box);
+    box.querySelector("#ownerTransferConfirmText").textContent = message;
+    const done = (ok) => {
+      box.remove();
+      resolve(ok);
+    };
+    box.querySelector("#ownerTransferCancel").onclick = () => done(false);
+    box.querySelector("#ownerTransferOk").onclick = () => done(true);
+  });
+}
+
+async function handleDomainAssignSubmit(e, confirmTransfer = false) {
+  if (e?.preventDefault) e.preventDefault();
   const userId = document.getElementById("assignUserSelect")?.value;
   const domains = parseAssignDomainList(document.getElementById("assignDomainList")?.value || "");
   const btn = document.getElementById("btnConfirmAssignDomains");
@@ -4695,9 +5532,23 @@ async function handleDomainAssignSubmit(e) {
     const res = await fetch("/api/admin/assign-domain", {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ domains, userId }),
+      body: JSON.stringify({ domains, userId, confirmTransfer: confirmTransfer === true }),
     });
     const data = await res.json();
+    if (!data.success && data.code === "OWNER_CONFLICT" && confirmTransfer !== true) {
+      const conflicts = (data.conflicts || (data.currentOwner ? [data.currentOwner] : [])).filter(
+        (c) => c && !isHubAdminAccount(c.userId, c.username)
+      );
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Xác Nhận Gán Domain";
+      }
+      if (!conflicts.length) return handleDomainAssignSubmit(null, true);
+      const lines = conflicts.map((c) => `${c.domain} đang thuộc @${c.username}`).join("\n");
+      const ok = await confirmCenter(`${lines}\n\nXác nhận chuyển các miền này sang thành viên vừa chọn?`);
+      if (!ok) return;
+      return handleDomainAssignSubmit(null, true);
+    }
     if (data.success) {
       const ok = data.assignedCount ?? domains.length;
       const fail = Array.isArray(data.failed) ? data.failed.length : 0;
@@ -4727,6 +5578,10 @@ let topupBalancePollTimer = null;
 let topupBalanceBaseline = null;
 
 function openTopupModal() {
+  if (!isLoggedIn()) {
+    requireLoginOrAbort("Đăng nhập để nạp Xu vào ví");
+    return;
+  }
   const simBtn = document.getElementById("btnSimulatePay");
   if (simBtn) {
     // Chỉ hiện nút test cho Admin (backend vẫn cần ALLOW_SIMULATE_PAY=true)
@@ -4892,6 +5747,9 @@ async function simulatePaymentWebhook() {
 let allTasks = [];
 let hubOrdersCache = [];
 let hubOptimisticTasks = new Map();
+let hubWatchHistory = [];
+let hubWatchLoaded = false;
+const hubInflightDomains = new Set();
 let taskPollingInterval = null;
 const TASK_POLL_FAST_MS = 1200;
 const TASK_POLL_SLOW_MS = 4000;
@@ -4942,15 +5800,44 @@ function mergeHubTaskFromApi(task) {
   updateTaskBadge();
 }
 
+function markHubInflight(domain, on) {
+  const key = String(domain || "").toLowerCase().replace(/^www\./, "");
+  if (!key) return;
+  if (on) hubInflightDomains.add(key);
+  else hubInflightDomains.delete(key);
+}
+
+function releaseOptimisticHubTask(domain) {
+  const key = String(domain || "").toLowerCase().replace(/^www\./, "");
+  if (key) hubOptimisticTasks.delete(key);
+}
+
 function syncOptimisticTasksFromServer(tasks) {
-  const serverDomains = new Set((tasks || []).map((t) => String(t.domain || "").toLowerCase()).filter(Boolean));
-  for (const key of hubOptimisticTasks.keys()) {
-    if (serverDomains.has(key)) hubOptimisticTasks.delete(key);
+  const runningByDomain = new Map();
+  for (const t of tasks || []) {
+    if (!isTaskRunningStatus(t.status)) continue;
+    const key = domainKeyOf(t);
+    if (!key) continue;
+    const prev = runningByDomain.get(key);
+    if (!prev || new Date(t.createdAt || 0) >= new Date(prev.createdAt || 0)) runningByDomain.set(key, t);
   }
   const now = Date.now();
-  for (const [key, t] of hubOptimisticTasks.entries()) {
-    const age = now - new Date(t.createdAt || 0).getTime();
-    if (age > 3 * 60 * 1000) hubOptimisticTasks.delete(key);
+  for (const [key, opt] of [...hubOptimisticTasks.entries()]) {
+    const optTs = new Date(opt.createdAt || 0).getTime();
+    const live = runningByDomain.get(key);
+    if (live && new Date(live.createdAt || 0).getTime() + 2000 >= optTs) {
+      hubOptimisticTasks.delete(key);
+      continue;
+    }
+    const watch = (hubWatchHistory || []).find(
+      (h) => domainKeyOf(h) === key && (h.status === "in_progress" || h.status === "pending")
+    );
+    if (watch && new Date(watch.timestamp || watch.updatedAt || 0).getTime() + 5000 >= optTs) {
+      hubOptimisticTasks.delete(key);
+      continue;
+    }
+    if (hubInflightDomains.has(key)) continue;
+    if (now - optTs > 15 * 60 * 1000) hubOptimisticTasks.delete(key);
   }
 }
 
@@ -5027,7 +5914,8 @@ function getHistoryProgressAsTasks() {
       .filter(Boolean)
   );
   const now = Date.now();
-  return (allHistory || [])
+  const progressSource = hubWatchLoaded ? hubWatchHistory : allHistory || [];
+  return progressSource
     .filter((h) => {
       if (h.status !== "in_progress" && h.status !== "pending") return false;
       if (h.taskId && tasksById.has(h.taskId)) {
@@ -5043,8 +5931,11 @@ function getHistoryProgressAsTasks() {
         const histTs = new Date(h.updatedAt || h.timestamp || 0).getTime();
         if (termTs && termTs >= histTs) return false;
       }
-      const age = now - new Date(h.updatedAt || h.timestamp || 0).getTime();
-      if (age > 2 * 60 * 60 * 1000) return false;
+      const waitingZone = h.details?.waitZone302 === true;
+      const anchor = waitingZone ? h.timestamp || h.updatedAt : h.updatedAt || h.timestamp;
+      const age = now - new Date(anchor || 0).getTime();
+      const cap = waitingZone ? 6 * 60 * 60 * 1000 : 20 * 60 * 1000;
+      if (age > cap) return false;
       return true;
     })
     .map((h) => ({
@@ -5073,13 +5964,20 @@ function getDisplayTasks() {
 
   const beats = (next, prev) => {
     if (!prev) return true;
-    if (next._fromHistory && !prev._fromHistory && isTaskTerminalStatus(prev.status)) return false;
-    if (!next._fromHistory && prev._fromHistory && isTaskTerminalStatus(next.status)) return true;
-    if (!next._fromHistory && prev._fromHistory && isTaskRunningStatus(next.status)) return true;
-    if (next._fromHistory && !prev._fromHistory && isTaskRunningStatus(prev.status)) return false;
-    if (isTaskTerminalStatus(next.status) && isTaskRunningStatus(prev.status) && prev._fromHistory) return true;
-    if (isTaskRunningStatus(next.status) && next._fromHistory && isTaskTerminalStatus(prev.status)) return false;
-    return (next._pri || 0) > (prev._pri || 0);
+    const nextRun = isTaskRunningStatus(next.status);
+    const prevRun = isTaskRunningStatus(prev.status);
+    const nextStart = new Date(next.createdAt || 0).getTime();
+    const prevStart = new Date(prev.createdAt || 0).getTime();
+    const nextDone = new Date(next.finishedAt || next.createdAt || 0).getTime();
+    const prevDone = new Date(prev.finishedAt || prev.createdAt || 0).getTime();
+    if (nextRun && !prevRun) return nextStart + 1500 >= prevDone;
+    if (!nextRun && prevRun) return nextDone >= prevStart + 1500;
+    if (nextRun && prevRun) {
+      if (prev._optimistic && !next._optimistic) return true;
+      if (next._optimistic && !prev._optimistic) return false;
+      return nextStart >= prevStart;
+    }
+    return nextDone >= prevDone;
   };
 
   const add = (t, pri) => {
@@ -5097,6 +5995,7 @@ function getDisplayTasks() {
 
   allTasks
     .filter((t) => isTaskTerminalStatus(t.status))
+    .filter((t) => t.status !== "SUCCESS" || isOwnActor(t.userId) || !t.userId)
     .forEach((t) => {
       const fin = t.finishedAt ? new Date(t.finishedAt).getTime() : 0;
       const keepMs = t.status === "FAILED" ? 6 * 60 * 60 * 1000 : 30 * 60 * 1000;
@@ -5504,69 +6403,7 @@ function removeClonerTextReplacementRow(btn) {
 
 async function handleCloneWebsite(e) {
   e.preventDefault();
-  const url = document.getElementById("clonerSourceUrl")?.value.trim();
-  const templateName = document.getElementById("clonerTemplateName")?.value.trim();
-  const domain = document.getElementById("clonerDomain")?.value.trim();
-  const targetUrl = document.getElementById("clonerTargetUrl")?.value.trim();
-  const pageTitle = document.getElementById("clonerPageTitleInput")?.value.trim();
-
-  // Thu thập danh sách thay thế text
-  const textReplacements = [];
-  const rows = document.querySelectorAll(".cloner-replace-row");
-  rows.forEach((r) => {
-    const find = r.querySelector(".cloner-find-text")?.value.trim();
-    const replace = r.querySelector(".cloner-replace-text")?.value.trim();
-    if (find) {
-      textReplacements.push({ find, replace: replace || "" });
-    }
-  });
-
-  if (!url) {
-    showToast("❌ Vui lòng nhập link website cần sao chép");
-    return;
-  }
-
-  const btn = document.getElementById("btnSubmitClone");
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = `<span>⏳ Đang đưa vào hàng đợi...</span>`;
-  }
-
-  try {
-    const res = await fetch("/api/tasks/clone-web", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({
-        url,
-        templateName,
-        domain,
-        targetUrl,
-        isDeploy: Boolean(domain),
-        logoData: uploadedClonerLogoBase64 || undefined,
-        faviconData: uploadedClonerFaviconBase64 || undefined,
-        pageTitle: pageTitle || undefined,
-        textReplacements: textReplacements.length > 0 ? textReplacements : undefined,
-      }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      showProcessingToast("Clone VIP");
-      startHubProgressWatch({
-        domain: domain || templateName || url,
-        label: "Đang clone & đóng gói",
-        switchTab: true,
-      });
-    } else {
-      showToast(`❌ Lỗi: ${data.error}`, "error");
-    }
-  } catch (err) {
-    showToast(`❌ Lỗi kết nối: ${err.message}`);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = `<span>🚀 Bắt Đầu Sao Chép & Đóng Gói VIP</span>`;
-    }
-  }
+  showToast("Chức năng clone web đã đóng", "error");
 }
 
 function downloadTemplateZip(templateId) {
@@ -5812,25 +6649,58 @@ async function openSwitchModeModal(domain, currentMode, currentLink) {
   if (domainInput) domainInput.value = domain;
   if (title) title.textContent = `Tên miền: ${domain} (Hiện tại: ${currentMode || "Chưa rõ"})`;
 
-  const resolved = await resolveUiCurrentLink(domain, currentLink);
+  const fromList = (typeof allDomains !== "undefined" ? allDomains : [])?.find?.(
+    (d) => d.domain?.toLowerCase() === String(domain || "").toLowerCase()
+  );
+  const quickLink =
+    (currentLink && currentLink !== "Chưa gán link" ? currentLink : "") ||
+    fromList?.mainUrl ||
+    "";
+
   if (targetUrlInput) {
-    targetUrlInput.value = resolved.link || "";
+    delete targetUrlInput.dataset.userEdited;
+    targetUrlInput.value = quickLink || "";
     targetUrlInput.required = false;
-    targetUrlInput.placeholder = "Để trống = giữ link cũ (tự kế thừa)";
+    targetUrlInput.placeholder = quickLink
+      ? quickLink
+      : "Đang lấy link hiện tại… (có thể để trống)";
+    targetUrlInput.oninput = () => {
+      targetUrlInput.dataset.userEdited = "1";
+    };
   }
 
   if (tplSelect && allTemplates.length > 0) {
-    tplSelect.innerHTML = allTemplates.map((t) => `
-      <option value="${t.id}">${t.name} (${t.brand})</option>
-    `).join("");
+    tplSelect.innerHTML = allTemplates
+      .map((t) => `<option value="${t.id}">${t.name} (${t.brand || ""})</option>`)
+      .join("");
   }
 
   if (modeSelect) {
-    modeSelect.value = currentMode === "DIRECT_302" || currentMode === "302 Direct Redirect" || currentMode === "302" ? "LP" : "302";
+    modeSelect.value =
+      currentMode === "DIRECT_302" ||
+      currentMode === "302 Direct Redirect" ||
+      currentMode === "302"
+        ? "LP"
+        : "302";
   }
 
   toggleSwitchModeFields();
   openModal("switchModeModal");
+
+  // Resolve link nền — không chặn mở modal
+  resolveUiCurrentLink(domain, quickLink)
+    .then((resolved) => {
+      if (!targetUrlInput || targetUrlInput.dataset.userEdited) return;
+      targetUrlInput.value = resolved.link || "";
+      targetUrlInput.placeholder = resolved.link
+        ? resolved.link
+        : "Để trống = giữ link cũ (tự kế thừa)";
+    })
+    .catch(() => {
+      if (targetUrlInput && !targetUrlInput.value) {
+        targetUrlInput.placeholder = "Để trống = giữ link cũ (tự kế thừa)";
+      }
+    });
 }
 
 function toggleSwitchModeFields() {
@@ -5854,6 +6724,7 @@ async function handleSwitchModeSubmit(e) {
   }
 
   closeModal("switchModeModal");
+  markHubInflight(domain, true);
   startHubProgressWatch({ domain, label: `Đang chuyển sang ${toMode === "LP" ? "LP" : "302"}` });
 
   try {
@@ -5884,6 +6755,10 @@ async function handleSwitchModeSubmit(e) {
       error: err.message,
       domain,
     });
+  } finally {
+    markHubInflight(domain, false);
+    releaseOptimisticHubTask(domain);
+    loadTasksList();
   }
 }
 
@@ -6305,7 +7180,10 @@ async function loadAdminPendingRequests() {
               <strong style="color: var(--accent-cyan); font-weight: 700;">👤 ${r.username}</strong>
               <div style="font-size: 11px; color: var(--text-dim);">${r.fullName || ""}</div>
             </td>
-            <td><strong style="color: #fff; font-family: var(--font-mono); font-size: 14px;">${r.domain}</strong></td>
+            <td>
+              <strong style="color: #fff; font-family: var(--font-mono); font-size: 14px;">${r.domain}</strong>
+              ${r.isConflict ? `<div style="font-size: 11px; color: #fbbf24; margin-top: 4px;">Đang thuộc @${r.currentOwner?.username || "user khác"}</div>` : ""}
+            </td>
             <td style="color: var(--text-dim); font-size: 13px;">${r.note || "Xin cấp quyền quản trị"}</td>
             <td><span class="badge-status badge-warning" style="font-weight: 700;">🟡 Chờ Duyệt</span></td>
             <td style="text-align: right;">
@@ -6325,13 +7203,23 @@ async function loadAdminPendingRequests() {
   } catch {}
 }
 
-async function handleAdminApproveRequest(requestId) {
+async function handleAdminApproveRequest(requestId, confirmTransfer = false) {
   try {
     const res = await fetch(`/api/admin/domain-requests/${encodeURIComponent(requestId)}/approve`, {
       method: "POST",
       headers: authHeaders(),
+      body: JSON.stringify({ confirmTransfer: confirmTransfer === true }),
     });
     const data = await res.json();
+    if (!data.success && data.code === "OWNER_CONFLICT" && confirmTransfer !== true) {
+      const who = data.currentOwner?.username || "user khác";
+      const ownerId = data.currentOwner?.userId;
+      if (isHubAdminAccount(ownerId, who)) return handleAdminApproveRequest(requestId, true);
+      const dom = data.currentOwner?.domain || "này";
+      const ok = await confirmCenter(`Tên miền ${dom} đang thuộc @${who}.\nXác nhận đổi chủ?`);
+      if (!ok) return;
+      return handleAdminApproveRequest(requestId, true);
+    }
     if (data.success) {
       showToast(`🎉 ${data.message}`);
       loadAdminPendingRequests();
@@ -6367,7 +7255,7 @@ async function handleAdminRejectRequest(requestId) {
   }
 }
 
-async function handleAdminManualAssign() {
+async function handleAdminManualAssign(confirmTransfer = false) {
   const domain = document.getElementById("adminAssignDomainInput")?.value.trim();
   const userId = document.getElementById("adminAssignUserSelect")?.value;
 
@@ -6380,9 +7268,18 @@ async function handleAdminManualAssign() {
     const res = await fetch("/api/admin/domain-permissions/assign", {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ domain, userId }),
+      body: JSON.stringify({ domain, userId, confirmTransfer }),
     });
     const data = await res.json();
+    if (!data.success && data.code === "OWNER_CONFLICT" && !confirmTransfer) {
+      const who = data.currentOwner?.username || data.conflicts?.[0]?.username || "user khác";
+      const ownerId = data.currentOwner?.userId || data.conflicts?.[0]?.userId;
+      if (isHubAdminAccount(ownerId, who)) return handleAdminManualAssign(true);
+      const dom = data.currentOwner?.domain || domain;
+      const ok = await confirmCenter(`Tên miền ${dom} đang thuộc @${who}.\nXác nhận đổi sang user vừa chọn?`);
+      if (!ok) return;
+      return handleAdminManualAssign(true);
+    }
     if (data.success) {
       showToast(`🎉 ${data.message}`);
       document.getElementById("adminAssignDomainInput").value = "";
@@ -6435,6 +7332,11 @@ function orderDomainClick(btn, e) {
     e.stopPropagation();
   }
   if (!btn) return;
+  if (!isLoggedIn()) {
+    pendingAfterLogin = () => orderDomainClick(btn);
+    requireLoginOrAbort("Đăng nhập để đặt mua tên miền");
+    return;
+  }
   const domain = btn.getAttribute("data-domain") || "";
   const priceXu = Number(btn.getAttribute("data-price")) || 250;
   const ruleApplied = btn.getAttribute("data-rule") || "Quy chuẩn";
@@ -6468,7 +7370,7 @@ function buildOrderDomainButtonHtml({ domain, priceXu = 250, ruleApplied = "Quy 
   return `<button type="button" class="btn btn-primary btn-sm js-btn-order-domain" data-domain="${escapeHtmlText(domain)}" data-price="${priceXu}" data-rule="${escapeHtmlText(ruleApplied)}" data-extra="${extraJson}" onclick="orderDomainClick(this, event)" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #000; font-weight: 800; border-color: #f59e0b; min-width: 130px;">🛒 Đặt Mua Ngay</button>`;
 }
 
-function openConfirmDomainPurchaseModal(domain, priceXu = 250, ruleApplied = "", extra = {}) {
+async function openConfirmDomainPurchaseModal(domain, priceXu = 250, ruleApplied = "", extra = {}) {
   const norm = (domain || "").trim().toLowerCase();
   const hiddenInput = document.getElementById("confirmOrderDomainHidden");
   const linkHidden = document.getElementById("confirmOrderLinkHidden");
@@ -6508,8 +7410,28 @@ function openConfirmDomainPurchaseModal(domain, priceXu = 250, ruleApplied = "",
   if (badgePrice) badgePrice.textContent = `${priceXu} Xu (≈ ${(priceXu).toLocaleString("vi-VN")}k đ)`;
   if (badgeRule) badgeRule.textContent = ruleApplied || "Quy chuẩn định giá";
 
-  const userBalance = currentUser ? (currentUser.balance || 0) : 0;
+  let userBalance = currentUser ? (currentUser.balance || 0) : 0;
+  try {
+    const balRes = await fetch("/api/wallet/balance", { headers: authHeaders() });
+    const balData = await balRes.json();
+    if (balData.success && typeof balData.balance === "number") {
+      userBalance = balData.balance;
+      if (currentUser) currentUser.balance = userBalance;
+    }
+  } catch {}
   if (badgeBalance) badgeBalance.textContent = `🪙 ${userBalance.toLocaleString("vi-VN")} Xu`;
+
+  const submitBtn = document.getElementById("btnSubmitConfirmPurchase");
+  const titleEl = document.getElementById("confirmOrderTitle");
+  const subtitleEl = document.getElementById("confirmOrderSubtitle");
+  const noXu = userBalance <= 0;
+  const shortXu = userBalance < Number(priceXu);
+  if (titleEl) titleEl.textContent = noXu ? "Bạn chưa có Xu" : "Xác Nhận Đơn Đặt Mua Tên Miền";
+  if (subtitleEl) subtitleEl.textContent = noXu ? "Nạp Xu trước rồi hãy gửi yêu cầu mua" : "Xem giá và xác nhận gửi yêu cầu mua";
+  if (submitBtn) {
+    submitBtn.disabled = shortXu;
+    submitBtn.textContent = noXu ? "Bạn chưa có Xu" : shortXu ? "Không đủ Xu — hãy nạp thêm" : "✅ Xác Nhận Đặt Mua";
+  }
 
   if (modeBadge) {
     modeBadge.textContent = deployMode === "302" ? "⚡ Trỏ 302 trực tiếp" : "🎨 Landing Page";
@@ -6522,7 +7444,13 @@ function openConfirmDomainPurchaseModal(domain, priceXu = 250, ruleApplied = "",
 
   if (summaryEl) {
     const modeTxt = deployMode === "302" ? "trỏ 302" : "gắn Landing Page";
-    summaryEl.innerHTML = `Bạn xác nhận dùng <span style="color: #10b981;">${priceXu.toLocaleString("vi-VN")} Xu</span> đặt mua <span style="color: #fbbf24; font-family: var(--font-mono);">${norm}</span> và ${modeTxt}? Đơn sẽ chờ Admin duyệt.`;
+    if (userBalance <= 0) {
+      summaryEl.innerHTML = `Bạn chưa có Xu. Không gửi được đơn mua <span style="color: #fbbf24; font-family: var(--font-mono);">${norm}</span>. Nạp Xu rồi hãy gửi.`;
+    } else if (userBalance < Number(priceXu)) {
+      summaryEl.innerHTML = `Ví đang có <span style="color: #f43f5e;">${userBalance.toLocaleString("vi-VN")} Xu</span>, chưa đủ <span style="color: #fbbf24;">${Number(priceXu).toLocaleString("vi-VN")} Xu</span> để gửi đơn mua <span style="color: #fbbf24; font-family: var(--font-mono);">${norm}</span>. Nạp thêm rồi hãy gửi.`;
+    } else {
+      summaryEl.innerHTML = `Bạn xác nhận dùng <span style="color: #10b981;">${Number(priceXu).toLocaleString("vi-VN")} Xu</span> đặt mua <span style="color: #fbbf24; font-family: var(--font-mono);">${norm}</span> và ${modeTxt}? Đơn sẽ chờ Admin duyệt.`;
+    }
   }
 
   openModal("confirmDomainPurchaseModal");
@@ -6535,6 +7463,17 @@ async function handleConfirmDomainPurchaseSubmit(e) {
 
   if (!domain) {
     showToast("❌ Vui lòng cung cấp tên miền hợp lệ");
+    return;
+  }
+
+  const priceNeed = Number(currentPurchaseOrderData?.priceXu) || 0;
+  const balNow = currentUser ? (currentUser.balance || 0) : 0;
+  if (priceNeed > 0 && balNow <= 0) {
+    showToast("Bạn chưa có Xu", "error");
+    return;
+  }
+  if (priceNeed > 0 && balNow < priceNeed) {
+    showToast(`❌ Ví không đủ Xu để gửi yêu cầu. Cần ${priceNeed.toLocaleString("vi-VN")} Xu, hiện có ${balNow.toLocaleString("vi-VN")} Xu.`, "error");
     return;
   }
 
@@ -6745,6 +7684,16 @@ async function handleAdminApproveDomainOrder(orderId) {
       showToast(`❌ User thiếu Xu (${order.userCurrentBalance}/${order.priceXu})`, "error");
       return;
     }
+    let confirmTransfer = false;
+    if (
+      order.currentOwner?.userId &&
+      order.currentOwner.userId !== order.userId &&
+      !isHubAdminAccount(order.currentOwner.userId, order.currentOwner.username)
+    ) {
+      const ok = await confirmCenter(`Tên miền ${order.domain} đang thuộc @${order.currentOwner.username || order.currentOwner.userId}.\nXác nhận đổi sang @${order.username}?`);
+      if (!ok) return;
+      confirmTransfer = true;
+    }
 
     let link = (order.link || "").trim();
     let tele = (order.tele || "").trim();
@@ -6780,6 +7729,7 @@ async function handleAdminApproveDomainOrder(orderId) {
     const approveRes = await fetch(`/api/admin/domain-orders/${encodeURIComponent(orderId)}/approve`, {
       method: "POST",
       headers: authHeaders(),
+      body: JSON.stringify({ confirmTransfer }),
     });
     const approveData = await approveRes.json();
     if (!approveData.success) {

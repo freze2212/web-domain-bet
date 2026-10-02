@@ -6,7 +6,7 @@ import { ACTIVE_TEMPLATES } from "./templates.js";
 import { createPagesProject, deployToAllPagesInstances } from "./cloudflare.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CLONED_ROOT = process.platform === "win32" ? "C:\\Landingpages\\CLONED" : "/var/www/Landingpages/CLONED";
+const CLONED_ROOT = process.platform === "win32" ? "C:\\Landingpages\\CLONED" : "/var/www/web-domain/Landingpages/CLONED";
 
 if (!fs.existsSync(CLONED_ROOT)) {
   try {
@@ -27,8 +27,8 @@ const DYNAMIC_ROUTER_SCRIPT = `
             var h = (window.location.hostname || '').toLowerCase().replace(/^www\\./, '');
             var entry = dj[h] || dj['www.' + h] || dj[window.location.hostname];
             if (entry) {
-              var target = entry.main_url || entry.url || entry.link;
-              if (target) {
+              var target = typeof entry === 'string' ? entry : (entry.main_url || entry.url || entry.messenger_url || entry.target_url || '');
+              if (typeof target === 'string' && /^https?:\\/\\//i.test(target)) {
                 window.DYNAMIC_TARGET = target;
                 document.querySelectorAll('a').forEach(function(a) {
                   if (!a.getAttribute('data-keep-link')) {

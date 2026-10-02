@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadUsers } from "./auth.js";
+import { getStore, setStore } from "./mongo-stores.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, "..", "data");
@@ -71,20 +72,26 @@ const DEFAULT_PRICING = {
   },
 };
 
+function storeName(file) {
+  if (file === WALLETS_FILE) return "wallets";
+  if (file === PRICING_FILE) return "pricing";
+  if (file === TRANSACTIONS_FILE) return "transactions";
+  if (file === BANK_CONFIG_FILE) return "bank_config";
+  throw new Error("Không có store Mongo cho file này");
+}
+
 function loadJson(file, defaultVal) {
-  if (!fs.existsSync(file)) {
-    fs.writeFileSync(file, JSON.stringify(defaultVal, null, 2), "utf8");
+  const name = storeName(file);
+  const current = getStore(name);
+  if (current == null) {
+    setStore(name, defaultVal);
     return defaultVal;
   }
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return defaultVal;
-  }
+  return current;
 }
 
 function saveJson(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf8");
+  setStore(storeName(file), data);
 }
 
 export function getBankConfig() {
@@ -180,8 +187,18 @@ export function calculateDomainPriceRule(domain) {
       ruleApplied: ".NET (400 Xu)",
     };
   }
+  // 3. Quy tắc .CC = 250 xu (250k)
+  if (clean.endsWith(".cc")) {
+    return {
+      priceXu: 250,
+      priceVnd: 250000,
+      priceUsd: 5.98,
+      tld: ".cc",
+      ruleApplied: ".CC (250 Xu)",
+    };
+  }
 
-  // 3. Quy tắc theo giá gốc USD
+  // 4. Quy tắc theo giá gốc USD
   const detail = calculateDomainPriceDetail(clean);
   const regUsd = detail.regPrice !== null ? detail.regPrice : 4.98;
 

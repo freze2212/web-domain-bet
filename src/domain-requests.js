@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assignDomain, unassignDomain, getDomainOwner } from "./ownership.js";
+import { assignDomain, unassignDomain, getDomainOwner, describeOwnerConflict } from "./ownership.js";
+import { normalizeDomain } from "./utils.js";
+import { getStore, setStore } from "./mongo-stores.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, "..", "data");
@@ -12,26 +14,19 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 function loadRequests() {
-  if (!fs.existsSync(REQUESTS_FILE)) {
-    fs.writeFileSync(REQUESTS_FILE, JSON.stringify([], null, 2), "utf8");
-    return [];
-  }
-  try {
-    return JSON.parse(fs.readFileSync(REQUESTS_FILE, "utf8"));
-  } catch {
-    return [];
-  }
+  const data = getStore("domain_requests");
+  return Array.isArray(data) ? data : [];
 }
 
 function saveRequests(data) {
-  fs.writeFileSync(REQUESTS_FILE, JSON.stringify(data, null, 2), "utf8");
+  setStore("domain_requests", Array.isArray(data) ? data : []);
 }
 
 /**
  * Tạo yêu cầu xin cấp quyền quản lý tên miền
  */
 export function createDomainRequest({ userId, username, fullName, domain, note = "" }) {
-  const normDomain = domain.trim().toLowerCase().replace(/^www\./, "");
+  const normDomain = normalizeDomain(domain).replace(/^www\./, "");
   if (!normDomain) {
     throw new Error("Tên miền không hợp lệ");
   }
@@ -104,7 +99,7 @@ export function getDomainRequestById(id) {
 /**
  * Admin phê duyệt yêu cầu cấp quyền
  */
-export function approveDomainRequest(requestId, adminUser) {
+export function approveDomainRequest(requestId, adminUser, { confirmTransfer = false } = {}) {
   const requests = loadRequests();
   const req = requests.find((r) => r.id === requestId);
   if (!req) {
@@ -114,18 +109,32 @@ export function approveDomainRequest(requestId, adminUser) {
     throw new Error(`Yêu cầu này đã được xử lý trước đó (Trạng thái: ${req.status})`);
   }
 
+  const conflict = describeOwnerConflict(req.domain, req.userId);
+  if (conflict && !confirmTransfer) {
+    const err = new Error(
+      `Tên miền ${conflict.domain} đang thuộc @${conflict.username}. Xác nhận đổi chủ thì mới cấp được.`
+    );
+    err.code = "OWNER_CONFLICT";
+    err.currentOwner = conflict;
+    throw err;
+  }
+
   req.status = "approved";
   req.resolvedAt = new Date().toISOString();
   req.resolvedBy = adminUser.username || adminUser.id || "admin";
 
-  // Cấp quyền sở hữu trong ownership
-  assignDomain(req.domain, req.userId, {
-    approvedBy: req.resolvedBy,
-    approvedAt: req.resolvedAt,
-    username: req.username,
-    fullName: req.fullName,
-    requestId: req.id,
-  });
+  assignDomain(
+    req.domain,
+    req.userId,
+    {
+      approvedBy: req.resolvedBy,
+      approvedAt: req.resolvedAt,
+      username: req.username,
+      fullName: req.fullName,
+      requestId: req.id,
+    },
+    { allowTransfer: true }
+  );
 
   saveRequests(requests);
   return req;

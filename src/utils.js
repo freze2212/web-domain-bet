@@ -1,3 +1,13 @@
+import path from "node:path";
+
+export const LANDING_ROOT = process.platform === "win32"
+  ? "C:\\Landingpages"
+  : "/var/www/web-domain/Landingpages";
+
+export function landingPath(...parts) {
+  return path.join(LANDING_ROOT, ...parts);
+}
+
 export function extractDomainsFromText(input) {
   if (!input) return [];
   if (Array.isArray(input)) {

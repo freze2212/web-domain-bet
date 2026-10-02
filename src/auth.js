@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { getStore, setStore } from "./mongo-stores.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, "..", "data");
@@ -97,20 +98,15 @@ function getInitialUsers() {
 }
 
 export function loadUsers() {
-  if (!fs.existsSync(USERS_FILE)) {
-    const init = getInitialUsers();
-    fs.writeFileSync(USERS_FILE, JSON.stringify(init, null, 2), "utf8");
-    return init;
-  }
-  try {
-    return JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
-  } catch {
-    return getInitialUsers();
-  }
+  const users = getStore("users");
+  if (Array.isArray(users) && users.length > 0) return users;
+  const init = getInitialUsers();
+  setStore("users", init);
+  return init;
 }
 
 export function saveUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), "utf8");
+  setStore("users", Array.isArray(users) ? users : []);
 }
 
 export function login(username, password) {
@@ -165,7 +161,7 @@ export function register({ username, password, fullName, role = "user" }) {
     username: cleanUsername,
     passwordHash: hashPassword(password),
     fullName: fullName || cleanUsername,
-    role: role === "admin" ? "admin" : "user",
+    role: "user",
     status: "active",
     createdAt: new Date().toISOString(),
   };
@@ -236,7 +232,7 @@ export function createUserByAdmin({ username, password, fullName, role = "user",
     username: cleanUsername,
     passwordHash: hashPassword(password),
     fullName: fullName || cleanUsername,
-    role: role === "admin" ? "admin" : "user",
+    role: role === "admin" || role === "assistant" ? role : "user",
     status: "active",
     createdAt: new Date().toISOString(),
   };
@@ -254,7 +250,7 @@ export function updateUserByAdmin(userId, { fullName, password, role, status }) 
 
   if (fullName !== undefined) u.fullName = fullName;
   if (password) u.passwordHash = hashPassword(password);
-  if (role !== undefined) u.role = role === "admin" ? "admin" : "user";
+  if (role !== undefined) u.role = role === "admin" || role === "assistant" ? role : "user";
   if (status !== undefined) u.status = status;
 
   saveUsers(users);

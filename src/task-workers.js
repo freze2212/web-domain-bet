@@ -3,27 +3,22 @@ import {
   completeTask,
   failTask,
   getTask,
+  markTaskWaitingZone,
 } from "./task-queue.js";
 import { checkDomainAvailability, registerDomain, resolveContactId, updateNameservers } from "./spaceship.js";
 import {
   setupCloudflare,
   setupDirect302Redirect,
-  deleteForwardingPageRules,
-  removePagesDomain,
-  removeDomainFromAllPagesProjects,
-  addPagesDomain,
-  getOrCreateZone,
-  getZoneNameservers,
 } from "./cloudflare.js";
 import { getTemplate, updateTemplateDomainsJson, findTemplateByDomain } from "./templates.js";
-import { assignDomain, getDomainOwner } from "./ownership.js";
+import { getDomainOwner, touchDomainOwner } from "./ownership.js";
 import { deductBalance, topupBalance } from "./wallet.js";
 import { addHistoryItem, updateHistoryItem, setHistoryProgress } from "./history.js";
 import { verifyHistoryItem } from "./verifier.js";
-import { cloneWebsite } from "./scraper.js";
 import { smartSetLink, findDomainInRepos, removeDomainFromRepo } from "./repo-scanner.js";
 import { resolveInheritedLink } from "./link-resolve.js";
 import { assertNotAdminCfDomain } from "./cf-account-guard.js";
+import { pointNameserversFor302 } from "./zone-302-wait.js";
 
 /**
  * Worker: Mua tên miền & Deploy (Landing Page hoặc 302)
@@ -107,7 +102,7 @@ export async function executeBuyAndDeploy(taskId) {
     }
 
     // 5. Gán quyền sở hữu domain cho User
-    assignDomain(domain, userId, {
+    touchDomainOwner(domain, userId, {
       templateId: templateId || null,
       mode,
       currentLink: link,
@@ -213,10 +208,29 @@ export async function executeSwitchMode(taskId) {
         await removeDomainFromRepo(domain, m.filePath || m.folderPath).catch(() => {});
       }
 
-      updateTaskProgress(taskId, 65, "Đang cấu hình Page Rule 302 & DNS (tự chọn token Admin/Freze)...", `Đích đến: ${targetUrl}`, "info");
+      updateTaskProgress(taskId, 55, "Đang trỏ Nameserver sang Cloudflare...", `Đích đến: ${targetUrl}`, "info");
+      const ready = await pointNameserversFor302(domain, {
+        onTick: (status) => {
+          updateTaskProgress(taskId, 60, `Đã trỏ NS. Zone Cloudflare đang "${status}"...`, "Chờ registry", "info");
+        },
+      });
+      if (!ready.active) {
+        const waitMsg = "Đã trỏ nameserver. Đang chờ zone Cloudflare active để tự tạo 302...";
+        updateHistoryItem(historyId, {
+          status: "in_progress",
+          progress: waitMsg,
+          error: null,
+          link: targetUrl,
+          details: { waitZone302: true, link: targetUrl },
+        });
+        markTaskWaitingZone(taskId);
+        updateTaskProgress(taskId, 65, waitMsg, "Registry chưa công bố nameserver", "info");
+        return;
+      }
+      updateTaskProgress(taskId, 70, "Đang cấu hình Page Rule 302 & DNS (tự chọn token Admin/Freze)...", `Đích đến: ${targetUrl}`, "info");
       const cfRes = await setupDirect302Redirect(domain, targetUrl, { hintProjects: pageHints });
 
-      assignDomain(domain, userId, { mode: "302", currentLink: targetUrl, templateId: null });
+      touchDomainOwner(domain, userId, { mode: "302", currentLink: targetUrl, templateId: null });
 
       updateTaskProgress(taskId, 90, "Đang kiểm tra phản hồi 302...", "Xác thực chuyển hướng Cloudflare", "info");
 
@@ -264,17 +278,11 @@ export async function executeSwitchMode(taskId) {
         await updateTemplateDomainsJson(template, domain, finalLink, inherited.tele || "");
         finalTarget = owner?.cnameTarget || template.cnameTarget;
       } else {
-        updateTaskProgress(taskId, 30, "Đang gỡ domain khỏi LP cũ & Page Rules 302...", "Dọn hybrid state", "info");
+        updateTaskProgress(taskId, 30, "Đang gỡ domain khỏi repo LP cũ...", "Dọn hybrid state", "info");
         const repoMatches = findDomainInRepos(domain);
         for (const m of repoMatches) {
           await removeDomainFromRepo(domain, m.filePath || m.folderPath).catch(() => {});
         }
-        await removeDomainFromAllPagesProjects(domain, null, {
-          hintProjects: buildPagesProjectHints(domain),
-        }).catch(() => {});
-
-        const zone = await getOrCreateZone(domain);
-        await deleteForwardingPageRules(zone.id).catch(() => {});
 
         updateTaskProgress(taskId, 55, `Đang gắn Pages + CNAME tới ${template.cnameTarget}...`, "Cloudflare Pages", "info");
         const cfRes = await setupCloudflare(domain, template.cnameTarget, template.path);
@@ -284,7 +292,7 @@ export async function executeSwitchMode(taskId) {
         await updateTemplateDomainsJson(template, domain, finalLink, inherited.tele || "");
       }
 
-      assignDomain(domain, userId, {
+      touchDomainOwner(domain, userId, {
         mode: "LP",
         currentLink: finalLink,
         templateId: template.id,
@@ -322,11 +330,13 @@ export async function executeSwitchMode(taskId) {
             `Cloudflare đang giới hạn API (quá nhiều thao tác liên tiếp). Chờ 3–5 phút rồi thử chuyển lại — hệ thống sẽ tự retry khi gọi API.`
           )
         : err;
-    updateHistoryItem(historyId, {
-      status: "failed",
-      progress: null,
-      error: friendly.message || msg,
-    }).catch(() => {});
+    try {
+      updateHistoryItem(historyId, {
+        status: "failed",
+        progress: null,
+        error: friendly.message || msg,
+      });
+    } catch {}
     failTask(taskId, friendly, `Lỗi chuyển đổi chế độ cho ${domain}`);
   }
 }
@@ -335,75 +345,7 @@ export async function executeSwitchMode(taskId) {
  * Worker: VIP Web Cloner
  */
 export async function executeCloneWebsite(taskId) {
-  const task = getTask(taskId);
-  if (!task) return;
-
-  const {
-    url,
-    templateName,
-    domain,
-    targetUrl,
-    isDeploy = false,
-    userId = "admin",
-    logoData = null,
-    faviconData = null,
-    pageTitle = "",
-    textReplacements = [],
-  } = task.params;
-
-  try {
-    updateTaskProgress(taskId, 10, `Bắt đầu phân tích và cào mã nguồn từ ${url}...`, "Kết nối máy chủ nguồn", "info");
-
-    const cloneRes = await cloneWebsite({
-      url,
-      templateName,
-      domain,
-      targetUrl,
-      logoData,
-      faviconData,
-      pageTitle,
-      textReplacements,
-      onProgress: (pct, msg) => {
-        updateTaskProgress(taskId, pct, msg, msg, "info");
-      },
-    });
-
-    // Nếu người dùng chọn gán tên miền và deploy ngay
-    const isValidDomain = domain && domain.includes(".") && domain.length >= 4;
-    if (isValidDomain && isDeploy && cloneRes.template) {
-      try {
-        updateTaskProgress(taskId, 85, `Đang gán tên miền ${domain} vào mẫu clone mới...`, "Cập nhật domains.json & DNS", "info");
-        await setupCloudflare(domain, cloneRes.template.cnameTarget);
-        await updateTemplateDomainsJson(cloneRes.template, domain, targetUrl || url);
-        assignDomain(domain, userId, { mode: "LP", currentLink: targetUrl || url, templateId: cloneRes.template.id });
-      } catch (domErr) {
-        updateTaskProgress(taskId, 90, `⚠️ Cảnh báo gán tên miền ${domain}: ${domErr.message}. Mẫu clone vẫn được lưu vào Kho Mẫu.`, "Gán domain thủ công sau", "warning");
-      }
-    } else if (domain && !isValidDomain) {
-      updateTaskProgress(taskId, 85, `⚠️ Tên miền [${domain}] không hợp lệ (cần có đuôi như .com, .top). Bỏ qua bước trỏ DNS. Mẫu clone đã được lưu vào Kho Mẫu.`, "Bỏ qua DNS", "warning");
-    }
-
-    completeTask(
-      taskId,
-      {
-        template: cloneRes.template,
-        domain: isValidDomain ? domain : null,
-        targetUrl,
-      },
-      `Đã sao chép và đóng gói Landing Page [${cloneRes.template.name}] vào Kho Mẫu thành công!`
-    );
-  } catch (err) {
-    console.error(`[Worker] Lỗi CloneWebsite từ ${url}:`, err);
-    // Tự động hoàn lại Xu cho User nếu tác vụ lỗi
-    if (task.params.deductedAmount && userId !== "admin" && userId !== "u_admin") {
-      try {
-        topupBalance(userId, task.params.deductedAmount, `Hoàn ${task.params.deductedAmount} Xu do lỗi sao chép website: ${err.message}`, "AUTO_REFUND");
-      } catch (refErr) {
-        console.warn(`[Worker] Lỗi hoàn tiền:`, refErr.message);
-      }
-    }
-    failTask(taskId, err, `Lỗi clone website (Đã hoàn lại Xu vào ví)`);
-  }
+  failTask(taskId, new Error("Chức năng clone web đã đóng"), "Clone web đã đóng");
 }
 
 /**
@@ -425,7 +367,7 @@ export async function executeUpdateLink(taskId) {
       return;
     }
 
-    assignDomain(domain, userId, { currentLink: newLink });
+    touchDomainOwner(domain, userId, { currentLink: newLink });
 
     completeTask(
       taskId,

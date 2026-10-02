@@ -1,11 +1,21 @@
+import "./config.js";
 import { startServer } from "./server.js";
 import { startBackgroundVerifier } from "./verifier.js";
 import { queryEnrichedDomainsList } from "./domains-list-service.js";
+import { initMongoStores, loadAllStores } from "./mongo-stores.js";
+import { reconcileStaleHistory } from "./history.js";
+import { reconcileStaleTasks } from "./task-queue.js";
 
 async function main() {
   console.log("=============================================================");
   console.log("🚀 KHỞI ĐỘNG LANDING PAGE HUB (WEB ONLY)");
   console.log("=============================================================\n");
+
+  await initMongoStores();
+  await loadAllStores();
+  // Job không sống qua restart. Đóng hết RUNNING / in_progress còn sót trước khi nhận request.
+  reconcileStaleTasks(0);
+  reconcileStaleHistory(0);
 
   const port = process.env.PORT || 3000;
   const { port: actualPort } = await startServer(port);

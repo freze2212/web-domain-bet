@@ -4,6 +4,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { getHistory, updateHistoryItem } from "./history.js";
+import { resumePendingZoneRedirects } from "./zone-302-wait.js";
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -201,11 +202,6 @@ export async function autoRepairDomain(item, isFullRebuild = false) {
       await setupDirect302Redirect(domain, item.link || "https://google.com");
       logs.push(`✅ [Bước 2/5] Đã hoàn tất cài đặt Page Rule 302 & DNS A record.`);
     } else {
-      logs.push(`🔧 [Bước 2/5] Xoá toàn bộ Page Rules 302 cũ (tránh xung đột)...`);
-      if (zone) {
-        await deleteForwardingPageRules(zone.id).catch(() => {});
-      }
-
       // Tìm template tương ứng
       let tpl = item.templateId ? getTemplate(item.templateId) : null;
       if (!tpl) {
@@ -233,8 +229,18 @@ export async function autoRepairDomain(item, isFullRebuild = false) {
 
         // Tạo đủ 2 bản ghi DNS CNAME cho apex và www trỏ chính xác về target
         logs.push(`🔧 [Bước 4/5] Tự động tạo bản ghi DNS CNAME (@ & www -> ${finalTarget})...`);
-        await ensurePagesCname(domain, finalTarget).catch(() => {});
-        logs.push(`✅ [Bước 4/5] Đã cấu hình DNS CNAME Proxied.`);
+        let cnameOk = false;
+        try {
+          await ensurePagesCname(domain, finalTarget);
+          cnameOk = true;
+          logs.push(`✅ [Bước 4/5] Đã cấu hình DNS CNAME Proxied.`);
+        } catch (cnameErr) {
+          logs.push(`⚠️ [Bước 4/5] CNAME lỗi, giữ Page Rule 302: ${cnameErr.message}`);
+        }
+        if (cnameOk && zone) {
+          await deleteForwardingPageRules(zone.id).catch(() => {});
+          logs.push(`✅ Đã gỡ Page Rule 302 sau khi CNAME trỏ xong.`);
+        }
 
         // Đồng bộ domains.json & Commit + Multi-Remote Push + Direct Wrangler Deploy
         const repoMatches = findDomainInRepos(domain);
@@ -669,10 +675,12 @@ export function startBackgroundVerifier(intervalMs = 30000) {
   // Chạy ngay 1 lần sau 5 giây khởi động
   setTimeout(() => {
     runVerificationQueue().catch(() => {});
+    resumePendingZoneRedirects().catch(() => {});
   }, 5000);
 
   verifierInterval = setInterval(() => {
     runVerificationQueue().catch(() => {});
+    resumePendingZoneRedirects().catch(() => {});
   }, intervalMs);
 
   return verifierInterval;

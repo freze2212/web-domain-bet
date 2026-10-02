@@ -8,27 +8,37 @@ export function patchIndexHtmlLinks(html, domain, newLink) {
   h = h.replace(/(<a\b[^>]*class=["'][^"']*redirect-link[^"']*["'][^>]*href=["'])[^"']*(["'])/gi, `$1${newLink}$2`);
   h = h.replace(/(<a\b[^>]*href=["'])[^"']*(["'][^>]*class=["'][^"']*redirect-link)/gi, `$1${newLink}$2`);
 
+  // QUAN TRỌNG: check typeof string TRƯỚC — nếu để e.link trước sẽ đụng String.prototype.link (native)
   const loader = `
 <script id="hub-domains-json-loader">
 (function(){
+  function isHttpUrl(u){ return typeof u==="string" && /^https?:\\/\\//i.test(u.trim()); }
+  function pick(e){
+    if(!e) return "";
+    if(typeof e==="string") return isHttpUrl(e)?e.trim():"";
+    var c=e.main_url||e.url||e.messenger_url||e.target_url||"";
+    return isHttpUrl(c)?String(c).trim():"";
+  }
   function apply(u){
-    if(!u) return;
+    if(!isHttpUrl(u)) return;
     window.REDIRECT_URL=u;
-    var links=document.querySelectorAll('a.redirect-link,a.ref-btn,a.btn-register,a.cta-btn');
+    window.__HUB_LINK__=u;
+    var links=document.querySelectorAll('a.redirect-link,a.ref-btn,a.btn-register,a.cta-btn,#main-cta');
     for(var i=0;i<links.length;i++){ links[i].setAttribute('href',u); links[i].href=u; }
   }
   fetch('/domains.json?v='+Date.now()).then(function(r){return r.json();}).then(function(d){
     if(!d) return;
     var h=(window.location.hostname||'').toLowerCase();
     var nh=h.replace(/^www\\./,'');
-    var e=d[h]||d[nh];
-    if(!e) return;
-    apply(e.main_url||e.url||e.link||(typeof e==='string'?e:''));
+    var e=d[h]||d[nh]||d['www.'+nh];
+    apply(pick(e));
   }).catch(function(){});
 })();
 </script>`;
 
-  if (!h.includes("hub-domains-json-loader")) {
+  if (h.includes("hub-domains-json-loader")) {
+    h = h.replace(/<script id="hub-domains-json-loader">[\s\S]*?<\/script>/i, loader.trim());
+  } else {
     h = h.replace(/<\/body>/i, `${loader}\n</body>`);
   }
   return h;

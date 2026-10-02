@@ -79,6 +79,246 @@ body.auth-ready .auth-boot-screen {
   display: none;
 }
 
+/* Guest mode (Spaceship-style): tra cứu free, mua cần login */
+#btnGuestLogin {
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+
+body.guest-mode #btnGuestLogin {
+  display: inline-flex !important;
+}
+
+body.guest-mode #walletBadgeBtn,
+body.guest-mode #userBadgeBtn,
+body.guest-mode .btn-logout,
+body.guest-mode #headerTaskIndicator {
+  display: none !important;
+}
+
+body.guest-mode .nav-tab[data-auth="required"] {
+  display: none !important;
+}
+
+body.guest-mode .header-tools .btn-primary {
+  display: none !important;
+}
+
+.guest-search-hint {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(99, 102, 241, 0.08));
+  color: #e2e8f0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.guest-search-hint strong {
+  color: #38bdf8;
+}
+
+.guest-search-hint em {
+  font-style: normal;
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+/* Domain suggestions — Namecheap-style cards */
+.domain-suggest-panel {
+  margin: 18px 0 8px;
+  padding: 18px 18px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  background:
+    radial-gradient(1200px 280px at 0% 0%, rgba(14, 165, 233, 0.10), transparent 55%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(8, 12, 22, 0.55));
+}
+
+.suggest-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.suggest-kicker {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #38bdf8;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.suggest-head h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.suggest-head h4 em {
+  font-style: normal;
+  color: #fbbf24;
+}
+
+.suggest-meta,
+.suggest-loading {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.suggest-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.suggest-grid--muted {
+  margin-top: 10px;
+  opacity: 0.72;
+}
+
+.suggest-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(2, 6, 23, 0.45);
+  min-height: 118px;
+  transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.suggest-card.is-available:hover {
+  border-color: rgba(16, 185, 129, 0.55);
+  background: rgba(6, 78, 59, 0.18);
+  transform: translateY(-1px);
+}
+
+.suggest-card.is-taken {
+  border-style: dashed;
+  opacity: 0.85;
+}
+
+.suggest-card.is-skeleton {
+  min-height: 110px;
+  background: linear-gradient(90deg, rgba(30,41,59,0.5), rgba(51,65,85,0.35), rgba(30,41,59,0.5));
+  background-size: 200% 100%;
+  animation: suggestShimmer 1.2s ease-in-out infinite;
+  border: none;
+}
+
+@keyframes suggestShimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.suggest-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.suggest-tld {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: #67e8f9;
+}
+
+.suggest-status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.suggest-card.is-available .suggest-status {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.15);
+}
+
+.suggest-card.is-taken .suggest-status {
+  color: #fda4af;
+  background: rgba(244, 63, 94, 0.12);
+}
+
+.suggest-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+.suggest-price {
+  font-size: 15px;
+  font-weight: 800;
+  color: #34d399;
+  font-family: var(--font-mono);
+}
+
+.suggest-card.is-taken .suggest-price {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.suggest-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.suggest-actions .btn {
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+}
+
+.suggest-locked {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.suggest-empty {
+  padding: 14px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.03);
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.suggest-taken {
+  margin-top: 14px;
+}
+
+.suggest-taken summary {
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+  user-select: none;
+}
+
+@media (max-width: 640px) {
+  .suggest-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Admin UI ẩn mặc định — chỉ bật sau khi xác thực role admin */
 .nav-tab[data-role="admin"],
 .admin-buy-target-group,
@@ -348,9 +588,18 @@ body.user-is-admin section.tab-pane[data-role="admin"].active {
   color: #fff;
 }
 
+.user-role-tag.assistant {
+  background: linear-gradient(135deg, #d97706, #f59e0b);
+  color: #111;
+}
+
 .user-role-tag.user {
   background: linear-gradient(135deg, #059669, #10b981);
   color: #fff;
+}
+
+body.user-is-assistant .assistant-hide {
+  display: none !important;
 }
 
 .btn-icon-text {
@@ -2487,6 +2736,11 @@ body.modal-open {
   color: #fff;
 }
 
+.user-role-tag.assistant {
+  background: #f59e0b;
+  color: #111;
+}
+
 .user-role-tag.user {
   background: var(--accent-cyan);
   color: #000;
@@ -2610,6 +2864,61 @@ body.modal-open {
   background: rgba(6, 182, 212, 0.3);
   border-color: var(--accent-cyan);
   color: #fff;
+}
+
+.dir-jump-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.dir-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.dir-stat {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+}
+
+.dir-stat-label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.dir-stat-value {
+  display: block;
+  margin-top: 6px;
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.dir-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.dir-search {
+  flex: 1 1 260px;
+  min-width: 200px;
+}
+
+.dir-select {
+  flex: 0 1 170px;
+  min-width: 140px;
 }
 
 .pagination-host {
