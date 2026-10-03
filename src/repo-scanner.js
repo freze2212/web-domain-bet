@@ -1,4 +1,4 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { exec } from "node:child_process";
@@ -745,7 +745,7 @@ export function listAllDomains() {
   if (
     listAllDomainsCache.data &&
     now - listAllDomainsCache.at < LIST_DOMAINS_TTL_MS &&
-    listAllDomainsCache.mapAt === pagesDomainMapVersion()
+    listAllDomainsCache.mapAt === linkSourcesVersion()
   ) {
     return listAllDomainsCache.data;
   }
@@ -950,7 +950,7 @@ export function listAllDomains() {
   const result = Array.from(domainMap.values())
     .filter((d) => isFrezeHubDomain(d.domain))
     .sort((a, b) => a.domain.localeCompare(b.domain));
-  listAllDomainsCache = { at: now, data: result, mapAt: pagesDomainMapVersion() };
+  listAllDomainsCache = { at: now, data: result, mapAt: linkSourcesVersion() };
   return result;
 }
 
