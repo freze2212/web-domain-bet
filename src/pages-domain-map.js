@@ -21,6 +21,11 @@ export function getServingPagesProject(domain) {
   return state.domains[apexOf(domain)] || null;
 }
 
+/** Repo GitHub (owner/name, chữ thường) mà project Pages build ra, nếu là project Git. */
+export function getProjectRepo(projectName) {
+  return state.repos?.[projectName] || null;
+}
+
 /** Hostname xxx.pages.dev của project (có thể khác tên project khi tên bị trùng). */
 export function getProjectSubdomain(projectName) {
   return state.subdomains?.[projectName] || `${projectName}.pages.dev`;
@@ -56,10 +61,13 @@ export async function refreshPagesDomainMap() {
 
     const domains = {};
     const subdomains = {};
+    const repos = {};
     for (const acc of accounts) {
       const projects = await getAllPagesProjectsForAccount(acc.id, { token: acc.token });
       for (const p of projects) {
         if (p.subdomain) subdomains[p.name] = p.subdomain;
+        const src = p.source?.config;
+        if (src?.owner && src?.repo_name) repos[p.name] = `${src.owner}/${src.repo_name}`.toLowerCase();
         for (const d of p.domains || []) {
           if (String(d).endsWith(".pages.dev")) continue;
           const apex = apexOf(d);
@@ -84,7 +92,7 @@ export async function refreshPagesDomainMap() {
         row.ambiguous = true;
       }
     }
-    state = { at: Date.now(), domains, subdomains };
+    state = { at: Date.now(), domains, subdomains, repos };
     fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true });
     fs.writeFileSync(CACHE_PATH, JSON.stringify(state), "utf8");
     return { count: Object.keys(domains).length, accounts: accounts.length };

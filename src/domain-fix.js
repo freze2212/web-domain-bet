@@ -15,6 +15,7 @@ import { findServingTemplate, findServingRepoMatch } from "./repo-scanner.js";
 import { probeLiveRedirect, readApexCnameProject, getProjectSubdomain } from "./pages-domain-map.js";
 import { getLastDomainHistoryMeta } from "./history.js";
 import { switchDomainToTemplate } from "./lp-switch.js";
+import { isSelfRedirect } from "./link-resolve.js";
 
 const stripPagesDev = (s) => String(s || "").trim().toLowerCase().replace(/\.pages\.dev$/, "");
 
@@ -56,7 +57,7 @@ export async function fixDomain(domain, { historyItem = null, log = () => {} } =
 
   const cname = await readApexCnameProject(domain).catch(() => null);
   const rule = zone?.id ? await findActiveForwardingRule(zone.id, { token: tokenForZone(zone) }).catch(() => null) : null;
-  if (rule?.targetUrl && !cname) {
+  if (rule?.targetUrl && !cname && !isSelfRedirect(domain, rule.targetUrl)) {
     log(`Page Rule 302 đang bật tới ${rule.targetUrl} nhưng miền chưa chuyển hướng — dựng lại 302 với đúng link đó`);
     await setupDirect302Redirect(domain, rule.targetUrl);
     return { mode: "302", link: rule.targetUrl, changed: true };

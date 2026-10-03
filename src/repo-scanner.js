@@ -24,7 +24,7 @@ import { verifyHistoryItem, waitForLiveLinkMatch, waitFor302RedirectMatch } from
 import { normalizeDomain, normalizeUrl, LANDING_ROOT } from "./utils.js";
 import { listHubZonesFromCache, isAdminCfZone, adminSkipPayload, isFrezeHubDomain } from "./cf-account-guard.js";
 import { patchIndexHtmlLinks, findDomainKeys, getDomainEntry, removeDomainKeys, domainKeyApex } from "./lp-link-patch.js";
-import { getServingPagesProject, pagesDomainMapVersion, getLiveRedirect, liveRedirectsVersion } from "./pages-domain-map.js";
+import { getServingPagesProject, pagesDomainMapVersion, getLiveRedirect, liveRedirectsVersion, getProjectRepo } from "./pages-domain-map.js";
 
 const linkSourcesVersion = () => `${pagesDomainMapVersion()}|${liveRedirectsVersion()}`;
 
@@ -150,10 +150,15 @@ function skipScanDirName(name) {
   return false;
 }
 
-/** Project Pages → template; gg88-lp-5uae-6 thuộc mẫu gg88-lp-5uae. */
+/** Project Pages → template: theo repo Git project build ra; không có thì theo tên (gg88-lp-5uae-6 → gg88-lp-5uae). */
 function templateForPagesProject(projectName) {
   const name = String(projectName || "").toLowerCase();
   if (!name) return null;
+  const repo = getProjectRepo(projectName);
+  if (repo) {
+    const byRepo = listTemplates().find((t) => String(t.gitRepo || "").toLowerCase() === repo);
+    if (byRepo) return byRepo;
+  }
   const projOf = (t) =>
     [
       t.pagesProject,

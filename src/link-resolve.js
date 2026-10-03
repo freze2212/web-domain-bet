@@ -1,6 +1,16 @@
 import { findZoneByName, findActiveForwardingRule, tokenForZone } from "./cloudflare.js";
 import { normalizeUrl, isRealLink } from "./utils.js";
 
+/** Page Rule chuyển miền về chính nó (apex → www) không phải link đích. */
+export function isSelfRedirect(domain, target) {
+  const apex = (h) => String(h || "").trim().toLowerCase().replace(/^www\./, "");
+  try {
+    return apex(new URL(target).hostname) === apex(domain);
+  } catch {
+    return false;
+  }
+}
+
 function pickConfigLink(config) {
   if (!config) return { link: null, tele: null };
   // String.prototype.link là hàm native: entry dạng chuỗi phải xử lý riêng
@@ -60,7 +70,7 @@ export async function resolveInheritedLink(domain, opts = {}) {
   if (zone) {
     const zOpts = { token: tokenForZone(zone) };
     const active = await findActiveForwardingRule(zone.id, zOpts).catch(() => null);
-    if (active?.targetUrl) {
+    if (active?.targetUrl && !isSelfRedirect(domain, active.targetUrl)) {
       return {
         link: normalizeUrl(active.targetUrl),
         tele: providedTele,
