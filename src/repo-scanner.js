@@ -24,7 +24,9 @@ import { verifyHistoryItem, waitForLiveLinkMatch, waitFor302RedirectMatch } from
 import { normalizeDomain, normalizeUrl, LANDING_ROOT } from "./utils.js";
 import { listHubZonesFromCache, isAdminCfZone, adminSkipPayload, isFrezeHubDomain } from "./cf-account-guard.js";
 import { patchIndexHtmlLinks, findDomainKeys, getDomainEntry, removeDomainKeys, domainKeyApex } from "./lp-link-patch.js";
-import { getServingPagesProject, pagesDomainMapVersion } from "./pages-domain-map.js";
+import { getServingPagesProject, pagesDomainMapVersion, getLiveRedirect, liveRedirectsVersion } from "./pages-domain-map.js";
+
+const linkSourcesVersion = () => `${pagesDomainMapVersion()}|${liveRedirectsVersion()}`;
 
 const execAsync = promisify(exec);
 
@@ -933,6 +935,15 @@ export function listAllDomains() {
     }
   } catch (err) {
     console.warn("Lỗi nạp cf_zones_cache.json:", err.message);
+  }
+
+  // D. Miền đang 302 thật (mở thử thấy Location): link hiển thị là nơi nó đang chuyển tới.
+  for (const row of domainMap.values()) {
+    const r = getLiveRedirect(row.domain);
+    if (!r?.location) continue;
+    row.mainUrl = r.location;
+    row.liveRedirect = r.location;
+    row.sourceType = "redirect_302";
   }
 
   // Chỉ loại miền Admin khi thiếu ADMIN token (blockHubMutation)

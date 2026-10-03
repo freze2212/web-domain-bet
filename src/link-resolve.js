@@ -39,6 +39,14 @@ export async function resolveInheritedLink(domain, opts = {}) {
     }
   }
 
+  const { probeLiveRedirect } = await import("./pages-domain-map.js");
+  const live302 = await probeLiveRedirect(domain);
+  if (live302?.location) {
+    try {
+      return { link: normalizeUrl(live302.location), tele: providedTele, source: "live_302" };
+    } catch {}
+  }
+
   const { findServingRepoMatch } = await import("./repo-scanner.js");
   const match = findServingRepoMatch(domain);
   if (match) {

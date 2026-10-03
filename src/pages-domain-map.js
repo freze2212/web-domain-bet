@@ -59,12 +59,86 @@ export async function refreshPagesDomainMap() {
   return refreshing;
 }
 
+// --- 302 thật: mở thử miền, đọc Location (Page Rule / Redirect Rule / Worker đều ra ở đây) ---
+const REDIRECT_CACHE_PATH = path.resolve(__dirname, "../data/live_redirects.json");
+let redirects = { at: 0, domains: {} };
+try {
+  const raw = JSON.parse(fs.readFileSync(REDIRECT_CACHE_PATH, "utf8"));
+  if (raw && typeof raw.domains === "object") redirects = raw;
+} catch {}
+
+/** Nơi miền đang thật sự chuyển tới (bỏ qua bước nhảy sang www/https của chính nó). */
+export function getLiveRedirect(domain) {
+  return redirects.domains[apexOf(domain)] || null;
+}
+
+export function liveRedirectsVersion() {
+  return redirects.at;
+}
+
+export async function probeLiveRedirect(domain) {
+  return probeRedirect(apexOf(domain)).catch(() => null);
+}
+
+async function probeRedirect(domain) {
+  let url = `https://${domain}/`;
+  for (let hop = 0; hop < 4; hop++) {
+    const res = await fetch(url, {
+      redirect: "manual",
+      headers: { "user-agent": "Mozilla/5.0 (LandingHub-302-probe)" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.status < 300 || res.status >= 400) return null;
+    const loc = res.headers.get("location");
+    if (!loc) return null;
+    const next = new URL(loc, url);
+    if (apexOf(next.hostname) !== domain) return { location: next.href, status: res.status };
+    url = next.href;
+  }
+  return null;
+}
+
+let probing = null;
+export async function refreshLiveRedirects(domainList) {
+  if (probing) return probing;
+  probing = (async () => {
+    const list = [...new Set((domainList || []).map(apexOf).filter((d) => d && d.includes(".")))];
+    const found = {};
+    let failed = 0;
+    for (let i = 0; i < list.length; i += 10) {
+      await Promise.all(
+        list.slice(i, i + 10).map(async (d) => {
+          try {
+            const r = await probeRedirect(d);
+            if (r) found[d] = { ...r, at: Date.now() };
+          } catch {
+            failed++;
+            // Không mở được lần này: giữ kết quả cũ, không coi là đã hết 302
+            if (redirects.domains[d]) found[d] = redirects.domains[d];
+          }
+        })
+      );
+    }
+    redirects = { at: Date.now(), domains: found };
+    fs.mkdirSync(path.dirname(REDIRECT_CACHE_PATH), { recursive: true });
+    fs.writeFileSync(REDIRECT_CACHE_PATH, JSON.stringify(redirects), "utf8");
+    return { probed: list.length, redirects: Object.keys(found).length, failed };
+  })().finally(() => {
+    probing = null;
+  });
+  return probing;
+}
+
 let timer = null;
-export function startPagesDomainMapRefresher() {
-  const run = () =>
-    refreshPagesDomainMap()
+export function startPagesDomainMapRefresher(getDomainList = () => []) {
+  const run = async () => {
+    await refreshPagesDomainMap()
       .then((r) => console.log(`[PagesMap] ${r.count} miền đang gắn Pages (${r.accounts} tài khoản)`))
       .catch((e) => console.warn("[PagesMap] refresh lỗi:", e.message));
+    await refreshLiveRedirects(getDomainList())
+      .then((r) => console.log(`[Live302] mở thử ${r.probed} miền, ${r.redirects} miền đang chuyển hướng, ${r.failed} lỗi`))
+      .catch((e) => console.warn("[Live302] lỗi:", e.message));
+  };
   setTimeout(run, 3000);
   if (timer) clearInterval(timer);
   timer = setInterval(run, REFRESH_MS);

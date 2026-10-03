@@ -5,7 +5,7 @@ import { listAllDomains, detectBrandFromDomain } from "./repo-scanner.js";
 import { listTemplates } from "./templates.js";
 import { listHubZonesFromCache, isAdminCfZone } from "./cf-account-guard.js";
 import { getDomainOwner } from "./ownership.js";
-import { pagesDomainMapVersion } from "./pages-domain-map.js";
+import { pagesDomainMapVersion, liveRedirectsVersion } from "./pages-domain-map.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CF_CACHE_PATH = path.resolve(__dirname, "../data/cf_zones_cache.json");
@@ -96,7 +96,7 @@ export function invalidateEnrichedDomainsCache() {
 
 export function buildEnrichedDomainsList({ isAdminUser, userAllowedDomains }) {
   const templates = listTemplates();
-  const cacheKey = `${listAllDomains().length}|${templates.length}|${cfCacheMtime()}|${pagesDomainMapVersion()}`;
+  const cacheKey = `${listAllDomains().length}|${templates.length}|${cfCacheMtime()}|${pagesDomainMapVersion()}|${liveRedirectsVersion()}`;
   const now = Date.now();
   if (enrichedCache.domains && enrichedCache.key === cacheKey && now - enrichedCache.at < ENRICHED_TTL_MS) {
     return filterEnrichedForUser(enrichedCache.domains, { isAdminUser, userAllowedDomains });
@@ -106,7 +106,7 @@ export function buildEnrichedDomainsList({ isAdminUser, userAllowedDomains }) {
   const index = buildTemplateIndex(templates);
 
   const enriched = domains.map((d) => {
-    const matchingTpl = matchTemplateForDomain(d, index);
+    const matchingTpl = d.liveRedirect ? null : matchTemplateForDomain(d, index);
     const brand = matchingTpl ? matchingTpl.brand : detectBrandFromDomain(d.domain);
     const templateName = matchingTpl
       ? matchingTpl.name
@@ -119,7 +119,13 @@ export function buildEnrichedDomainsList({ isAdminUser, userAllowedDomains }) {
       templateId: matchingTpl ? matchingTpl.id : null,
       templateName,
       brand,
-      cnameTarget: d.servingProject ? `${d.servingProject}.pages.dev` : matchingTpl ? matchingTpl.cnameTarget : null,
+      cnameTarget: d.liveRedirect
+        ? null
+        : d.servingProject
+          ? `${d.servingProject}.pages.dev`
+          : matchingTpl
+            ? matchingTpl.cnameTarget
+            : null,
       owner: owner?.userId || "Chưa gán",
       inRepo: true,
     };

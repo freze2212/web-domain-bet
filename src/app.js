@@ -6,6 +6,7 @@ import { initMongoStores, loadAllStores } from "./mongo-stores.js";
 import { reconcileStaleHistory } from "./history.js";
 import { reconcileStaleTasks } from "./task-queue.js";
 import { startPagesDomainMapRefresher } from "./pages-domain-map.js";
+import { listAllDomains } from "./repo-scanner.js";
 
 async function main() {
   console.log("=============================================================");
@@ -34,7 +35,7 @@ async function main() {
   });
 
   startBackgroundVerifier(30000);
-  startPagesDomainMapRefresher();
+  startPagesDomainMapRefresher(() => listAllDomains().map((d) => d.domain));
 }
 
 main().catch((err) => {
