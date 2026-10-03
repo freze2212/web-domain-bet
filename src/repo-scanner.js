@@ -170,7 +170,7 @@ function templateForPagesProject(projectName) {
   );
 }
 
-function sameTemplateFolder(a, b) {
+export function sameTemplateFolder(a, b) {
   const sub = (p) => String(p || "").split(/[\\/]/).filter(Boolean).slice(-2).join("/").toLowerCase();
   return !!a && !!b && sub(a) === sub(b);
 }
@@ -207,17 +207,25 @@ export function getAllDomainsJsonFiles() {
   return files;
 }
 
-/** Bản ghi của miền trong repo đang phục vụ live (project Pages đang gắn miền), nếu biết. */
+/**
+ * Mẫu đang thật sự phục vụ miền, theo project Pages đang gắn miền trên Cloudflare.
+ * null nếu miền không nằm trên Pages, hoặc nằm ở nhiều project mà không xác định được CNAME.
+ */
+export function findServingTemplate(domain) {
+  const serving = getServingPagesProject(domain);
+  if (!serving?.project || serving.ambiguous) return null;
+  const template = templateForPagesProject(serving.project);
+  return template ? { template, project: serving.project, accountId: serving.accountId } : null;
+}
+
+/** Bản ghi của miền trong repo đang phục vụ live. Không đoán: không xác định được repo thì null. */
 export function findServingRepoMatch(domain) {
   const matches = findDomainInRepos(domain);
-  if (matches.length < 2) return matches[0] || null;
-  const serving = getServingPagesProject(domain);
-  for (const proj of serving?.projects || []) {
-    const tpl = templateForPagesProject(proj);
-    const m = tpl?.path ? matches.find((x) => sameTemplateFolder(x.folderPath, tpl.path)) : null;
-    if (m) return m;
-  }
-  return matches[0];
+  if (!matches.length) return null;
+  if (!pagesDomainMapVersion()) return matches.length === 1 ? matches[0] : null;
+  const tpl = findServingTemplate(domain)?.template;
+  if (!tpl?.path) return null;
+  return matches.find((x) => sameTemplateFolder(x.folderPath, tpl.path)) || null;
 }
 
 // 2. Tìm chính xác domain nằm ở folder gốc / repo nào (không gồm .bak / backup)

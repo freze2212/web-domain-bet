@@ -1,7 +1,7 @@
 import { getDomainInfo } from "./spaceship.js";
-import { findZoneByName, getZoneNameservers, cfRequest } from "./cloudflare.js";
-import { findDomainInRepos } from "./repo-scanner.js";
-import { listTemplates, getTemplate } from "./templates.js";
+import { findZoneByName, getZoneNameservers, cfRequest, pagesTokenForAccount } from "./cloudflare.js";
+import { findServingTemplate, findServingRepoMatch } from "./repo-scanner.js";
+import { getServingPagesProject } from "./pages-domain-map.js";
 import { checkDomainHttp, captureDomainScreenshot } from "./verifier.js";
 import { normalizeDomain } from "./utils.js";
 
@@ -72,18 +72,12 @@ export async function inspectDomainHealth(rawDomain) {
     const hasCorrectDns = !!apexCname;
 
     // 5. Kiểm tra vị trí mã nguồn Repo / Template
-    const repoMatches = findDomainInRepos(domain);
-    const allTpls = listTemplates();
-    let matchedTpl = null;
-
-    if (repoMatches.length > 0) {
-      const firstRepo = repoMatches[0];
-      matchedTpl = allTpls.find((t) => t.path && firstRepo.filePath.includes(t.path));
-      result.detectedLink = firstRepo.config?.main_url || firstRepo.config?.url || null;
-      result.detectedTele = firstRepo.config?.telegram_url || firstRepo.config?.messenger_url || null;
-    }
-    if (!matchedTpl) {
-      matchedTpl = allTpls.find((t) => t.id === "gg88_lp_5uae") || allTpls[0];
+    const matchedTpl = findServingTemplate(domain)?.template || null;
+    const servingRepo = findServingRepoMatch(domain);
+    if (servingRepo) {
+      const c = servingRepo.config;
+      result.detectedLink = (typeof c === "string" ? c : c?.main_url || c?.url) || null;
+      result.detectedTele = (typeof c === "object" && (c?.telegram_url || c?.messenger_url)) || null;
     }
     result.detectedTemplate = matchedTpl ? { id: matchedTpl.id, name: matchedTpl.name, project: matchedTpl.pagesProject, target: matchedTpl.cnameTarget } : null;
 
@@ -92,39 +86,16 @@ export async function inspectDomainHealth(rawDomain) {
     let pagesDomainStatus = "Chưa gắn vào Pages";
     let boundProjectName = null;
 
-    const accountIds = [...new Set([process.env.CLOUDFLARE_ACCOUNT_ID || "456da4d89821d871fac09c0e5651338a", cfZone?.account?.id].filter(Boolean))];
-
     try {
-      const baseProject = matchedTpl?.pagesProject || "gg88-lp-5uae";
-      const candidateProjects = [
-        baseProject,
-        `${baseProject}-2`,
-        `${baseProject}-3`,
-        `${baseProject}-4`,
-        `${baseProject}-5`,
-        "gg88-lp-5uae",
-        "gg88-lp-5uae-2",
-        "gg88-lp-5uae-3",
-        "lp-gg88-vip",
-        "lp-gg88-vip-2",
-        "lp-gg88-vip-3",
-        "lp-gg88-vip-4",
-      ];
-
-      for (const accId of accountIds) {
-        for (const proj of [...new Set(candidateProjects)]) {
-          const pagesRes = await cfRequest(
-            `/accounts/${accId}/pages/projects/${proj}/domains/${domain}`
-          ).catch(() => null);
-
-          if (pagesRes && pagesRes.name) {
-            pagesDomainStatus = pagesRes.status || "active";
-            boundProjectName = proj;
-            isBoundToPages = ["active", "pending", "active_redeploying"].includes(pagesDomainStatus);
-            break;
-          }
-        }
-        if (boundProjectName) break;
+      const serving = getServingPagesProject(domain);
+      if (serving?.project) {
+        const pagesRes = await cfRequest(
+          `/accounts/${serving.accountId}/pages/projects/${encodeURIComponent(serving.project)}/domains/${encodeURIComponent(domain)}`,
+          { token: pagesTokenForAccount(serving.accountId) }
+        ).catch(() => null);
+        boundProjectName = serving.project;
+        pagesDomainStatus = pagesRes?.status || "active";
+        isBoundToPages = ["active", "pending", "active_redeploying"].includes(pagesDomainStatus);
       }
     } catch {}
 
@@ -201,7 +172,7 @@ export async function inspectDomainHealth(rawDomain) {
         ? (pagesDomainStatus === "pending"
             ? `Đã gắn vào [${boundProjectName}] (Đang cấp phát SSL)`
             : `Đã gắn & kích hoạt trên [${boundProjectName}]`)
-        : (boundProjectName ? `Trạng thái: [${boundProjectName}] (${pagesDomainStatus})` : `Chưa gắn vào Pages Project [${matchedTpl?.pagesProject || "gg88-lp-5uae"}]`),
+        : (boundProjectName ? `Trạng thái: [${boundProjectName}] (${pagesDomainStatus})` : "Chưa gắn vào project Pages nào"),
       detail: isPagesOk
         ? (pagesDomainStatus === "pending"
             ? "Cloudflare Pages đã nhận diện tên miền và đang hoàn tất kích hoạt định tuyến chứng chỉ SSL."
@@ -212,13 +183,13 @@ export async function inspectDomainHealth(rawDomain) {
     });
 
     // Điểm 6: Mã nguồn & domains.json
-    const hasRepoConfig = repoMatches.length > 0 && !!result.detectedLink;
+    const hasRepoConfig = !!servingRepo && !!result.detectedLink;
     result.checklist.push({
       id: "source_config",
       title: "6. Cấu Hình Mã Nguồn & domains.json",
       passed: hasRepoConfig,
-      statusText: hasRepoConfig ? `Đã cấu hình trong [${matchedTpl?.name || "GG88"}]` : "Chưa có link đích trong domains.json",
-      detail: hasRepoConfig ? `Link đích: ${result.detectedLink} (Thư mục: ${repoMatches[0].folderPath})` : "Cần ghi link đích vào file domains.json và deploy.",
+      statusText: hasRepoConfig ? `Đã cấu hình trong [${matchedTpl?.name || "?"}]` : "Chưa có link đích trong domains.json",
+      detail: hasRepoConfig ? `Link đích: ${result.detectedLink} (Thư mục: ${servingRepo.folderPath})` : "Cần ghi link đích vào file domains.json và deploy.",
       actionGuide: hasRepoConfig ? null : "Vào mục Quản Lý Domain hoặc Đổi Mẫu để chọn giao diện và link đích.",
       severity: hasRepoConfig ? "success" : "warning",
     });

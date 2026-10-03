@@ -152,7 +152,7 @@ function isGitConnectedPagesProject(project) {
 }
 
 /** Token Pages đúng account */
-function pagesTokenForAccount(accountId) {
+export function pagesTokenForAccount(accountId) {
   const adminAcc = getAdminAccountId();
   if (accountId === adminAcc) return getAdminToken() || getPrimaryToken();
   return getPrimaryToken() || getAdminToken();
@@ -774,7 +774,9 @@ export async function ensureLiveDomainLink(domain, claimedLink, opts = {}) {
     };
   }
 
-  await purgeZone();
+  // projectOnly: chỉ đọc xxx.pages.dev — dùng khi DNS còn trỏ mẫu cũ (miền vẫn phát domains.json cũ)
+  const projectOnly = !!opts.projectOnly && !!projectHost;
+  if (!projectOnly) await purgeZone();
 
   while (Date.now() - started < timeoutMs) {
     attempt += 1;
@@ -803,9 +805,11 @@ export async function ensureLiveDomainLink(domain, claimedLink, opts = {}) {
       }
     }
 
-    apex = await probeDomainJsonLink(norm);
-    if (apex.link === want) {
-      return pack({ ok: true, pending: false, link: apex.link, host: apex.host, error: null });
+    if (!projectOnly) {
+      apex = await probeDomainJsonLink(norm);
+      if (apex.link === want) {
+        return pack({ ok: true, pending: false, link: apex.link, host: apex.host, error: null });
+      }
     }
 
     published = projectHost
@@ -821,6 +825,9 @@ export async function ensureLiveDomainLink(domain, claimedLink, opts = {}) {
     if (projectLink === want) {
       deployState = "success";
       deployLog.deployed = true;
+      if (projectOnly) {
+        return pack({ ok: true, pending: false, link: projectLink, host: projectHost, error: null });
+      }
       if (!purgedAfterPublish) {
         purgedAfterPublish = true;
         await purgeZone();
@@ -829,7 +836,7 @@ export async function ensureLiveDomainLink(domain, claimedLink, opts = {}) {
       if (apex.link === want) {
         return pack({ ok: true, pending: false, link: apex.link, host: apex.host, error: null });
       }
-    } else if (deployState === "success" && projectReadable && projectLink && projectLink !== want) {
+    } else if (!projectOnly && deployState === "success" && projectReadable && projectLink && projectLink !== want) {
       projectMisses += 1;
       if (projectMisses >= 3) {
         return pack({
@@ -840,7 +847,7 @@ export async function ensureLiveDomainLink(domain, claimedLink, opts = {}) {
           error: `Live link lệch: live=${projectLink} | want=${want}`,
         });
       }
-    } else if (deployState === "success" && projectReadable && !projectLink) {
+    } else if (!projectOnly && deployState === "success" && projectReadable && !projectLink) {
       projectMisses += 1;
       if (projectMisses >= 3) {
         return pack({
@@ -856,6 +863,16 @@ export async function ensureLiveDomainLink(domain, claimedLink, opts = {}) {
     }
 
     await sleep(4000);
+  }
+
+  if (projectOnly) {
+    return pack({
+      ok: false,
+      pending: false,
+      link: published.link || null,
+      host: projectHost,
+      error: `${projectHost} chưa phát link mới của [${norm}] sau ${Math.round(timeoutMs / 1000)}s`,
+    });
   }
 
   if (apex.link === want) {

@@ -68,6 +68,10 @@ export async function resumePendingZoneRedirects() {
       }
       try {
         const cf = await setupDirect302Redirect(h.domain, h.link);
+        const { findDomainInRepos, removeDomainFromRepo } = await import("./repo-scanner.js");
+        for (const m of findDomainInRepos(h.domain)) {
+          await removeDomainFromRepo(h.domain, m.filePath || m.folderPath).catch(() => {});
+        }
         syncDeployOwnership(
           h.domain,
           { userId: h.userId || "u_admin", username: h.username, fullName: h.fullName, role: "admin" },

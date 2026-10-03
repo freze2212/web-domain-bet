@@ -1,7 +1,5 @@
-import { findZoneByName, findActiveForwardingRule, findAnyForwardingRule, tokenForZone } from "./cloudflare.js";
-import { getLastDomainHistoryMeta } from "./history.js";
-import { getDomainOwner } from "./ownership.js";
-import { normalizeUrl } from "./utils.js";
+import { findZoneByName, findActiveForwardingRule, tokenForZone } from "./cloudflare.js";
+import { normalizeUrl, isRealLink } from "./utils.js";
 
 function pickConfigLink(config) {
   if (!config) return { link: null, tele: null };
@@ -19,24 +17,20 @@ function pickConfigLink(config) {
 }
 
 /**
- * Chuỗi kế thừa link giống thao tác tay khi form để trống:
- * provided → domains.json → Page Rule (active rồi disabled) → ownership → history → live 302 Location
+ * Link đang chạy thật khi form để trống:
+ * provided → 302 live (mở thử miền) → domains.json của mẫu đang phục vụ → Page Rule đang bật.
+ * Không lấy history/ownership/Page Rule đã tắt: đó là link cũ, không phải link đang chạy.
  */
 export async function resolveInheritedLink(domain, opts = {}) {
   const provided = (opts.providedLink || "").trim();
   const providedTele = (opts.providedTele || "").trim();
 
-  // Tránh coi placeholder form "https://" là link thật
-  if (provided && provided !== "https://" && provided !== "http://") {
+  if (provided) {
+    let norm = null;
     try {
-      return {
-        link: normalizeUrl(provided),
-        tele: providedTele,
-        source: "provided",
-      };
-    } catch {
-      // fall through to inherit
-    }
+      norm = normalizeUrl(provided);
+    } catch {}
+    if (norm && isRealLink(norm)) return { link: norm, tele: providedTele, source: "provided" };
   }
 
   const { probeLiveRedirect } = await import("./pages-domain-map.js");
@@ -51,7 +45,7 @@ export async function resolveInheritedLink(domain, opts = {}) {
   const match = findServingRepoMatch(domain);
   if (match) {
     const picked = pickConfigLink(match.config);
-    if (picked.link) {
+    if (picked.link && isRealLink(picked.link)) {
       try {
         return {
           link: normalizeUrl(picked.link),
@@ -73,54 +67,10 @@ export async function resolveInheritedLink(domain, opts = {}) {
         source: "page_rule_active",
       };
     }
-    const anyRule = await findAnyForwardingRule(zone.id, zOpts).catch(() => null);
-    if (anyRule?.targetUrl) {
-      return {
-        link: normalizeUrl(anyRule.targetUrl),
-        tele: providedTele,
-        source: "page_rule_any",
-      };
-    }
   }
-
-  const owner = getDomainOwner(domain);
-  if (owner?.currentLink) {
-    try {
-      return {
-        link: normalizeUrl(owner.currentLink),
-        tele: providedTele || owner.tele || "",
-        source: "ownership",
-      };
-    } catch {}
-  }
-
-  const hist = getLastDomainHistoryMeta(domain);
-  if (hist?.link) {
-    try {
-      return {
-        link: normalizeUrl(hist.link),
-        tele: providedTele || hist.tele || "",
-        source: "history",
-      };
-    } catch {}
-  }
-
-  try {
-    const r = await fetch(`https://${domain}/`, {
-      method: "GET",
-      redirect: "manual",
-      headers: { "user-agent": "LandingHub-LinkInherit/1.0" },
-      signal: AbortSignal.timeout(8000),
-    });
-    const loc = r.headers.get("location");
-    if (loc && [301, 302, 303, 307, 308].includes(r.status)) {
-      return {
-        link: normalizeUrl(loc),
-        tele: providedTele,
-        source: "live_302",
-      };
-    }
-  } catch {}
 
   return { link: null, tele: providedTele || "", source: "none" };
 }
+
+export const NO_LINK_ERROR =
+  "Miền chưa có link đang chạy (không chuyển hướng, không có dòng trong mẫu đang phục vụ). Vui lòng nhập link.";

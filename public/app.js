@@ -1211,7 +1211,7 @@ function setupForms() {
           });
           const data = await res.json();
           if (data.success && data.pendingLive) {
-            showToast(`⏳ [${domain}] đã ghi link. Đang chờ Pages phát domains.json — lịch sử sẽ thành công khi live khớp.`, "processing");
+            showToast(`⏳ Đang đổi mẫu [${domain}]. Miền vẫn chạy chỗ cũ cho tới khi mẫu mới sẵn sàng — theo dõi trong lịch sử.`, "processing");
             fetchHistory();
           } else if (data.success) {
             showToast(`🎉 Đã đổi mẫu thành công cho [${domain}] sang [${data.templateName || data.newTemplateName || targetTemplateId}]!`, "success");
@@ -3178,14 +3178,13 @@ function setupBatchTab() {
 
   if (btnAddRow) {
     btnAddRow.addEventListener("click", () => {
-      const defaultTpl = allTemplates.find(t => t.id === 'gg88_lp_5uae')?.id || allTemplates[0]?.id || "";
       batchItems.push({
         id: "batch_" + Date.now() + "_" + Math.random().toString(36).substr(2, 4),
         selected: true,
         domain: "",
-        link: "https://",
+        link: "",
         tele: "",
-        templateId: defaultTpl,
+        templateId: "",
         status: "ready",
         statusText: "Sẵn sàng",
         error: null,
@@ -3253,7 +3252,6 @@ function parseBatchRawText(text) {
   const teleRegex = /(https?:\/\/t\.me\/[^\s"'<>\n]+|@[a-zA-Z0-9_]{4,})/i;
   const domainRegex = /([a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?)/i;
 
-  const defaultTpl = allTemplates.find((t) => t.id === "gg88_lp_5uae")?.id || allTemplates[0]?.id || "";
   const rawResults = [];
   let pendingItem = null;
 
@@ -3380,9 +3378,9 @@ function parseBatchRawText(text) {
     id: "batch_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6) + "_" + idx,
     selected: true,
     domain: item.domain,
-    link: item.link || "https://",
+    link: item.link || "",
     tele: item.tele || "",
-    templateId: defaultTpl,
+    templateId: "",
     status: "ready",
     statusText: "Sẵn sàng",
     error: null,
@@ -3429,22 +3427,47 @@ function openVisualPickerForGlobalBatch() {
   openModal("templatePickerModal");
 }
 
+/** Đơn chưa có mẫu: bắt admin chọn theo số thứ tự, không tự lấy mẫu nào. */
+function askTemplateForOrder(domain) {
+  const list = allTemplates || [];
+  if (!list.length) {
+    showToast("❌ Chưa tải được danh sách mẫu", "error");
+    return "";
+  }
+  const menu = list.map((t, i) => `${i + 1}. [${t.brand || "GG88"}] ${t.name}`).join("\n");
+  const raw = prompt(`Đơn ${domain} chưa có mẫu LP. Nhập số thứ tự mẫu:\n\n${menu}`, "");
+  const idx = parseInt(String(raw || "").trim(), 10) - 1;
+  if (!(idx >= 0 && idx < list.length)) {
+    if (raw !== null) showToast("⚠️ Số thứ tự mẫu không hợp lệ", "warning");
+    return "";
+  }
+  return list[idx].id;
+}
+
+/** Link đích thật: có host. Loại "https://" trống và "https://t.me/" trống. */
+function isRealLinkClient(input) {
+  try {
+    const u = new URL(String(input || "").trim());
+    if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) return false;
+    if (/^(www\.)?t\.me$/i.test(u.hostname) && u.pathname.replace(/\/+$/, "") === "") return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function populateBatchGlobalTemplateSelect() {
   const gSelect = document.getElementById("batchGlobalTemplateSelect");
   if (!gSelect) return;
 
-  const defaultTpl = allTemplates.find((t) => t.id === "gg88_lp_5uae")?.id || allTemplates[0]?.id;
-
-  let optionsHtml = `<option value="302_DIRECT">⚡ Trỏ 302 Trực Tiếp (Forwarding)</option>`;
+  let optionsHtml = `<option value="" selected>— Chọn mẫu —</option>`;
+  optionsHtml += `<option value="302_DIRECT">⚡ Trỏ 302 Trực Tiếp (Forwarding)</option>`;
   optionsHtml += allTemplates
-    .map((t) => {
-      const selected = t.id === defaultTpl ? "selected" : "";
-      return `<option value="${t.id}" ${selected}>[${t.brand || "GG88"}] ${t.name}</option>`;
-    })
+    .map((t) => `<option value="${t.id}">[${t.brand || "GG88"}] ${t.name}</option>`)
     .join("");
 
   gSelect.innerHTML = optionsHtml;
-  updateBatchGlobalThumbnail(defaultTpl);
+  updateBatchGlobalThumbnail("");
 
   gSelect.onchange = function () {
     updateBatchGlobalThumbnail(this.value);
@@ -3481,7 +3504,8 @@ function renderBatchTable() {
 
   tbody.innerHTML = batchItems
     .map((item, index) => {
-      let tplOptionsHtml = `<option value="302_DIRECT" ${item.templateId === "302_DIRECT" ? "selected" : ""}>⚡ Trỏ 302 Trực Tiếp</option>`;
+      let tplOptionsHtml = `<option value="" ${!item.templateId ? "selected" : ""}>— Chọn mẫu —</option>`;
+      tplOptionsHtml += `<option value="302_DIRECT" ${item.templateId === "302_DIRECT" ? "selected" : ""}>⚡ Trỏ 302 Trực Tiếp</option>`;
       tplOptionsHtml += allTemplates
         .map((t) => {
           const isSel = item.templateId === t.id ? "selected" : "";
@@ -3619,12 +3643,20 @@ async function startBatchExecution() {
   const isBuy = mode === "buy";
   const isSetLink = mode === "setlink";
 
-  if (isSetLink) {
-    const missing = selectedList.filter((i) => !i.link || i.link === "https://" || !/^https?:\/\//i.test(i.link));
-    if (missing.length) {
-      showToast("⚠️ Mỗi dòng cần một link đích đầy đủ (https://...)", "warning");
+  const noLink = selectedList.filter((i) => !isRealLinkClient(i.link));
+  if (noLink.length) {
+    showToast(`⚠️ ${noLink.length} dòng chưa có link đích hợp lệ: ${noLink.slice(0, 5).map((i) => i.domain).join(", ")}`, "warning");
+    return;
+  }
+  if (!isSetLink) {
+    const noTpl = selectedList.filter((i) => !i.templateId);
+    if (noTpl.length) {
+      showToast(`⚠️ ${noTpl.length} dòng chưa chọn mẫu: ${noTpl.slice(0, 5).map((i) => i.domain).join(", ")}`, "warning");
       return;
     }
+  }
+
+  if (isSetLink) {
     if (!confirm(`Đổi link cho ${selectedList.length} tên miền?\n\nLanding / 302 đang gắn sẽ được giữ nguyên. Mỗi miền dùng đúng link của dòng đó.`)) {
       return;
     }
@@ -6674,9 +6706,9 @@ async function openSwitchModeModal(domain, currentMode, currentLink) {
   }
 
   if (tplSelect && allTemplates.length > 0) {
-    tplSelect.innerHTML = allTemplates
-      .map((t) => `<option value="${t.id}">${t.name} (${t.brand || ""})</option>`)
-      .join("");
+    tplSelect.innerHTML =
+      `<option value="" selected>— Chọn mẫu —</option>` +
+      allTemplates.map((t) => `<option value="${t.id}">${t.name} (${t.brand || ""})</option>`).join("");
   }
 
   if (modeSelect) {
@@ -6724,6 +6756,14 @@ async function handleSwitchModeSubmit(e) {
 
   if (!domain) {
     showToast("❌ Vui lòng nhập đầy đủ thông tin");
+    return;
+  }
+  if (toMode === "LP" && !templateId) {
+    showToast("⚠️ Vui lòng chọn mẫu Landing Page", "warning");
+    return;
+  }
+  if (toMode === "302" && targetUrl && !isRealLinkClient(targetUrl)) {
+    showToast("⚠️ Link đích không hợp lệ", "warning");
     return;
   }
 
@@ -7709,14 +7749,8 @@ async function handleAdminApproveDomainOrder(orderId) {
       if (!link) return;
     }
     if (deployMode !== "302" && !templateId) {
-      if (allTemplates && allTemplates.length > 0) {
-        templateId = allTemplates[0].id;
-        const pick = confirm(`Đơn chưa có mẫu LP. Dùng mẫu "${allTemplates[0].name}"?\n\nCancel để hủy.`);
-        if (!pick) return;
-      } else {
-        templateId = prompt(`Nhập templateId cho LP:`, "")?.trim() || "";
-        if (!templateId) return;
-      }
+      templateId = askTemplateForOrder(order.domain);
+      if (!templateId) return;
     }
 
     const quote = await fetchSpaceshipQuote(order.domain);
@@ -7817,14 +7851,8 @@ async function handleAdminFulfillDomainOrder(orderId) {
     }
 
     if (deployMode !== "302" && !templateId) {
-      if (allTemplates && allTemplates.length > 0) {
-        templateId = allTemplates[0].id;
-        const pick = confirm(`Đơn chưa có mẫu LP. Dùng mẫu mặc định "${allTemplates[0].name}"?\n\nBấm Cancel để hủy và chọn mẫu thủ công trên tab Mua.`);
-        if (!pick) return;
-      } else {
-        templateId = prompt(`Nhập templateId cho LP (${order.domain}):`, "")?.trim() || "";
-        if (!templateId) return;
-      }
+      templateId = askTemplateForOrder(order.domain);
+      if (!templateId) return;
     }
 
     if (!confirm(`Mua hộ & cài ${order.domain} cho ${order.username}?\n\nSpaceship sẽ tính phí USD (Admin thanh toán). Xu khách đã trừ khi duyệt.`)) {

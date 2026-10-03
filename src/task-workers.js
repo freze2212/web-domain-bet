@@ -9,15 +9,18 @@ import { checkDomainAvailability, registerDomain, resolveContactId, updateNamese
 import {
   setupCloudflare,
   setupDirect302Redirect,
+  ensureLiveDomainLink,
 } from "./cloudflare.js";
 import { getTemplate, updateTemplateDomainsJson, findTemplateByDomain } from "./templates.js";
 import { getDomainOwner, touchDomainOwner } from "./ownership.js";
 import { deductBalance, topupBalance } from "./wallet.js";
 import { addHistoryItem, updateHistoryItem, setHistoryProgress } from "./history.js";
 import { verifyHistoryItem } from "./verifier.js";
-import { smartSetLink, findDomainInRepos, removeDomainFromRepo } from "./repo-scanner.js";
-import { resolveInheritedLink } from "./link-resolve.js";
+import { smartSetLink, findDomainInRepos, removeDomainFromRepo, sameTemplateFolder } from "./repo-scanner.js";
+import { resolveInheritedLink, NO_LINK_ERROR } from "./link-resolve.js";
+import { switchDomainToTemplate } from "./lp-switch.js";
 import { assertNotAdminCfDomain } from "./cf-account-guard.js";
+import { isRealLink } from "./utils.js";
 import { pointNameserversFor302 } from "./zone-302-wait.js";
 
 /**
@@ -35,8 +38,10 @@ export async function executeBuyAndDeploy(taskId) {
     assertNotAdminCfDomain(domain);
 
     const template = templateId ? getTemplate(templateId) : null;
-    const templateName = template?.name || (mode === "302" ? "Direct 302 Redirect" : "Mặc định");
-    const cnameTarget = template?.cnameTarget || (mode === "302" ? "8.8.8.8" : "web-domain.pages.dev");
+    if (!isRealLink(link)) throw new Error("Thiếu link đích");
+    if (mode !== "302" && !template?.cnameTarget) throw new Error("Chưa chọn mẫu Landing Page");
+    const templateName = template?.name || "Direct 302 Redirect";
+    const cnameTarget = mode === "302" ? "8.8.8.8" : template.cnameTarget;
 
     // Thêm vào bảng lịch sử ban đầu (Pending)
     addHistoryItem({
@@ -72,17 +77,33 @@ export async function executeBuyAndDeploy(taskId) {
     if (mode === "302") {
       setHistoryProgress(historyId, "Đang thiết lập Page Rule 302...");
       updateTaskProgress(taskId, 55, "Đang thiết lập Cloudflare Page Rule 302...", "Tạo Page Rule & Proxy DNS 8.8.8.8", "info");
-      // Gỡ khỏi LP source nếu trước đó từng gắn Landing Page
-      const { findDomainInRepos, removeDomainFromRepo } = await import("./repo-scanner.js");
-      const repoMatches = findDomainInRepos(domain);
-      for (const m of repoMatches) {
+      cfResult = await setupDirect302Redirect(domain, link);
+      // Gỡ khỏi LP source sau khi 302 đã chạy
+      for (const m of findDomainInRepos(domain)) {
         await removeDomainFromRepo(domain, m.filePath || m.folderPath).catch(() => {});
       }
-      cfResult = await setupDirect302Redirect(domain, link);
     } else {
+      // Mẫu phát link cho miền trước khi DNS trỏ tới, để miền không bao giờ chạy link mặc định
+      setHistoryProgress(historyId, `Đang ghi link vào mẫu [${template.name}]...`);
+      updateTaskProgress(taskId, 45, `Đang ghi link vào mẫu [${template.name}]...`, "Ghi domains.json, chờ Pages phát", "info");
+      const sinceMs = Date.now();
+      await updateTemplateDomainsJson(template, domain, link, "", { skipLiveEnsure: true });
+      const built = await ensureLiveDomainLink(domain, link, {
+        projectName: String(template.cnameTarget).replace(/\.pages\.dev$/i, ""),
+        accountId: template.pagesAccountId || undefined,
+        sinceMs,
+        timeoutMs: 8 * 60_000,
+        projectOnly: true,
+      });
+      if (!built.ok) throw new Error(`Pages chưa phát link mới, chưa trỏ DNS. ${built.error}`);
+
       setHistoryProgress(historyId, "Đang gắn Pages + CNAME Cloudflare...");
       updateTaskProgress(taskId, 55, "Đang thiết lập Zone Cloudflare & DNS CNAME...", "Tạo Zone & kết nối Nameservers", "info");
       cfResult = await setupCloudflare(domain, cnameTarget);
+      for (const m of findDomainInRepos(domain)) {
+        if (sameTemplateFolder(m.folderPath, template.path)) continue;
+        await removeDomainFromRepo(domain, m.filePath || m.folderPath).catch(() => {});
+      }
     }
 
     // 3. Đổi Nameserver trên Spaceship nếu cần
@@ -93,12 +114,6 @@ export async function executeBuyAndDeploy(taskId) {
       } catch (err) {
         console.warn(`[Worker] Cảnh báo cập nhật NS trên Spaceship cho ${domain}:`, err.message);
       }
-    }
-
-    // 4. Nếu là Landing Page, đồng bộ domains.json & deploy Cloudflare Pages
-    if (mode === "LP" && template) {
-      updateTaskProgress(taskId, 80, `Đang đồng bộ mã nguồn mẫu [${template.name}]...`, "Ghi domains.json & deploy Pages", "info");
-      await updateTemplateDomainsJson(template, domain, link);
     }
 
     // 5. Gán quyền sở hữu domain cho User
@@ -200,13 +215,10 @@ export async function executeSwitchMode(taskId) {
     assertNotAdminCfDomain(domain);
 
     if (toMode === "302") {
-      // Chuyển sang 302 Direct Redirect
-      updateTaskProgress(taskId, 35, "Đang gỡ domain khỏi Cloudflare Pages & domains.json...", "Xóa Custom Domains + LP source", "info");
+      // Chuyển sang 302 Direct Redirect. domains.json cũ chỉ gỡ sau khi 302 đã chạy,
+      // để miền không rơi vào link mặc định của mẫu trong lúc chờ zone.
+      if (!isRealLink(targetUrl)) throw new Error("Vui lòng nhập link đích cho 302");
       const pageHints = buildPagesProjectHints(domain);
-      const repoMatches = findDomainInRepos(domain);
-      for (const m of repoMatches) {
-        await removeDomainFromRepo(domain, m.filePath || m.folderPath).catch(() => {});
-      }
 
       updateTaskProgress(taskId, 55, "Đang trỏ Nameserver sang Cloudflare...", `Đích đến: ${targetUrl}`, "info");
       const ready = await pointNameserversFor302(domain, {
@@ -229,6 +241,9 @@ export async function executeSwitchMode(taskId) {
       }
       updateTaskProgress(taskId, 70, "Đang cấu hình Page Rule 302 & DNS (tự chọn token Admin/Freze)...", `Đích đến: ${targetUrl}`, "info");
       const cfRes = await setupDirect302Redirect(domain, targetUrl, { hintProjects: pageHints });
+      for (const m of findDomainInRepos(domain)) {
+        await removeDomainFromRepo(domain, m.filePath || m.folderPath).catch(() => {});
+      }
 
       touchDomainOwner(domain, userId, { mode: "302", currentLink: targetUrl, templateId: null });
 
@@ -257,40 +272,22 @@ export async function executeSwitchMode(taskId) {
 
       const inherited = await resolveInheritedLink(domain, { providedLink: targetUrl || "" });
       const finalLink = inherited.link;
-      if (!finalLink) throw new Error("Thiếu link đích — không tìm được link cũ để kế thừa");
+      if (!finalLink) throw new Error(NO_LINK_ERROR);
 
-      const owner = getDomainOwner(domain);
-      const currentTpl =
-        findTemplateByDomain(domain) ||
-        (owner?.templateId ? getTemplate(owner.templateId) : null);
-      const sameTemplate =
-        !!currentTpl &&
-        (currentTpl.id === template.id ||
-          currentTpl.folder === template.folder ||
-          currentTpl.cnameTarget === template.cnameTarget) &&
-        (owner?.mode === "LP" || !owner?.mode || owner?.mode === "lp");
-
-      let finalTarget = template.cnameTarget;
-
-      if (sameTemplate) {
-        // Đã LP đúng mẫu → chỉ cập nhật domains.json (tránh gỡ Pages → live trống vài phút)
-        updateTaskProgress(taskId, 40, `Đã đúng mẫu ${template.name} — chỉ đồng bộ link...`, "Fast path SWITCH_LP", "info");
-        await updateTemplateDomainsJson(template, domain, finalLink, inherited.tele || "");
-        finalTarget = owner?.cnameTarget || template.cnameTarget;
-      } else {
-        updateTaskProgress(taskId, 30, "Đang gỡ domain khỏi repo LP cũ...", "Dọn hybrid state", "info");
-        const repoMatches = findDomainInRepos(domain);
-        for (const m of repoMatches) {
-          await removeDomainFromRepo(domain, m.filePath || m.folderPath).catch(() => {});
-        }
-
-        updateTaskProgress(taskId, 55, `Đang gắn Pages + CNAME tới ${template.cnameTarget}...`, "Cloudflare Pages", "info");
-        const cfRes = await setupCloudflare(domain, template.cnameTarget, template.path);
-        finalTarget = cfRes?.target || template.cnameTarget;
-
-        updateTaskProgress(taskId, 80, `Đang đồng bộ domains.json vào mẫu ${template.name}...`, "Deploy Cloudflare Pages", "info");
-        await updateTemplateDomainsJson(template, domain, finalLink, inherited.tele || "");
-      }
+      let pct = 20;
+      const switched = await switchDomainToTemplate({
+        domain,
+        template,
+        link: finalLink,
+        tele: inherited.tele || "",
+        onProgress: (msg) => {
+          pct = Math.min(pct + 10, 90);
+          updateTaskProgress(taskId, pct, msg, `Mẫu ${template.name}`, "info");
+          setHistoryProgress(historyId, msg);
+        },
+      });
+      const sameTemplate = switched.sameTemplate;
+      const finalTarget = switched.finalTarget;
 
       touchDomainOwner(domain, userId, {
         mode: "LP",
@@ -311,7 +308,12 @@ export async function executeSwitchMode(taskId) {
         progress: null,
         cfAccount: "Cloudflare",
         error: null,
-        details: { inheritSource: inherited.source, fastPath: sameTemplate },
+        details: {
+          inheritSource: inherited.source,
+          fastPath: sameTemplate,
+          removedFrom: switched.removedFrom,
+          detachedFrom: switched.detachedFrom,
+        },
       });
 
       setTimeout(() => verifyHistoryItem(historyId).catch(() => {}), 2000);

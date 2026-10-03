@@ -174,92 +174,9 @@ export async function autoRepairDomain(item, isFullRebuild = false) {
       return { repaired: false, skipped: true, reason: "CF_ADMIN_SKIP", logs };
     }
 
-    // 1. Kiểm tra Zone Cloudflare
-    const zone = await getOrCreateZone(domain);
-    const ns = getZoneNameservers(zone);
-
-    // 2. Tự động kiểm tra và cưỡng chế Nameservers trên Spaceship nếu sai lệch
-    try {
-      const spInfo = await getDomainInfo(domain).catch(() => null);
-      if (ns && ns.length > 0) {
-        const currentHosts = spInfo?.nameservers?.hosts || [];
-        const nsMatch = ns.every((h) => currentHosts.map((x) => x.toLowerCase()).includes(h.toLowerCase()));
-        if (!nsMatch || isFullRebuild) {
-          logs.push(`🔧 [Bước 1/5] Cưỡng chế cập nhật Nameservers Spaceship về Cloudflare (${ns.join(", ")})...`);
-          await updateNameservers(domain, ns).catch(() => {});
-          logs.push(`✅ [Bước 1/5] Đã gửi lệnh đồng bộ Nameservers Spaceship.`);
-        } else {
-          logs.push(`✅ [Bước 1/5] Nameservers Spaceship đã chuẩn (${ns.join(", ")}).`);
-        }
-      }
-    } catch (e) {
-      logs.push(`⚠️ [Bước 1/5] Lỗi kiểm tra Spaceship NS: ${e.message}`);
-    }
-
-    // 3. Xử lý sửa chữa theo loại cấu hình (Landing Page hoặc 302)
-    const is302 = item.actionType?.includes("302") || item.templateId === "302_DIRECT";
-
-    if (is302) {
-      logs.push(`🔧 [Bước 2/5] Tự động thiết lập lại chuyển hướng 302 & DNS Proxy 8.8.8.8...`);
-      await setupDirect302Redirect(domain, item.link || "https://google.com");
-      logs.push(`✅ [Bước 2/5] Đã hoàn tất cài đặt Page Rule 302 & DNS A record.`);
-    } else {
-      // Tìm template tương ứng
-      let tpl = item.templateId ? getTemplate(item.templateId) : null;
-      if (!tpl) {
-        const repoMatches = findDomainInRepos(domain);
-        if (repoMatches.length > 0) {
-          const tplList = (await import("./templates.js")).listTemplates();
-          tpl = tplList.find((t) => t.path && repoMatches.some((m) => m.filePath.includes(t.path)));
-        }
-      }
-      if (!tpl) {
-        tpl = getTemplate("gg88_lp_5uae");
-      }
-
-      if (tpl) {
-        let finalTarget = tpl.cnameTarget;
-        // Gắn Custom Domain vào Cloudflare Pages
-        if (tpl.pagesProject) {
-          logs.push(`🔧 [Bước 3/5] Kích hoạt Custom Domain trên Pages Project [${tpl.pagesProject}]...`);
-          const pagesRes = await addPagesDomain(domain, tpl.pagesProject, tpl.path, tpl.pagesAccountId ? { accountId: tpl.pagesAccountId } : {}).catch(() => {});
-          if (pagesRes?.canonicalSubdomain) {
-            finalTarget = pagesRes.canonicalSubdomain;
-          }
-          logs.push(`✅ [Bước 3/5] Đã đăng ký Custom Domain trên Pages (${finalTarget}).`);
-        }
-
-        // Tạo đủ 2 bản ghi DNS CNAME cho apex và www trỏ chính xác về target
-        logs.push(`🔧 [Bước 4/5] Tự động tạo bản ghi DNS CNAME (@ & www -> ${finalTarget})...`);
-        let cnameOk = false;
-        try {
-          await ensurePagesCname(domain, finalTarget);
-          cnameOk = true;
-          logs.push(`✅ [Bước 4/5] Đã cấu hình DNS CNAME Proxied.`);
-        } catch (cnameErr) {
-          logs.push(`⚠️ [Bước 4/5] CNAME lỗi, giữ Page Rule 302: ${cnameErr.message}`);
-        }
-        if (cnameOk && zone) {
-          await deleteForwardingPageRules(zone.id).catch(() => {});
-          logs.push(`✅ Đã gỡ Page Rule 302 sau khi CNAME trỏ xong.`);
-        }
-
-        // Đồng bộ domains.json & Commit + Multi-Remote Push + Direct Wrangler Deploy
-        const repoMatches = findDomainInRepos(domain);
-        let targetLink = item.link;
-        let targetTele = item.tele || "";
-        if (!targetLink && repoMatches.length > 0) {
-          targetLink = repoMatches[0].config?.main_url || repoMatches[0].config?.url;
-          targetTele = targetTele || repoMatches[0].config?.telegram_url || repoMatches[0].config?.messenger_url || "";
-        }
-
-        if (targetLink) {
-          logs.push(`🔧 [Bước 5/5] Tự động ghi lại domains.json, Git Push & Deploy Pages (${targetLink})...`);
-          await updateTemplateDomainsJson(tpl, domain, targetLink, targetTele).catch(() => {});
-          logs.push(`✅ [Bước 5/5] Đã đồng bộ domains.json & kích hoạt Deploy toàn diện.`);
-        }
-      }
-    }
+    const { fixDomain } = await import("./domain-fix.js");
+    const fixed = await fixDomain(domain, { historyItem: item, log: (m) => logs.push(m) });
+    if (!fixed.changed) logs.push("Không cần sửa gì.");
 
     const updated = updateHistoryItem(item.id || domain, {
       lastRepairedAt: new Date().toISOString(),

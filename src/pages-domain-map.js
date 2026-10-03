@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
-import { getAllPagesProjectsForAccount } from "./cloudflare.js";
+import { getAllPagesProjectsForAccount, findZoneByName, tokenForZone, cfRequest } from "./cloudflare.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_PATH = path.resolve(__dirname, "../data/pages_domain_map.json");
@@ -21,6 +21,24 @@ export function getServingPagesProject(domain) {
   return state.domains[apexOf(domain)] || null;
 }
 
+/** Hostname xxx.pages.dev của project (có thể khác tên project khi tên bị trùng). */
+export function getProjectSubdomain(projectName) {
+  return state.subdomains?.[projectName] || `${projectName}.pages.dev`;
+}
+
+/** Project Pages mà CNAME apex của miền đang trỏ tới (xxx.pages.dev → xxx). */
+export async function readApexCnameProject(domain) {
+  const apex = apexOf(domain);
+  const zone = await findZoneByName(apex);
+  if (!zone?.id) return null;
+  const res = await cfRequest(`/zones/${zone.id}/dns_records?type=CNAME&name=${encodeURIComponent(apex)}`, {
+    token: tokenForZone(zone),
+  });
+  const rec = (Array.isArray(res) ? res : res?.result || [])[0];
+  const content = String(rec?.content || "").toLowerCase();
+  return content.endsWith(".pages.dev") ? content.replace(/\.pages\.dev$/, "") : null;
+}
+
 export function pagesDomainMapVersion() {
   return state.at;
 }
@@ -37,9 +55,11 @@ export async function refreshPagesDomainMap() {
     if (adminAcc && adminTok && adminAcc !== frezeAcc) accounts.push({ id: adminAcc, token: adminTok });
 
     const domains = {};
+    const subdomains = {};
     for (const acc of accounts) {
       const projects = await getAllPagesProjectsForAccount(acc.id, { token: acc.token });
       for (const p of projects) {
+        if (p.subdomain) subdomains[p.name] = p.subdomain;
         for (const d of p.domains || []) {
           if (String(d).endsWith(".pages.dev")) continue;
           const apex = apexOf(d);
@@ -49,7 +69,22 @@ export async function refreshPagesDomainMap() {
         }
       }
     }
-    state = { at: Date.now(), domains };
+    // Miền gắn ở nhiều project: project thật là project mà CNAME apex đang trỏ tới
+    for (const [apex, row] of Object.entries(domains)) {
+      if (row.projects.length < 2) continue;
+      const cname = await readApexCnameProject(apex).catch(() => null);
+      const target = row.projects.find(
+        (p) => p === cname || String(subdomains[p] || "").replace(/\.pages\.dev$/i, "") === cname
+      );
+      if (target) {
+        row.project = target;
+        row.projects = [target, ...row.projects.filter((p) => p !== target)];
+        row.cnameConfirmed = true;
+      } else {
+        row.ambiguous = true;
+      }
+    }
+    state = { at: Date.now(), domains, subdomains };
     fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true });
     fs.writeFileSync(CACHE_PATH, JSON.stringify(state), "utf8");
     return { count: Object.keys(domains).length, accounts: accounts.length };

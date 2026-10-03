@@ -25,8 +25,10 @@ import {
   trackLiveJsonWait,
   releaseLiveJsonWait,
 } from "./cloudflare.js";
-import { resolveInheritedLink } from "./link-resolve.js";
-import { normalizeDomain, normalizeUrl, extractDomainsFromText } from "./utils.js";
+import { resolveInheritedLink, NO_LINK_ERROR } from "./link-resolve.js";
+import { switchDomainToTemplate } from "./lp-switch.js";
+import { fixDomain } from "./domain-fix.js";
+import { normalizeDomain, normalizeUrl, extractDomainsFromText, isRealLink } from "./utils.js";
 import { findDomainInRepos, checkDomainCfAccount, updateDomainInExactRepos, listAllDomains, removeDomainFromRepo, smartSetLink, detectBrandFromDomain, invalidateDomainListCache } from "./repo-scanner.js";
 import { adminSkipPayload, listHubZonesFromCache, isAdminCfZone, invalidateCfZoneCacheMem } from "./cf-account-guard.js";
 import { invalidateOwnershipCache } from "./ownership.js";
@@ -1410,17 +1412,24 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await parseBody(req);
       const domain = normalizeDomain(body.domain || "");
-      const link = normalizeUrl(body.link || "");
+      let link = "";
+      try {
+        link = normalizeUrl(body.link || "");
+      } catch {}
       const isBuy = Boolean(body.isBuy);
       const mode = body.mode === "302" ? "302" : "LP";
-      const templateId = body.templateId || (mode === "LP" ? "lp_gg88_vip_2" : null);
+      const templateId = mode === "LP" ? body.templateId || null : null;
 
       if (!domain) {
         sendJson(res, 400, { success: false, error: "Vui lòng nhập tên miền hợp lệ" });
         return;
       }
-      if (!link) {
+      if (!isRealLink(link)) {
         sendJson(res, 400, { success: false, error: "Vui lòng nhập đường link đích" });
+        return;
+      }
+      if (mode === "LP" && !getTemplate(templateId)) {
+        sendJson(res, 400, { success: false, error: "Vui lòng chọn mẫu Landing Page" });
         return;
       }
 
@@ -2491,73 +2500,28 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      // 1. Chẩn đoán ban đầu
-      const initialReport = await inspectDomainHealth(domain);
-
-      // 2. Tìm template / link / tele
-      let matchedTpl = null;
-      let targetLink = initialReport.detectedLink;
-      let targetTele = initialReport.detectedTele || "";
-
-      const repoMatches = findDomainInRepos(domain);
-      const allTpls = listTemplates();
-
-      if (repoMatches.length > 0) {
-        matchedTpl = allTpls.find((t) => t.path && repoMatches[0].filePath.includes(t.path));
-        targetLink = targetLink || repoMatches[0].config?.main_url || repoMatches[0].config?.url;
-        targetTele = targetTele || repoMatches[0].config?.telegram_url || repoMatches[0].config?.messenger_url || "";
+      const logs = [];
+      let fixed;
+      try {
+        fixed = await fixDomain(domain, { log: (m) => logs.push(m) });
+      } catch (fixErr) {
+        sendJson(res, 400, { success: false, error: fixErr.message, logs });
+        return;
       }
-      if (!matchedTpl) {
-        matchedTpl = allTpls.find((t) => t.id === "gg88_lp_5uae") || allTpls[0];
-      }
-      if (!targetLink) {
-        targetLink = "https://t.me/";
+      if (fixed.changed && fixed.link) {
+        await new Promise((r) => setTimeout(r, 4000));
+        await verifyHistoryItem({ domain, id: domain, link: fixed.link }, true).catch(() => {});
       }
 
-      // 3. Đảm bảo Zone Cloudflare & Đồng bộ Nameservers
-      const zone = await getOrCreateZone(domain).catch(() => null);
-      if (zone) {
-        const zoneNs = getZoneNameservers(zone);
-        if (zoneNs && zoneNs.length > 0) {
-          await updateNameservers(domain, zoneNs).catch(() => {});
-        }
-      }
-
-      // 4. Dọn dẹp liên kết cũ bị kẹt / lệch project
-      await removeDomainFromAllPagesProjects(domain).catch(() => {});
-
-      // 5. Gắn Custom Domain vào Cloudflare Pages
-      let finalTarget = matchedTpl.cnameTarget;
-      if (matchedTpl.pagesProject) {
-        const pagesRes = await addPagesDomain(
-          domain,
-          matchedTpl.pagesProject,
-          matchedTpl.path,
-          await pagesOptsForTemplate(domain, matchedTpl)
-        ).catch(() => {});
-        if (pagesRes?.canonicalSubdomain) {
-          finalTarget = pagesRes.canonicalSubdomain;
-        }
-      }
-
-      // 6. Cập nhật DNS CNAME (@ & www) trỏ chuẩn xác về target
-      await ensurePagesCname(domain, finalTarget);
-      if (zone) await deleteForwardingPageRules(zone.id).catch(() => {});
-
-      // 7. Cập nhật domains.json & js/config.js và Git Push / Deploy
-      await updateTemplateDomainsJson(matchedTpl, domain, targetLink, targetTele).catch(() => {});
-
-      // 8. Chờ Cloudflare định tuyến & Verify HTTP 200 + Chụp ảnh
-      await new Promise((r) => setTimeout(r, 4000));
-      await verifyHistoryItem({ domain, id: domain, link: targetLink }, true).catch(() => {});
-
-      // 9. Chẩn đoán lại để trả về kết quả mới nhất
       const updatedReport = await inspectDomainHealth(domain);
 
       sendJson(res, 200, {
         success: true,
-        message: `Đã tự động sửa xong toàn diện cho [${domain}]!`,
+        message: fixed.changed
+          ? `Đã sửa [${domain}] (giữ nguyên ${fixed.mode === "302" ? "302" : "mẫu"} và link đang chạy)`
+          : `[${domain}] không cần sửa gì: ${logs[logs.length - 1] || "đang chạy đúng"}`,
         domain,
+        logs,
         report: updatedReport,
       });
     } catch (err) {
@@ -2589,73 +2553,19 @@ const server = http.createServer(async (req, res) => {
             continue;
           }
 
-          const initialReport = await inspectDomainHealth(dom);
-
-          // Tìm template & link
-          let matchedTpl = null;
-          let targetLink = initialReport.detectedLink;
-          let targetTele = initialReport.detectedTele || "";
-
-          const repoMatches = findDomainInRepos(dom);
-          const allTpls = listTemplates();
-
-          if (repoMatches.length > 0) {
-            matchedTpl = allTpls.find((t) => t.path && repoMatches[0].filePath.includes(t.path));
-            targetLink = targetLink || repoMatches[0].config?.main_url || repoMatches[0].config?.url;
-            targetTele = targetTele || repoMatches[0].config?.telegram_url || repoMatches[0].config?.messenger_url || "";
+          const logs = [];
+          const fixed = await fixDomain(dom, { log: (m) => logs.push(m) });
+          if (fixed.changed && fixed.link) {
+            await new Promise((r) => setTimeout(r, 3000));
+            await verifyHistoryItem({ domain: dom, id: dom, link: fixed.link }, true).catch(() => {});
           }
-          if (!matchedTpl) {
-            matchedTpl = allTpls.find((t) => t.id === "gg88_lp_5uae") || allTpls[0];
-          }
-          if (!targetLink) {
-            targetLink = "https://t.me/";
-          }
-
-          // Đồng bộ NS & Zone
-          const zone = await getOrCreateZone(dom).catch(() => null);
-          if (zone) {
-            const zoneNs = getZoneNameservers(zone);
-            if (zoneNs && zoneNs.length > 0) {
-              await updateNameservers(dom, zoneNs).catch(() => {});
-            }
-          }
-
-          // Dọn dẹp domain cũ
-          await removeDomainFromAllPagesProjects(dom).catch(() => {});
-
-          // Gắn vào Pages
-          let finalTarget = matchedTpl.cnameTarget;
-          if (matchedTpl.pagesProject) {
-            const pagesRes = await addPagesDomain(
-              dom,
-              matchedTpl.pagesProject,
-              matchedTpl.path,
-              await pagesOptsForTemplate(dom, matchedTpl)
-            ).catch(() => {});
-            if (pagesRes?.canonicalSubdomain) {
-              finalTarget = pagesRes.canonicalSubdomain;
-            }
-          }
-
-          // Cập nhật CNAME, rồi mới gỡ 302
-          let cnameOk = false;
-          try {
-            await ensurePagesCname(dom, finalTarget);
-            cnameOk = true;
-          } catch {}
-          if (cnameOk && zone) await deleteForwardingPageRules(zone.id).catch(() => {});
-
-          // Ghi domains.json & deploy
-          await updateTemplateDomainsJson(matchedTpl, dom, targetLink, targetTele).catch(() => {});
-
-          // Chờ 3s & Verify
-          await new Promise((r) => setTimeout(r, 3000));
-          await verifyHistoryItem({ domain: dom, id: dom, link: targetLink }, true).catch(() => {});
 
           const updatedReport = await inspectDomainHealth(dom);
           results.push({
             domain: dom,
             success: true,
+            changed: fixed.changed,
+            logs,
             healthScore: updatedReport.healthScore,
             maxScore: updatedReport.maxScore,
             overallStatus: updatedReport.overallStatus,
@@ -3352,6 +3262,17 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      const linkRes = await resolveInheritedLink(domain, {
+        providedLink: rawLink || "",
+        providedTele: rawTele || rawTele2 || "",
+      });
+      if (!linkRes.link) {
+        sendJson(res, 400, { success: false, error: NO_LINK_ERROR });
+        return;
+      }
+      const activeLink = linkRes.link;
+      const activeTele = linkRes.tele || "";
+
       histId = `hist_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       addHistoryItem({
         id: histId,
@@ -3361,8 +3282,8 @@ const server = http.createServer(async (req, res) => {
         templateName: targetTpl.name,
         templateId: targetTpl.id,
         cnameTarget: targetTpl.cnameTarget || null,
-        link: rawLink || "",
-        tele: rawTele || rawTele2 || "",
+        link: activeLink,
+        tele: activeTele,
         status: "in_progress",
         progress: `Đang chuyển sang mẫu [${targetTpl.name}]...`,
         userId: currentUser.userId,
@@ -3371,297 +3292,71 @@ const server = http.createServer(async (req, res) => {
         previousTemplateId: body.fromTemplateId || null,
         previousTemplateName: body.fromTemplateName || null,
         previousLink: body.previousLink || null,
-        details: { step: `Đang chuyển sang mẫu [${targetTpl.name}]...` },
+        details: { step: `Đang chuyển sang mẫu [${targetTpl.name}]...`, safeSwitch: true, inheritSource: linkRes.source },
       });
 
-      // 1. Kế thừa link nếu form để trống (domains.json → Page Rule → ownership → history → live 302)
-      setHistoryProgress(histId, "Đang lấy link kế thừa...");
-      const inherited = await resolveInheritedLink(domain, {
-        providedLink: rawLink || "",
-        providedTele: rawTele || rawTele2 || "",
-      });
-      let activeLink = inherited.link;
-      let activeTele = inherited.tele || "";
-
-      // Giữ Page Rule 302 tới khi CNAME Pages đã ghi. Xóa trước rồi attach fail
-      // thì A 8.8.8.8 proxied bị Cloudflare đẩy sang https://dns.google/.
-      const zone = await findZoneByName(domain).catch(() => null);
-
-      if (!activeLink) {
-        activeLink = "https://t.me/";
-      }
-      updateHistoryItem(histId, { link: activeLink, tele: activeTele });
-
-      // 2. Xoá domain khỏi các repo cũ
-      setHistoryProgress(histId, "Đang gỡ domain khỏi repo mẫu cũ...");
-      const existingMatches = findDomainInRepos(domain);
-      const removedFrom = [];
-      for (const m of existingMatches) {
-        const removed = await removeDomainFromRepo(domain, m.filePath);
-        if (removed) removedFrom.push(m.folderPath);
-      }
-
-      // 3. Gắn Custom Domain Pages Freze TRƯỚC — không xoá project cũ trước (tránh 1014)
-      let finalTarget = targetTpl.cnameTarget;
-      if (targetTpl.pagesProject) {
-        setHistoryProgress(histId, `Đang gắn domain vào Pages [${targetTpl.pagesProject}]...`);
-        try {
-          const pagesRes = await addPagesDomain(
-            domain,
-            targetTpl.pagesProject,
-            targetTpl.path,
-            await pagesOptsForTemplate(domain, targetTpl)
-          );
-          if (pagesRes?.canonicalSubdomain) {
-            finalTarget = pagesRes.canonicalSubdomain;
-          }
-        } catch (pagesErr) {
-          console.error(`[Switch-Template] Lỗi addPagesDomain cho ${domain}:`, pagesErr.message);
-          updateHistoryItem(histId, {
-            status: "failed",
-            progress: null,
-            error: pagesErr.message,
-            cnameTarget: finalTarget,
-          });
-          sendJson(res, 500, {
-            success: false,
-            error: `Gắn Pages thất bại (chưa đụng DNS): ${pagesErr.message}`,
-            histId,
-          });
-          return;
-        }
-      }
-
-      // 4. DNS CNAME chỉ sau khi Pages đã nhận domain
-      setHistoryProgress(histId, `Đang trỏ CNAME → ${finalTarget}...`);
-      try {
-        await ensurePagesCname(domain, finalTarget);
-      } catch (cnameErr) {
-        console.error(`[Switch-Template] Lỗi ensurePagesCname cho ${domain}:`, cnameErr.message);
-        updateHistoryItem(histId, {
-          status: "failed",
-          progress: null,
-          error: cnameErr.message,
-          cnameTarget: finalTarget,
-        });
-        sendJson(res, 500, {
-          success: false,
-          error: `Pages OK nhưng CNAME lỗi (1014/DNS): ${cnameErr.message}`,
-          histId,
-        });
-        return;
-      }
-
-      if (zone) {
-        setHistoryProgress(histId, "Đang gỡ Page Rule 302 sau khi CNAME đã trỏ...");
-        await deleteForwardingPageRules(zone.id, { token: tokenForZone(zone) }).catch(() => {});
-      }
-
-      try {
-        const proj = String(finalTarget || "").replace(/\.pages\.dev$/i, "");
-        if (proj) {
-          setHistoryProgress(histId, "Đang chờ Pages domain active (SSL)...");
-          await waitForPagesDomainActive(proj, domain, undefined, 15000);
-        }
-      } catch (waitErr) {
-        console.warn(`[Switch-Template] Chờ Pages active: ${waitErr.message}`);
-      }
-
-      // 6. Đồng bộ domains.json & Deploy + verify live trên đúng project CNAME
-      setHistoryProgress(histId, `Đang push Git + force deploy live mẫu [${targetTpl.name}]...`);
-      const pagesProjectName = String(finalTarget || "").replace(/\.pages\.dev$/i, "");
-      const syncRes = await updateTemplateDomainsJson(targetTpl, domain, activeLink, activeTele, {
-        cnameTarget: finalTarget,
-        pagesProject: pagesProjectName,
-        accountId: targetTpl.pagesAccountId || undefined,
-        liveTimeoutMs: 45000,
-      });
-
-      async function finishSwitchLive(liveEnsure) {
-        if (zone) {
-          await cfRequest(`/zones/${zone.id}/purge_cache`, {
-            method: "POST",
-            body: { purge_everything: true },
-            token: tokenForZone(zone),
-          }).catch(() => {});
-        }
-        syncDeployOwnershipPreserve(domain, currentUser, body, {
-          mode: "LP",
-          currentLink: activeLink,
-          templateId: targetTpl.id,
-          cnameTarget: finalTarget,
-          tele: activeTele || "",
-        });
-        invalidateHubDomainCaches();
-        const histItem = updateHistoryItem(histId, {
-          status: "success",
-          progress: null,
-          error: null,
-          liveStatus: "200_OK",
-          cnameTarget: finalTarget,
-          link: activeLink,
-          tele: activeTele,
-          details: {
-            inheritSource: inherited.source,
-            removedFrom,
-            liveEnsure: liveEnsure || null,
-            waitLiveJson: false,
-          },
-        });
-        if (histItem?.id) verifyHistoryItem(histItem.id, true).catch(() => {});
-        return histItem;
-      }
-
-      if (syncRes?.liveEnsure?.ok) {
-        await finishSwitchLive(syncRes.liveEnsure);
-        sendJson(res, 200, {
-          success: true,
-          message: `Đã chuyển đổi mẫu thành công sang [${targetTpl.name}] cho ${domain}!`,
-          liveEnsure: syncRes.liveEnsure,
-          domain,
-          link: activeLink,
-          tele: activeTele,
-          newTemplateName: targetTpl.name,
-          cnameTarget: finalTarget,
-          removedFrom,
-          histId,
-        });
-        return;
-      }
-
-      if (syncRes?.liveEnsure?.pending) {
-        const sinceMs = syncRes.liveEnsure.sinceMs || Date.now();
-        updateHistoryItem(histId, {
-          status: "in_progress",
-          progress: "Git đã ghi link. Đang chờ Pages phát domains.json...",
-          error: null,
-          cnameTarget: finalTarget,
-          link: activeLink,
-          tele: activeTele,
-          details: {
-            inheritSource: inherited.source,
-            removedFrom,
-            waitLiveJson: true,
-            liveJsonSince: sinceMs,
-            liveJsonProject: pagesProjectName,
-            liveJsonAccountId: targetTpl.pagesAccountId || null,
-          },
-        });
-        trackLiveJsonWait(histId);
-        sendJson(res, 200, {
-          success: true,
-          pendingLive: true,
-          message: `Đã ghi link cho ${domain}. Pages đang phát bản mới — lịch sử chuyển Thành Công khi domains.json live khớp.`,
-          domain,
-          link: activeLink,
-          tele: activeTele,
-          newTemplateName: targetTpl.name,
-          cnameTarget: finalTarget,
-          histId,
-        });
-        setImmediate(async () => {
-          try {
-            const again = await ensureLiveDomainLink(domain, activeLink, {
-              projectName: pagesProjectName,
-              cnameTarget: finalTarget,
-              fallbackProject: targetTpl.pagesProject || null,
-              accountId: targetTpl.pagesAccountId || undefined,
-              sinceMs,
-              timeoutMs: Math.max(20000, 8 * 60 * 1000 - (Date.now() - sinceMs)),
-              failIfPending: true,
-            });
-            if (again.ok) {
-              await finishSwitchLive(again);
-              console.log(`[Switch-Template] ${domain} live khớp sau khi Pages phát xong`);
-              return;
-            }
-            updateHistoryItem(histId, {
-              status: "failed",
-              progress: null,
-              error: again.error || "Live domains.json chưa có link sau khi Pages deploy",
-              cnameTarget: finalTarget,
-              link: activeLink,
-              tele: activeTele,
-              details: { waitLiveJson: false, liveEnsure: again },
-            });
-          } catch (err) {
-            updateHistoryItem(histId, {
-              status: "failed",
-              progress: null,
-              error: err.message,
-              details: { waitLiveJson: false },
-            });
-          } finally {
-            releaseLiveJsonWait(histId);
-          }
-        });
-        return;
-      }
-
-      if (syncRes?.liveEnsure && syncRes.liveEnsure.ok === false) {
-        updateHistoryItem(histId, {
-          status: "failed",
-          progress: null,
-          error: syncRes.liveEnsure.error || "Live domains.json chưa có link sau deploy",
-          cnameTarget: finalTarget,
-          link: activeLink,
-          tele: activeTele,
-          details: { inheritSource: inherited.source, removedFrom, liveEnsure: syncRes.liveEnsure, waitLiveJson: false },
-        });
-        sendJson(res, 500, {
-          success: false,
-          error: syncRes.liveEnsure.error || "Live domains.json chưa có link sau deploy",
-          histId,
-          liveEnsure: syncRes.liveEnsure,
-        });
-        return;
-      }
-
-      // 7. Xoá cache Cloudflare Zone
-      if (zone) {
-        await cfRequest(`/zones/${zone.id}/purge_cache`, {
-          method: "POST",
-          body: { purge_everything: true },
-          token: tokenForZone(zone),
-        }).catch(() => {});
-      }
-
-      // Ghi ownership + lịch sử
-      syncDeployOwnershipPreserve(domain, currentUser, body, {
-        mode: "LP",
-        currentLink: activeLink,
-        templateId: targetTpl.id,
-        cnameTarget: finalTarget,
-        tele: activeTele || "",
-      });
-      invalidateHubDomainCaches();
-
-      const histItem = updateHistoryItem(histId, {
-        status: "success",
-        progress: null,
-        liveStatus: syncRes?.liveEnsure?.ok ? "200_OK" : "PENDING_200",
-        cnameTarget: finalTarget,
-        link: activeLink,
-        tele: activeTele,
-        details: { inheritSource: inherited.source, removedFrom, liveEnsure: syncRes?.liveEnsure || null },
-      });
-
-      // Kích hoạt verify live trong background
-      if (histItem?.id) {
-        verifyHistoryItem(histItem.id, true).catch(() => {});
-      }
-
+      const pagesOpts = await pagesOptsForTemplate(domain, targetTpl);
       sendJson(res, 200, {
         success: true,
-        message: `Đã chuyển đổi mẫu thành công sang [${targetTpl.name}] cho ${domain}!`,
-        liveEnsure: syncRes?.liveEnsure || null,
+        pendingLive: true,
+        message: `Đang đổi ${domain} sang mẫu [${targetTpl.name}]. Miền vẫn chạy chỗ cũ cho tới khi mẫu mới sẵn sàng.`,
         domain,
         link: activeLink,
         tele: activeTele,
         newTemplateName: targetTpl.name,
-        cnameTarget: finalTarget,
-        removedFrom,
         histId,
+      });
+
+      const jobHistId = histId;
+      setImmediate(async () => {
+        try {
+          const r = await switchDomainToTemplate({
+            domain,
+            template: targetTpl,
+            link: activeLink,
+            tele: activeTele,
+            pagesOpts,
+            onProgress: (msg) => setHistoryProgress(jobHistId, msg),
+          });
+          const zone = await findZoneByName(domain).catch(() => null);
+          if (zone) {
+            await cfRequest(`/zones/${zone.id}/purge_cache`, {
+              method: "POST",
+              body: { purge_everything: true },
+              token: tokenForZone(zone),
+            }).catch(() => {});
+          }
+          syncDeployOwnershipPreserve(domain, currentUser, body, {
+            mode: "LP",
+            currentLink: activeLink,
+            templateId: targetTpl.id,
+            cnameTarget: r.finalTarget,
+            tele: activeTele,
+          });
+          invalidateHubDomainCaches();
+          const histItem = updateHistoryItem(jobHistId, {
+            status: "success",
+            progress: null,
+            error: null,
+            liveStatus: "200_OK",
+            cnameTarget: r.finalTarget,
+            details: {
+              safeSwitch: false,
+              sameTemplate: r.sameTemplate,
+              removedFrom: r.removedFrom,
+              detachedFrom: r.detachedFrom,
+            },
+          });
+          if (histItem?.id) verifyHistoryItem(histItem.id, true).catch(() => {});
+        } catch (err) {
+          console.error(`[Switch-Template] ${domain}:`, err.message);
+          updateHistoryItem(jobHistId, {
+            status: "failed",
+            progress: null,
+            error: err.message,
+            details: { safeSwitch: false },
+          });
+        }
       });
     } catch (err) {
       if (histId) {

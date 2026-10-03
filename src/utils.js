@@ -73,6 +73,18 @@ export function normalizeUrl(input) {
   return url;
 }
 
+/** Link đích thật: có host hợp lệ. Loại placeholder "https://" và link trống kiểu "https://t.me/". */
+export function isRealLink(input) {
+  try {
+    const u = new URL(String(input || "").trim());
+    if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) return false;
+    if (/^(www\.)?t\.me$/i.test(u.hostname) && u.pathname.replace(/\/+$/, "") === "") return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
