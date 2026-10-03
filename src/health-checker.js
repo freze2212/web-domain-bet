@@ -246,7 +246,7 @@ export async function inspectDomainHealth(rawDomain) {
         }
       } else {
         // Kiểm tra xem có phải 302 rule không
-        const is302Rule = repoMatches.length === 0;
+        const is302Rule = !servingRepo;
         if (is302Rule && result.detectedLink) {
           isLiveLinkMatched = true;
           liveLinkStatusText = `Chuyển hướng trực tiếp 302: ${result.detectedLink}`;
