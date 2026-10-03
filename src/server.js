@@ -21,6 +21,9 @@ import {
   tokenForZone,
   cfRequest,
   resolvePagesAccountIdForDomain,
+  ensureLiveDomainLink,
+  trackLiveJsonWait,
+  releaseLiveJsonWait,
 } from "./cloudflare.js";
 import { resolveInheritedLink } from "./link-resolve.js";
 import { normalizeDomain, normalizeUrl, extractDomainsFromText } from "./utils.js";
@@ -3466,12 +3469,134 @@ const server = http.createServer(async (req, res) => {
 
       // 6. Đồng bộ domains.json & Deploy + verify live trên đúng project CNAME
       setHistoryProgress(histId, `Đang push Git + force deploy live mẫu [${targetTpl.name}]...`);
+      const pagesProjectName = String(finalTarget || "").replace(/\.pages\.dev$/i, "");
       const syncRes = await updateTemplateDomainsJson(targetTpl, domain, activeLink, activeTele, {
         cnameTarget: finalTarget,
-        pagesProject: String(finalTarget || "").replace(/\.pages\.dev$/i, ""),
+        pagesProject: pagesProjectName,
         accountId: targetTpl.pagesAccountId || undefined,
-        liveTimeoutMs: 120000,
+        liveTimeoutMs: 45000,
       });
+
+      async function finishSwitchLive(liveEnsure) {
+        if (zone) {
+          await cfRequest(`/zones/${zone.id}/purge_cache`, {
+            method: "POST",
+            body: { purge_everything: true },
+            token: tokenForZone(zone),
+          }).catch(() => {});
+        }
+        syncDeployOwnershipPreserve(domain, currentUser, body, {
+          mode: "LP",
+          currentLink: activeLink,
+          templateId: targetTpl.id,
+          cnameTarget: finalTarget,
+          tele: activeTele || "",
+        });
+        invalidateHubDomainCaches();
+        const histItem = updateHistoryItem(histId, {
+          status: "success",
+          progress: null,
+          error: null,
+          liveStatus: "200_OK",
+          cnameTarget: finalTarget,
+          link: activeLink,
+          tele: activeTele,
+          details: {
+            inheritSource: inherited.source,
+            removedFrom,
+            liveEnsure: liveEnsure || null,
+            waitLiveJson: false,
+          },
+        });
+        if (histItem?.id) verifyHistoryItem(histItem.id, true).catch(() => {});
+        return histItem;
+      }
+
+      if (syncRes?.liveEnsure?.ok) {
+        await finishSwitchLive(syncRes.liveEnsure);
+        sendJson(res, 200, {
+          success: true,
+          message: `Đã chuyển đổi mẫu thành công sang [${targetTpl.name}] cho ${domain}!`,
+          liveEnsure: syncRes.liveEnsure,
+          domain,
+          link: activeLink,
+          tele: activeTele,
+          newTemplateName: targetTpl.name,
+          cnameTarget: finalTarget,
+          removedFrom,
+          histId,
+        });
+        return;
+      }
+
+      if (syncRes?.liveEnsure?.pending) {
+        const sinceMs = syncRes.liveEnsure.sinceMs || Date.now();
+        updateHistoryItem(histId, {
+          status: "in_progress",
+          progress: "Git đã ghi link. Đang chờ Pages phát domains.json...",
+          error: null,
+          cnameTarget: finalTarget,
+          link: activeLink,
+          tele: activeTele,
+          details: {
+            inheritSource: inherited.source,
+            removedFrom,
+            waitLiveJson: true,
+            liveJsonSince: sinceMs,
+            liveJsonProject: pagesProjectName,
+            liveJsonAccountId: targetTpl.pagesAccountId || null,
+          },
+        });
+        trackLiveJsonWait(histId);
+        sendJson(res, 200, {
+          success: true,
+          pendingLive: true,
+          message: `Đã ghi link cho ${domain}. Pages đang phát bản mới — lịch sử chuyển Thành Công khi domains.json live khớp.`,
+          domain,
+          link: activeLink,
+          tele: activeTele,
+          newTemplateName: targetTpl.name,
+          cnameTarget: finalTarget,
+          histId,
+        });
+        setImmediate(async () => {
+          try {
+            const again = await ensureLiveDomainLink(domain, activeLink, {
+              projectName: pagesProjectName,
+              cnameTarget: finalTarget,
+              fallbackProject: targetTpl.pagesProject || null,
+              accountId: targetTpl.pagesAccountId || undefined,
+              sinceMs,
+              timeoutMs: Math.max(20000, 8 * 60 * 1000 - (Date.now() - sinceMs)),
+              failIfPending: true,
+            });
+            if (again.ok) {
+              await finishSwitchLive(again);
+              console.log(`[Switch-Template] ${domain} live khớp sau khi Pages phát xong`);
+              return;
+            }
+            updateHistoryItem(histId, {
+              status: "failed",
+              progress: null,
+              error: again.error || "Live domains.json chưa có link sau khi Pages deploy",
+              cnameTarget: finalTarget,
+              link: activeLink,
+              tele: activeTele,
+              details: { waitLiveJson: false, liveEnsure: again },
+            });
+          } catch (err) {
+            updateHistoryItem(histId, {
+              status: "failed",
+              progress: null,
+              error: err.message,
+              details: { waitLiveJson: false },
+            });
+          } finally {
+            releaseLiveJsonWait(histId);
+          }
+        });
+        return;
+      }
 
       if (syncRes?.liveEnsure && syncRes.liveEnsure.ok === false) {
         updateHistoryItem(histId, {
@@ -3481,11 +3606,11 @@ const server = http.createServer(async (req, res) => {
           cnameTarget: finalTarget,
           link: activeLink,
           tele: activeTele,
-          details: { inheritSource: inherited.source, removedFrom, liveEnsure: syncRes.liveEnsure },
+          details: { inheritSource: inherited.source, removedFrom, liveEnsure: syncRes.liveEnsure, waitLiveJson: false },
         });
         sendJson(res, 500, {
           success: false,
-          error: `Git OK nhưng live chưa có link: ${syncRes.liveEnsure.error || "domains.json mismatch"}`,
+          error: syncRes.liveEnsure.error || "Live domains.json chưa có link sau deploy",
           histId,
           liveEnsure: syncRes.liveEnsure,
         });

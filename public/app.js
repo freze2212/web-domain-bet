@@ -784,7 +784,7 @@ function templateShotSrc(t) {
   const url = t?.screenshotUrl;
   if (!url) return getFallbackPlaceholder(t?.name);
   const join = url.includes("?") ? "&" : "?";
-  return `${url}${join}v=20260930-fly88`;
+  return `${url}${join}v=20261002-shots`;
 }
 
 function templateShotFallback(encodedName) {
@@ -1210,8 +1210,11 @@ function setupForms() {
             }),
           });
           const data = await res.json();
-          if (data.success) {
-            showToast(`🎉 Đã đổi mẫu thành công cho [${domain}] sang [${data.templateName || targetTemplateId}]!`, "success");
+          if (data.success && data.pendingLive) {
+            showToast(`⏳ [${domain}] đã ghi link. Đang chờ Pages phát domains.json — lịch sử sẽ thành công khi live khớp.`, "processing");
+            fetchHistory();
+          } else if (data.success) {
+            showToast(`🎉 Đã đổi mẫu thành công cho [${domain}] sang [${data.templateName || data.newTemplateName || targetTemplateId}]!`, "success");
             fetchDomains();
             fetchHistory();
           } else {

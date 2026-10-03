@@ -53,8 +53,8 @@ export const ACTIVE_TEMPLATES = [
     "folder": "lp-gg88ny",
     "path": "C:\\Landingpages\\GG88\\lp-gg88ny",
     "gitRepo": "freze2212/lp-gg88ny",
-    "pagesProject": "lp-gg88ny",
-    "cnameTarget": "lp-gg88ny.pages.dev",
+    "pagesProject": "lp-gg88ny-git",
+    "cnameTarget": "lp-gg88ny-git.pages.dev",
     "sampleDomain": "gg88hh.com",
     "sampleUrl": "https://gg88hh.com",
     "totalDomains": 1,
@@ -127,6 +127,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "Welcome to cổng quốc tế chính thức ☀ 2026️",
     "folder": "landingpage-5h-gg",
     "path": "C:\\Landingpages\\GG88\\landingpage-5h-gg",
+    "gitRepo": "freze2212/lp-5h-gg88",
     "pagesProject": "lp-5h-gg88",
     "cnameTarget": "lp-5h-gg88.pages.dev",
     "pagesAccountId": "ddead9accc534c1eb074d2a46fffe748",
@@ -142,6 +143,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "Welcome to cổng chính thức ☀️ 2026",
     "folder": "ld-gg882pro",
     "path": "C:\\Landingpages\\GG88\\ld-gg882pro",
+    "gitRepo": "freze2212/lp-gg882pro",
     "pagesProject": "lp-gg882pro-git2",
     "cnameTarget": "lp-gg882pro-git2.pages.dev",
     "sampleDomain": "gg8858.com",
@@ -156,6 +158,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "GG88 - LP 5 QUỐC GIA (5 UAE)",
     "folder": "ldpape_4d-5-quocgia",
     "path": "C:\\Landingpages\\GG88\\ldpape_4d-5-quocgia",
+    "gitRepo": "freze2212/gg88-lp-5uae",
     "pagesProject": "gg88-lp-5uae",
     "cnameTarget": "gg88-lp-5uae.pages.dev",
     "sampleDomain": "g8fun.live",
@@ -200,6 +203,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "GG88 - Trang Chủ Link Tổng (g8tong.com)",
     "folder": "lp-1-page-gg88",
     "path": "C:\\Landingpages\\GG88\\lp-1-page-gg88",
+    "gitRepo": "freze2212/lp-1-page-gg88",
     "pagesProject": "lp-1-page-gg88",
     "cnameTarget": "lp-1-page-gg88.pages.dev",
     "sampleDomain": "g8tong.com",
@@ -214,6 +218,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "LLWIN CỔNG QUỐC TẾ UY TÍN HÀNG ĐẦU",
     "folder": "lp-1A-llwin-quocte",
     "path": "C:\\Landingpages\\LLWIN\\lp-1A-llwin-quocte",
+    "gitRepo": "freze2212/lp-1a-llwin-quocte",
     "pagesProject": "lp-1a-llwin-quocte",
     "cnameTarget": "lp-1a-llwin-quocte.pages.dev",
     "sampleDomain": "kjctong.com",
@@ -228,6 +233,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "Welcome to ⭐ Cổng chính thức năm 2026",
     "folder": "lp-7f-xx88-games",
     "path": "C:\\Landingpages\\XX88\\lp-7f-xx88-games",
+    "gitRepo": "freze2212/lp-7f-xx88-games",
     "pagesProject": "lp-7f-xx88-games-git2",
     "cnameTarget": "lp-7f-xx88-games-git2.pages.dev",
     "sampleDomain": "xx88pro.us",
@@ -242,6 +248,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "// NEURAL_PORTAL :: INTL_GATEWAY_2026",
     "folder": "lp-3c-gg88-fly88",
     "path": "C:\\Landingpages\\GG88\\lp-3c-gg88-fly88",
+    "gitRepo": "freze2212/lp-3c-gg88-fly88",
     "pagesProject": "lp-3c-gg88-fly88",
     "cnameTarget": "lp-3c-gg88-fly88.pages.dev",
     "sampleDomain": "gg8us.top",
@@ -256,6 +263,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "Tool Xoá Mã Ẩn Nhà Cái | Kích Hoạt RTP & Tắt Theo Dõi IP",
     "folder": "lp-6c-xoamaan-llwin",
     "path": "C:\\Landingpages\\LLWIN\\lp-6c-xoamaan-llwin",
+    "gitRepo": "freze2212/lp-xoamaan-6c-llwin",
     "pagesProject": "lp-xoamaan-6c-llwin",
     "cnameTarget": "lp-xoamaan-6c-llwin.pages.dev",
     "sampleDomain": "lp-xoamaan-6c-llwin.pages.dev",
@@ -286,6 +294,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "MULTI S.Y.S.T.E.M OVERRIDE V6.9",
     "folder": "lp-c168-xoamaan",
     "path": "C:\\Landingpages\\GG88\\lp-c168-xoamaan",
+    "gitRepo": "freze2212/lp-gg88-xoamaan",
     "pagesProject": "lp-gg88-xoamaan",
     "cnameTarget": "lp-gg88-xoamaan.pages.dev",
     "sampleDomain": "lp-gg88-xoamaan.pages.dev",
@@ -300,6 +309,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "MM88 · Cổng Link Tổng MM88 2026",
     "folder": "lp-fly88-mm88",
     "path": "C:\\Landingpages\\MM88\\lp-fly88-mm88",
+    "gitRepo": "freze2212/lp-mm88-fly88",
     "pagesProject": "lp-mm88-fly88",
     "cnameTarget": "lp-mm88-fly88.pages.dev",
     "pagesAccountId": "ddead9accc534c1eb074d2a46fffe748",
@@ -315,6 +325,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "GG88 · Cổng Link Tổng GG88 2026",
     "folder": "lp-gg88-fly88",
     "path": "C:\\Landingpages\\GG88\\lp-gg88-fly88",
+    "gitRepo": "freze2212/lp-gg88-fly88",
     "pagesProject": "lp-gg88-fly88",
     "cnameTarget": "lp-gg88-fly88.pages.dev",
     "sampleDomain": "gg88en.com",
@@ -345,8 +356,8 @@ export const ACTIVE_TEMPLATES = [
     "folder": "lp-7f-llwin-defr",
     "path": "C:\\Landingpages\\LLWIN\\lp-7f-llwin-defr",
     "gitRepo": "freze2212/lp-7f-llwin-defr",
-    "pagesProject": "lp-7f-llwin-defr",
-    "cnameTarget": "lp-7f-llwin-defr.pages.dev",
+    "pagesProject": "lp-7f-llwin-defr-git",
+    "cnameTarget": "lp-7f-llwin-defr-git.pages.dev",
     "sampleDomain": "appllwin.com",
     "sampleUrl": "https://appllwin.com",
     "totalDomains": 1,
@@ -359,6 +370,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "MM88 - Link Chính Thức Bảo Mật Cao",
     "folder": "lp-mm88-banner-qute",
     "path": "C:\\Landingpages\\MM88\\lp-mm88-banner-qute",
+    "gitRepo": "freze2212/lp-mm88-banner-qte",
     "pagesProject": "lp-mm88-banner-qte",
     "cnameTarget": "lp-mm88-banner-qte.pages.dev",
     "sampleDomain": "lp-mm88-banner-qte.pages.dev",
@@ -373,6 +385,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "CỔNG GAME QUỐC TẾ - ULTIMATE VIP",
     "folder": "lp-mm88-dt88",
     "path": "C:\\Landingpages\\GG88\\lp-mm88-dt88",
+    "gitRepo": "freze2212/lp-game-vip",
     "pagesProject": "lp-game-vip",
     "cnameTarget": "lp-game-vip.pages.dev",
     "sampleDomain": "dt8386.cc",
@@ -387,6 +400,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "GG88 - NẠP 100 NHẬN TOOL XÓA MÃ ẨN",
     "folder": "tool",
     "path": "C:\\Landingpages\\GG88\\tool",
+    "gitRepo": "freze2212/lp-uae-1-button",
     "pagesProject": "lp-uae-1-button",
     "cnameTarget": "lp-uae-1-button.pages.dev",
     "sampleDomain": "gg88us.live",
@@ -401,6 +415,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "xoamagame",
     "folder": "lp-xoaipan-9d-g",
     "path": "C:\\Landingpages\\GG88\\lp-xoaipan-9d-g",
+    "gitRepo": "freze2212/lp-9d-xoaip-gg88",
     "pagesProject": "lp-9d-xoaip-gg88",
     "cnameTarget": "lp-9d-xoaip-gg88.pages.dev",
     "pagesAccountId": "ddead9accc534c1eb074d2a46fffe748",
@@ -477,6 +492,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "Welcome to cổng chính thức ☀️ 2026",
     "folder": "lp-llwind.top",
     "path": "C:\\Landingpages\\LLWIN\\lp-llwind.top",
+    "gitRepo": "freze2212/lp-llwin-llwind.top",
     "pagesProject": "lp-llwin-llwind-top",
     "cnameTarget": "lp-llwin-llwind-top.pages.dev",
     "sampleDomain": "llwind.top",
@@ -491,6 +507,7 @@ export const ACTIVE_TEMPLATES = [
     "title": "Welcome to cổng chính thức ☀️ 2026",
     "folder": "lp-mm88sin.top",
     "path": "C:\\Landingpages\\MM88\\lp-mm88sin.top",
+    "gitRepo": "freze2212/lp-mm88sin-top",
     "pagesProject": "lp-mm88sin-top",
     "cnameTarget": "lp-mm88sin-top.pages.dev",
     "sampleDomain": "mm88sin.top",
@@ -536,8 +553,8 @@ export const ACTIVE_TEMPLATES = [
     "folder": "lp-mm88-5f",
     "path": "C:\\Landingpages\\MM88\\lp-mm88-5f",
     "gitRepo": "freze2212/lp-mm88-5f",
-    "pagesProject": "lp-mm88-5f",
-    "cnameTarget": "lp-mm88-5f.pages.dev",
+    "pagesProject": "lp-mm88-5f-git",
+    "cnameTarget": "lp-mm88-5f-git.pages.dev",
     "sampleDomain": "mmquocte.com",
     "sampleUrl": "https://mmquocte.com",
     "totalDomains": 1,
@@ -551,10 +568,10 @@ export const ACTIVE_TEMPLATES = [
     "folder": "lp-mm88-u880",
     "path": "C:\\Landingpages\\MM88\\lp-mm88-u880",
     "gitRepo": "freze2212/lp-mm88-u880",
-    "pagesProject": "lp-mm88-u880",
-    "cnameTarget": "lp-mm88-u880.pages.dev",
-    "sampleDomain": "lp-mm88-u880.pages.dev",
-    "sampleUrl": "https://lp-mm88-u880.pages.dev",
+    "pagesProject": "lp-mm88-u880-git",
+    "cnameTarget": "lp-mm88-u880-git.pages.dev",
+    "sampleDomain": "lp-mm88-u880-git.pages.dev",
+    "sampleUrl": "https://lp-mm88-u880-git.pages.dev",
     "totalDomains": 0,
     "brand": "MM88",
     "brandLabel": "MM88"
@@ -566,8 +583,8 @@ export const ACTIVE_TEMPLATES = [
     "folder": "lp-xoamaan-to",
     "path": "C:\\Landingpages\\GG88\\lp-xoamaan-to",
     "gitRepo": "freze2212/lp-xoamaan-to",
-    "pagesProject": "lp-xoamaan-to",
-    "cnameTarget": "lp-xoamaan-to.pages.dev",
+    "pagesProject": "lp-xoamaan-to-git",
+    "cnameTarget": "lp-xoamaan-to-git.pages.dev",
     "sampleDomain": "xoamaan.to",
     "sampleUrl": "https://xoamaan.to",
     "totalDomains": 1,
@@ -581,8 +598,8 @@ export const ACTIVE_TEMPLATES = [
     "folder": "lp-gg88-cd",
     "path": "C:\\Landingpages\\GG88\\lp-gg88-cd",
     "gitRepo": "freze2212/lp-gg88-cd",
-    "pagesProject": "lp-gg88-cd",
-    "cnameTarget": "lp-gg88-cd.pages.dev",
+    "pagesProject": "lp-gg88-cd-git",
+    "cnameTarget": "lp-gg88-cd-git.pages.dev",
     "sampleDomain": "gg88macao.com",
     "sampleUrl": "https://gg88macao.com",
     "totalDomains": 1,
@@ -722,6 +739,43 @@ export function findTemplateByDomain(domain) {
 
 const templateLocks = new Map();
 
+/** Thư mục mẫu thiếu .git mà template có gitRepo: clone lại đúng repo, giữ bản cũ bên cạnh. */
+export async function ensureTemplateGitCheckout(tplObj) {
+  const dir = tplObj?.path;
+  if (!dir) throw new Error("Template không có đường dẫn thư mục nguồn");
+  if (fs.existsSync(path.join(dir, ".git"))) return { cloned: false, path: dir };
+
+  const repo = String(tplObj.gitRepo || "").trim().replace(/^https:\/\/github\.com\//i, "").replace(/\.git$/i, "");
+  if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+    throw new Error(
+      `Template path thiếu .git và template chưa khai báo gitRepo. Path: ${dir}. Cần git clone đúng repo trước khi mua/đổi link.`
+    );
+  }
+
+  let target = dir;
+  if (/^[A-Za-z]:\\/.test(dir) && process.platform !== "win32") {
+    target = path.join(LANDING_ROOT, tplObj.brand || "", tplObj.folder || path.basename(dir.replace(/\\/g, "/")));
+  }
+
+  let backup = null;
+  if (fs.existsSync(target)) {
+    backup = `${target}.nogit-${Date.now()}`;
+    fs.renameSync(target, backup);
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+
+  try {
+    await gitExec(`git clone https://github.com/${repo}.git "${target}"`, path.dirname(target), { auth: true });
+  } catch (err) {
+    if (backup && !fs.existsSync(target)) fs.renameSync(backup, target);
+    const msg = String(err.stderr || err.message || err).replace(/AUTHORIZATION:[^\n]*/gi, "AUTHORIZATION: ***");
+    throw new Error(`Template path thiếu .git, tự clone ${repo} thất bại: ${msg.slice(0, 300)}`);
+  }
+
+  console.log(`[Template] Đã clone ${repo} → ${target}${backup ? ` (bản cũ: ${backup})` : ""}`);
+  return { cloned: true, path: target, backup };
+}
+
 /** Đưa thư mục mẫu về đúng bản origin rồi mới sửa. Không commit trên bản lệch. */
 export async function alignRepoToOrigin(cwd) {
   await execAsync("git rebase --abort", { cwd }).catch(() => {});
@@ -776,6 +830,8 @@ export async function updateTemplateDomainsJson(template, domain, mainUrl, messe
   if (!tplObj?.path) throw new Error("Template không có đường dẫn thư mục nguồn");
 
   return withTemplateLock(tplObj.path, async () => {
+    const checkout = await ensureTemplateGitCheckout(tplObj);
+    if (checkout.path !== tplObj.path) tplObj.path = checkout.path;
     const djPath = path.join(tplObj.path, "domains.json");
     const norm = domain.trim().toLowerCase().replace(/^www\./, "");
     const teleUrl = messengerUrl || "";
@@ -795,6 +851,7 @@ export async function updateTemplateDomainsJson(template, domain, mainUrl, messe
     let isExisting = false;
     let jsConfigRel = null;
     let gitPush;
+    const pushedAt = Date.now();
     try {
       gitPush = await publishRepoChanges(tplObj.path, {
         commitMsg: `Update link for domain ${norm}`,
@@ -846,8 +903,9 @@ export async function updateTemplateDomainsJson(template, domain, mainUrl, messe
           fallbackProject: tplObj.pagesProject || null,
           accountId: opts.accountId || tplObj.pagesAccountId || undefined,
           timeoutMs: opts.liveTimeoutMs ?? 90000,
+          sinceMs: pushedAt,
         });
-        if (!liveEnsure.ok) {
+        if (!liveEnsure.ok && !liveEnsure.pending) {
           console.warn(`[Template] Live chưa khớp sau force deploy [${norm}]:`, liveEnsure.error);
         }
       } catch (err) {
@@ -920,6 +978,8 @@ export async function updateTemplateBatchDomains(template, domainEntries) {
   if (!domainEntries || domainEntries.length === 0) return { updatedCount: 0 };
 
   return withTemplateLock(tplObj.path, async () => {
+    const checkout = await ensureTemplateGitCheckout(tplObj);
+    if (checkout.path !== tplObj.path) tplObj.path = checkout.path;
     const djPath = path.join(tplObj.path, "domains.json");
     const gitDir = path.join(tplObj.path, ".git");
     if (!fs.existsSync(gitDir)) {

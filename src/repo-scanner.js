@@ -529,9 +529,17 @@ export function updateJsConfigFile(folderPath, domain, newLink, newTele) {
     }
   }
 
-  // Cập nhật thêm _redirects nếu có
+  // _redirects /reg là 1 link cho cả project: chỉ ghi khi mẫu không có miền nào khác.
   const redPath = path.join(folderPath, "_redirects");
-  if (fs.existsSync(redPath) && newLink) {
+  let otherDomainsShareRepo = false;
+  try {
+    const dj = JSON.parse(fs.readFileSync(path.join(folderPath, "domains.json"), "utf8"));
+    otherDomainsShareRepo = Object.keys(dj).some((k) => {
+      const key = k.toLowerCase().replace(/^www\./, "");
+      return key !== norm.replace(/^www\./, "") && !key.endsWith(".pages.dev") && key.includes(".");
+    });
+  } catch {}
+  if (fs.existsSync(redPath) && newLink && !otherDomainsShareRepo) {
     try {
       let redContent = fs.readFileSync(redPath, "utf8");
       redContent = redContent.replace(/\/reg\s+https?:\/\/[^\s]+/g, `/reg ${newLink}`);

@@ -151,6 +151,10 @@ export function reconcileStaleHistory(maxAgeMs = 20 * 60 * 1000) {
         const born = new Date(h.timestamp || 0).getTime();
         if (born && now - born < 6 * 60 * 60 * 1000) continue;
       }
+      if (h.details?.waitLiveJson) {
+        const born = new Date(h.details.liveJsonSince || h.timestamp || 0).getTime();
+        if (born && now - born < 15 * 60 * 1000) continue;
+      }
       const key = String(h.domain || "")
         .toLowerCase()
         .replace(/^www\./, "");

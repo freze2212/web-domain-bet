@@ -630,26 +630,82 @@ function normLiveLink(u) {
     .replace(/\/$/, "");
 }
 
-async function probeDomainJsonLink(domain) {
+async function readHostDomainsJson(host, norm) {
+  const res = await fetch(`https://${host}/domains.json?v=${Date.now()}`, {
+    headers: { "user-agent": "Mozilla/5.0", "cache-control": "no-cache", pragma: "no-cache" },
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) return { host, readable: false, link: null };
+  const j = await res.json();
+  const e = j?.[norm] || j?.[`www.${norm}`];
+  const raw = typeof e === "string" ? e : e?.main_url || e?.messenger_url || "";
+  return { host, readable: true, link: raw ? normLiveLink(raw) : null };
+}
+
+async function probeDomainJsonLink(domain, extraHosts = []) {
   const norm = String(domain || "")
     .trim()
     .toLowerCase()
     .replace(/^www\./, "");
-  const hosts = [norm, `www.${norm}`];
+  const hosts = [...new Set([norm, `www.${norm}`, ...extraHosts].map((h) => String(h || "").trim()).filter(Boolean))];
+  let sawFile = null;
   for (const host of hosts) {
     try {
-      const j = await (
-        await fetch(`https://${host}/domains.json?v=${Date.now()}`, {
-          headers: { "user-agent": "Mozilla/5.0", "cache-control": "no-cache", pragma: "no-cache" },
-          signal: AbortSignal.timeout(15000),
-        })
-      ).json();
-      const e = j[norm] || j[`www.${norm}`];
-      const link = typeof e === "string" ? e : e?.main_url || e?.messenger_url || null;
-      if (link) return { host, link: normLiveLink(link) };
+      const row = await readHostDomainsJson(host, norm);
+      if (row.link) return { host, link: row.link, readable: true };
+      if (row.readable) sawFile = sawFile || { host, link: null, readable: true };
     } catch {}
   }
-  return { host: null, link: null };
+  return sawFile || { host: null, link: null, readable: false };
+}
+
+function deploymentCreatedMs(dep) {
+  return new Date(dep?.created_on || dep?.modified_on || 0).getTime() || 0;
+}
+
+function deploymentSucceeded(dep) {
+  const stage = dep?.latest_stage || {};
+  return stage.name === "deploy" && stage.status === "success";
+}
+
+function deploymentFailed(dep) {
+  const status = String(dep?.latest_stage?.status || "");
+  return status === "failure" || status === "canceled";
+}
+
+async function readProjectDeployments(projectName, preferredAccountId) {
+  const ids = [];
+  for (const id of [preferredAccountId, getPrimaryAccountId(), getAdminAccountId()]) {
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  let lastErr = null;
+  for (const accId of ids) {
+    try {
+      const deployments =
+        (await cfRequest(
+          `/accounts/${accId}/pages/projects/${encodeURIComponent(projectName)}/deployments?per_page=8`,
+          { token: pagesTokenForAccount(accId) }
+        )) || [];
+      return { accountId: accId, deployments };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  return { accountId: preferredAccountId || null, deployments: [], error: lastErr?.message || "không đọc được deployment" };
+}
+
+const liveJsonWaitIds = new Set();
+
+export function trackLiveJsonWait(historyId) {
+  if (historyId) liveJsonWaitIds.add(historyId);
+}
+
+export function releaseLiveJsonWait(historyId) {
+  liveJsonWaitIds.delete(historyId);
+}
+
+export function isLiveJsonWaitRunning(historyId) {
+  return liveJsonWaitIds.has(historyId);
 }
 
 /**
@@ -682,50 +738,168 @@ export async function ensureLiveDomainLink(domain, claimedLink, opts = {}) {
   }
 
   const deployLog = { project: project || null, deployed: false, error: null };
+  const sinceMs = opts.sinceMs || Date.now();
+  const projectHost = project ? `${project}.pages.dev` : "";
+  const timeoutMs = opts.timeoutMs ?? 90000;
+  const started = Date.now();
+  let attempt = 0;
+  let deployState = "waiting";
+  let purgedAfterPublish = false;
+  let projectMisses = 0;
+  let apex = { host: null, link: null, readable: false };
+  let published = { host: null, link: null, readable: false };
 
-  // Purge CF cache zone
-  try {
-    const zone = await findZoneByName(norm);
-    if (zone) {
+  async function purgeZone() {
+    try {
+      const zone = await findZoneByName(norm);
+      if (!zone) return;
       await cfRequest(`/zones/${zone.id}/purge_cache`, {
         method: "POST",
         body: { purge_everything: true },
         token: tokenForZone(zone),
       }).catch(() => {});
-    }
-  } catch {}
+    } catch {}
+  }
 
-  const timeoutMs = opts.timeoutMs ?? 90000;
-  const started = Date.now();
-  let last = { host: null, link: null };
-  let attempt = 0;
+  function pack(extra) {
+    return {
+      domain: norm,
+      attempts: attempt,
+      deployLog,
+      sinceMs,
+      project: project || null,
+      deployState,
+      ...extra,
+    };
+  }
+
+  await purgeZone();
+
   while (Date.now() - started < timeoutMs) {
     attempt += 1;
-    last = await probeDomainJsonLink(norm);
-    if (last.link && last.link === want) {
-      return {
-        ok: true,
-        domain: norm,
-        link: last.link,
-        host: last.host,
-        attempts: attempt,
-        deployLog,
-      };
+    if (project) {
+      const snap = await readProjectDeployments(project, opts.accountId || null).catch(() => ({
+        deployments: [],
+      }));
+      const fresh = (snap.deployments || []).filter((dep) => deploymentCreatedMs(dep) >= sinceMs - 20000);
+      const failed = fresh.find(deploymentFailed);
+      const succeeded = fresh.find(deploymentSucceeded);
+      if (failed && !succeeded) {
+        deployLog.error = failed.latest_stage?.status || "failure";
+        return pack({
+          ok: false,
+          pending: false,
+          link: null,
+          host: null,
+          error: `Pages deploy ${project} thất bại (${deployLog.error}). Git đã ghi link, deployment không lên.`,
+        });
+      }
+      if (succeeded) {
+        deployState = "success";
+        deployLog.deployed = true;
+      } else if (fresh.length) {
+        deployState = "building";
+      }
     }
+
+    apex = await probeDomainJsonLink(norm);
+    if (apex.link === want) {
+      return pack({ ok: true, pending: false, link: apex.link, host: apex.host, error: null });
+    }
+
+    published = projectHost
+      ? await readHostDomainsJson(projectHost, norm).catch(() => ({
+          host: projectHost,
+          readable: false,
+          link: null,
+        }))
+      : { host: null, link: null, readable: false };
+    const projectLink = published.link;
+    const projectReadable = published.readable;
+
+    if (projectLink === want) {
+      deployState = "success";
+      deployLog.deployed = true;
+      if (!purgedAfterPublish) {
+        purgedAfterPublish = true;
+        await purgeZone();
+      }
+      apex = await probeDomainJsonLink(norm);
+      if (apex.link === want) {
+        return pack({ ok: true, pending: false, link: apex.link, host: apex.host, error: null });
+      }
+    } else if (deployState === "success" && projectReadable && projectLink && projectLink !== want) {
+      projectMisses += 1;
+      if (projectMisses >= 3) {
+        return pack({
+          ok: false,
+          pending: false,
+          link: projectLink,
+          host: projectHost,
+          error: `Live link lệch: live=${projectLink} | want=${want}`,
+        });
+      }
+    } else if (deployState === "success" && projectReadable && !projectLink) {
+      projectMisses += 1;
+      if (projectMisses >= 3) {
+        return pack({
+          ok: false,
+          pending: false,
+          link: null,
+          host: projectHost,
+          error: `Pages ${project} đã deploy nhưng domains.json không có [${norm}]`,
+        });
+      }
+    } else {
+      projectMisses = 0;
+    }
+
     await sleep(4000);
   }
 
-  return {
+  if (apex.link === want) {
+    return pack({ ok: true, pending: false, link: apex.link, host: apex.host, error: null });
+  }
+
+  if (!opts.failIfPending) {
+    return pack({
+      ok: false,
+      pending: true,
+      link: apex.link || published.link || null,
+      host: apex.host || published.host || null,
+      error: null,
+    });
+  }
+
+  if (published.link === want || (projectHost && published.host === projectHost && published.link === want)) {
+    return pack({
+      ok: false,
+      pending: false,
+      link: want,
+      host: projectHost,
+      error: `Pages ${project || "?"} đã có link nhưng ${norm} chưa nhận domains.json mới.`,
+    });
+  }
+
+  if (deployState !== "success") {
+    return pack({
+      ok: false,
+      pending: false,
+      link: apex.link || null,
+      host: apex.host || null,
+      error: `Pages chưa phát xong bản mới của ${project || "?"} cho [${norm}]. Git đã ghi link.`,
+    });
+  }
+
+  return pack({
     ok: false,
-    domain: norm,
-    link: last.link,
-    host: last.host,
-    attempts: attempt,
-    deployLog,
-    error: last.link
-      ? `Live link lệch: live=${last.link} | want=${want}`
+    pending: false,
+    link: apex.link || null,
+    host: apex.host || null,
+    error: apex.link
+      ? `Live link lệch: live=${apex.link} | want=${want}`
       : `Live chưa có entry domains.json cho [${norm}] (project=${project || "?"})`,
-  };
+  });
 }
 
 /**

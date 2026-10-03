@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { getHistory, updateHistoryItem } from "./history.js";
 import { resumePendingZoneRedirects } from "./zone-302-wait.js";
+import { ensureLiveDomainLink, isLiveJsonWaitRunning, releaseLiveJsonWait, trackLiveJsonWait } from "./cloudflare.js";
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -662,6 +663,92 @@ export async function runVerificationQueue() {
   }
 }
 
+let liveJsonResumeRunning = false;
+
+/** Đổi mẫu đã push git nhưng Pages chưa phát domains.json. Chạy tiếp sau restart. */
+export async function resumePendingLiveJson() {
+  if (liveJsonResumeRunning) return;
+  liveJsonResumeRunning = true;
+  try {
+    const waiting = getHistory().filter(
+      (h) =>
+        (h.status === "in_progress" || h.status === "pending") &&
+        h.details?.waitLiveJson &&
+        h.domain &&
+        h.link &&
+        !isLiveJsonWaitRunning(h.id)
+    );
+    for (const h of waiting) {
+      const sinceMs = Number(h.details.liveJsonSince) || new Date(h.timestamp || 0).getTime() || Date.now();
+      const age = Date.now() - sinceMs;
+      if (age > 8 * 60 * 1000) {
+        updateHistoryItem(h.id, {
+          status: "failed",
+          progress: null,
+          error: `Pages chưa phát domains.json cho [${h.domain}] sau 8 phút. Git đã ghi link.`,
+          details: { waitLiveJson: false },
+        });
+        continue;
+      }
+      trackLiveJsonWait(h.id);
+      try {
+        const again = await ensureLiveDomainLink(h.domain, h.link, {
+          projectName: h.details.liveJsonProject || null,
+          cnameTarget: h.cnameTarget || null,
+          accountId: h.details.liveJsonAccountId || undefined,
+          sinceMs,
+          timeoutMs: Math.max(20000, 8 * 60 * 1000 - age),
+          failIfPending: true,
+        });
+        if (!again.ok) {
+          updateHistoryItem(h.id, {
+            status: "failed",
+            progress: null,
+            error: again.error || "Live domains.json chưa có link sau khi Pages deploy",
+            details: { waitLiveJson: false, liveEnsure: again },
+          });
+          continue;
+        }
+        const { syncDeployOwnershipPreserve } = await import("./ownership.js");
+        const { invalidateDomainListCache } = await import("./repo-scanner.js");
+        const { invalidateEnrichedDomainsCache } = await import("./domains-list-service.js");
+        const { invalidateCfZoneCacheMem } = await import("./cf-account-guard.js");
+        const { invalidateOwnershipCache } = await import("./ownership.js");
+        syncDeployOwnershipPreserve(
+          h.domain,
+          { userId: h.userId, username: h.username, fullName: h.fullName, role: h.username === "admin" ? "admin" : "user" },
+          {},
+          {
+            mode: "LP",
+            currentLink: h.link,
+            templateId: h.templateId || null,
+            cnameTarget: h.cnameTarget || null,
+            tele: h.tele || "",
+          }
+        );
+        invalidateDomainListCache();
+        invalidateEnrichedDomainsCache();
+        invalidateCfZoneCacheMem();
+        invalidateOwnershipCache();
+        updateHistoryItem(h.id, {
+          status: "success",
+          progress: null,
+          error: null,
+          liveStatus: "200_OK",
+          details: { waitLiveJson: false, liveEnsure: again },
+        });
+        console.log(`[live-json] ${h.domain} khớp sau khi Pages phát xong`);
+      } catch (err) {
+        console.error(`[live-json] ${h.domain}:`, err.message);
+      } finally {
+        releaseLiveJsonWait(h.id);
+      }
+    }
+  } finally {
+    liveJsonResumeRunning = false;
+  }
+}
+
 let verifierInterval = null;
 
 /**
@@ -676,11 +763,13 @@ export function startBackgroundVerifier(intervalMs = 30000) {
   setTimeout(() => {
     runVerificationQueue().catch(() => {});
     resumePendingZoneRedirects().catch(() => {});
+    resumePendingLiveJson().catch(() => {});
   }, 5000);
 
   verifierInterval = setInterval(() => {
     runVerificationQueue().catch(() => {});
     resumePendingZoneRedirects().catch(() => {});
+    resumePendingLiveJson().catch(() => {});
   }, intervalMs);
 
   return verifierInterval;
