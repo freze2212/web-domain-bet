@@ -3955,7 +3955,8 @@ function applyHistoryLinksToDomainRows(historyList) {
     if (applied.has(key)) continue;
     applied.add(key);
     const row = allDomains.find((d) => String(d.domain || "").toLowerCase() === key);
-    if (!row || row.mainUrl === h.link) continue;
+    // Link server trả về là link trong domains.json đang live; history chỉ lấp chỗ trống.
+    if (!row || row.mainUrl) continue;
     row.mainUrl = h.link;
     if (h.tele) row.telegramUrl = h.tele;
     changed = true;

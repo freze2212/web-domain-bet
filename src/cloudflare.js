@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { getDomainEntry } from "./lp-link-patch.js";
 import { poll, sleep } from "./utils.js";
 function getPrimaryToken() {
   const token = config.cloudflare.token();
@@ -637,7 +638,7 @@ async function readHostDomainsJson(host, norm) {
   });
   if (!res.ok) return { host, readable: false, link: null };
   const j = await res.json();
-  const e = j?.[norm] || j?.[`www.${norm}`];
+  const e = getDomainEntry(j, norm);
   const raw = typeof e === "string" ? e : e?.main_url || e?.messenger_url || "";
   return { host, readable: true, link: raw ? normLiveLink(raw) : null };
 }

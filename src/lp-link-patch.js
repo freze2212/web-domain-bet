@@ -1,12 +1,39 @@
-/** Patch LP index.html — bỏ hardcode link, chỉ load từ domains.json theo hostname */
+/** Khóa miền trong domains.json: chữ thường, bỏ www. */
+export function domainKeyApex(key) {
+  return String(key || "").trim().toLowerCase().replace(/^(www\.)+/, "");
+}
+
+/** Mọi khóa trỏ về cùng miền (G88VIP.UK, www.g88vip.uk, ...) */
+export function findDomainKeys(dj, domain) {
+  if (!dj || typeof dj !== "object" || Array.isArray(dj)) return [];
+  const norm = domainKeyApex(domain);
+  return Object.keys(dj).filter((k) => domainKeyApex(k) === norm);
+}
+
+/** Entry của miền, ưu tiên khóa chữ thường */
+export function getDomainEntry(dj, domain) {
+  const keys = findDomainKeys(dj, domain);
+  if (!keys.length) return undefined;
+  const norm = domainKeyApex(domain);
+  const exact = keys.find((k) => k === norm) || keys.find((k) => k === `www.${norm}`) || keys[0];
+  return dj[exact];
+}
+
+export function removeDomainKeys(dj, domain) {
+  const keys = findDomainKeys(dj, domain);
+  for (const k of keys) delete dj[k];
+  return keys.length;
+}
+
+/**
+ * Patch LP index.html — chỉ load link từ domains.json theo hostname.
+ * Không đụng href/link cứng dùng chung của mẫu: chép link miền vừa sửa vào đó làm miền khác ăn nhầm link.
+ */
 export function patchIndexHtmlLinks(html, domain, newLink) {
   if (!html || !newLink) return html;
   let h = String(html);
 
   h = h.replace(/window\.REDIRECT_URL\s*=\s*["'][^"']*["']/gi, `window.REDIRECT_URL = ""`);
-  h = h.replace(/https?:\/\/(?:www\.)?gg88\d+\.com[^"'\\s]*/gi, newLink);
-  h = h.replace(/(<a\b[^>]*class=["'][^"']*redirect-link[^"']*["'][^>]*href=["'])[^"']*(["'])/gi, `$1${newLink}$2`);
-  h = h.replace(/(<a\b[^>]*href=["'])[^"']*(["'][^>]*class=["'][^"']*redirect-link)/gi, `$1${newLink}$2`);
 
   // QUAN TRỌNG: check typeof string TRƯỚC — nếu để e.link trước sẽ đụng String.prototype.link (native)
   const loader = `

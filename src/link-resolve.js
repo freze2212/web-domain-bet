@@ -5,7 +5,10 @@ import { normalizeUrl } from "./utils.js";
 
 function pickConfigLink(config) {
   if (!config) return { link: null, tele: null };
-  const link = config.main_url || config.url || config.link || config.register_url || null;
+  // String.prototype.link là hàm native: entry dạng chuỗi phải xử lý riêng
+  if (typeof config === "string") return { link: config, tele: "" };
+  const str = (v) => (typeof v === "string" && v ? v : null);
+  const link = str(config.main_url) || str(config.url) || str(config.link) || str(config.register_url) || null;
   const teleRaw = config.telegram_url || config.tele || null;
   const messenger = config.messenger_url || null;
   const tele =
@@ -36,10 +39,10 @@ export async function resolveInheritedLink(domain, opts = {}) {
     }
   }
 
-  const { findDomainInRepos } = await import("./repo-scanner.js");
-  const matches = findDomainInRepos(domain);
-  if (matches.length > 0) {
-    const picked = pickConfigLink(matches[0].config);
+  const { findServingRepoMatch } = await import("./repo-scanner.js");
+  const match = findServingRepoMatch(domain);
+  if (match) {
+    const picked = pickConfigLink(match.config);
     if (picked.link) {
       try {
         return {

@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { patchIndexHtmlLinks, stripDomainsJsonFallbacks } from "./lp-link-patch.js";
+import { patchIndexHtmlLinks, stripDomainsJsonFallbacks, removeDomainKeys } from "./lp-link-patch.js";
 
 async function githubRequest(path, { method = "GET", body } = {}) {
   const url = `https://api.github.com${path}`;
@@ -160,6 +160,7 @@ export async function upsertDomainEntryInRepo(fullRepo, domain, entry, { message
       ? entry
       : { main_url: String(entry || ""), messenger_url: String(entry || "") };
 
+  removeDomainKeys(data, norm);
   data[norm] = payload;
   data[`www.${norm}`] = payload;
   stripDomainsJsonFallbacks(data);
@@ -178,6 +179,7 @@ export async function upsertDomainEntryInRepo(fullRepo, domain, entry, { message
     if (!/409|sha/i.test(err.message)) throw err;
     const file = await githubRequest(`${apiPath}?ref=${encodeURIComponent(branch)}`);
     const latest = JSON.parse(Buffer.from(file.content, "base64").toString("utf8"));
+    removeDomainKeys(latest, norm);
     latest[norm] = payload;
     latest[`www.${norm}`] = payload;
     stripDomainsJsonFallbacks(latest);
@@ -252,6 +254,7 @@ export async function upsertDomainEntriesInRepo(fullRepo, entries, { message } =
     const norm = String(item.domain || "").trim().toLowerCase().replace(/^www\./, "");
     if (!norm) continue;
     const payload = item.entry;
+    removeDomainKeys(data, norm);
     data[norm] = payload;
     data[`www.${norm}`] = payload;
   }

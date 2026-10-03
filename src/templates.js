@@ -5,7 +5,7 @@ import { LANDING_ROOT } from "./utils.js";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { updateJsConfigFile } from "./repo-scanner.js";
-import { stripDomainsJsonFallbacks } from "./lp-link-patch.js";
+import { stripDomainsJsonFallbacks, findDomainKeys, removeDomainKeys } from "./lp-link-patch.js";
 import { deployToAllPagesInstances, ensureLiveDomainLink } from "./cloudflare.js";
 import { config } from "./config.js";
 
@@ -730,7 +730,7 @@ export function findTemplateByDomain(domain) {
     if (fs.existsSync(djPath)) {
       try {
         const dj = JSON.parse(fs.readFileSync(djPath, "utf8"));
-        if (norm in dj) return t;
+        if (findDomainKeys(dj, norm).length) return t;
       } catch {}
     }
   }
@@ -862,7 +862,8 @@ export async function updateTemplateDomainsJson(template, domain, mainUrl, messe
               dj = JSON.parse(fs.readFileSync(djPath, "utf8"));
             } catch {}
           }
-          isExisting = norm in dj;
+          isExisting = findDomainKeys(dj, norm).length > 0;
+          removeDomainKeys(dj, norm);
           dj[norm] = entry;
           dj[`www.${norm}`] = entry;
           stripDomainsJsonFallbacks(dj);
@@ -1008,6 +1009,7 @@ export async function updateTemplateBatchDomains(template, domainEntries) {
               messenger_url: teleUrl || mainUrl,
               telegram_url: teleUrl || undefined,
             };
+            removeDomainKeys(dj, norm);
             dj[norm] = entry;
             dj[`www.${norm}`] = entry;
             updateJsConfigFile(tplObj.path, norm, mainUrl, teleUrl);

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { getHistory, updateHistoryItem } from "./history.js";
 import { resumePendingZoneRedirects } from "./zone-302-wait.js";
 import { ensureLiveDomainLink, isLiveJsonWaitRunning, releaseLiveJsonWait, trackLiveJsonWait } from "./cloudflare.js";
+import { getDomainEntry } from "./lp-link-patch.js";
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -294,7 +295,7 @@ function linkFromDomainsEntry(e) {
 
 function readLiveLinksFromDomainsJson(j, domain) {
   const norm = domain.trim().toLowerCase().replace(/^www\./, "");
-  const entryLink = linkFromDomainsEntry(j[norm] || j[`www.${norm}`]);
+  const entryLink = linkFromDomainsEntry(getDomainEntry(j, norm));
   const defaultLink =
     typeof j?.defaultLink === "string"
       ? j.defaultLink

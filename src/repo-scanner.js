@@ -23,7 +23,8 @@ import { getHistory, addHistoryItem, updateHistoryItem, getLastDomainHistoryMeta
 import { verifyHistoryItem, waitForLiveLinkMatch, waitFor302RedirectMatch } from "./verifier.js";
 import { normalizeDomain, normalizeUrl, LANDING_ROOT } from "./utils.js";
 import { listHubZonesFromCache, isAdminCfZone, adminSkipPayload, isFrezeHubDomain } from "./cf-account-guard.js";
-import { patchIndexHtmlLinks } from "./lp-link-patch.js";
+import { patchIndexHtmlLinks, findDomainKeys, getDomainEntry, removeDomainKeys, domainKeyApex } from "./lp-link-patch.js";
+import { getServingPagesProject, pagesDomainMapVersion } from "./pages-domain-map.js";
 
 const execAsync = promisify(exec);
 
@@ -147,6 +148,31 @@ function skipScanDirName(name) {
   return false;
 }
 
+/** Project Pages → template; gg88-lp-5uae-6 thuộc mẫu gg88-lp-5uae. */
+function templateForPagesProject(projectName) {
+  const name = String(projectName || "").toLowerCase();
+  if (!name) return null;
+  const projOf = (t) =>
+    [
+      t.pagesProject,
+      String(t.cnameTarget || "").replace(/\.pages\.dev$/i, ""),
+      String(t.gitRepo || "").split("/").pop().replace(/\./g, "-"),
+    ]
+      .filter(Boolean)
+      .map((x) => String(x).toLowerCase());
+  const tpls = listTemplates();
+  return (
+    tpls.find((t) => projOf(t).includes(name)) ||
+    tpls.find((t) => projOf(t).includes(name.replace(/-\d+$/, ""))) ||
+    null
+  );
+}
+
+function sameTemplateFolder(a, b) {
+  const sub = (p) => String(p || "").split(/[\\/]/).filter(Boolean).slice(-2).join("/").toLowerCase();
+  return !!a && !!b && sub(a) === sub(b);
+}
+
 let listAllDomainsCache = { at: 0, data: null };
 const LIST_DOMAINS_TTL_MS = 5 * 60_000;
 
@@ -179,6 +205,19 @@ export function getAllDomainsJsonFiles() {
   return files;
 }
 
+/** Bản ghi của miền trong repo đang phục vụ live (project Pages đang gắn miền), nếu biết. */
+export function findServingRepoMatch(domain) {
+  const matches = findDomainInRepos(domain);
+  if (matches.length < 2) return matches[0] || null;
+  const serving = getServingPagesProject(domain);
+  for (const proj of serving?.projects || []) {
+    const tpl = templateForPagesProject(proj);
+    const m = tpl?.path ? matches.find((x) => sameTemplateFolder(x.folderPath, tpl.path)) : null;
+    if (m) return m;
+  }
+  return matches[0];
+}
+
 // 2. Tìm chính xác domain nằm ở folder gốc / repo nào (không gồm .bak / backup)
 export function findDomainInRepos(domain) {
   const norm = domain.trim().toLowerCase().replace(/^www\./, "");
@@ -189,11 +228,11 @@ export function findDomainInRepos(domain) {
     if (isJunkLandingPath(f)) continue;
     try {
       const dj = JSON.parse(fs.readFileSync(f, "utf8"));
-      if (norm in dj || `www.${norm}` in dj) {
+      if (findDomainKeys(dj, norm).length) {
         matches.push({
           filePath: f,
           folderPath: path.dirname(f),
-          config: dj[norm] || dj[`www.${norm}`],
+          config: getDomainEntry(dj, norm),
         });
       }
     } catch {}
@@ -472,7 +511,6 @@ export function updateJsConfigFile(folderPath, domain, newLink, newTele) {
           code = resWww.code;
           changed = true;
         }
-        code = code.replace(/default\s*:\s*["'][^"']*["']/g, `default: "${newLink}"`);
         changed = true;
       }
 
@@ -594,7 +632,8 @@ export async function updateDomainInExactRepos(domain, newLink, newTele = "") {
         commitMsg: `Update link & telegram for ${norm}`,
         prepare() {
           const dj = JSON.parse(fs.readFileSync(m.filePath, "utf8"));
-          const existing = typeof dj[norm] === "object" ? dj[norm] : {};
+          const prevEntry = getDomainEntry(dj, norm);
+          const existing = prevEntry && typeof prevEntry === "object" ? prevEntry : {};
           const mainUrl = newLink || existing.main_url || existing.url || "";
           const teleUrl =
             newTele ||
@@ -607,6 +646,7 @@ export async function updateDomainInExactRepos(domain, newLink, newTele = "") {
             messenger_url: teleUrl || mainUrl,
             telegram_url: teleUrl || undefined,
           };
+          removeDomainKeys(dj, norm);
           dj[norm] = entry;
           dj[`www.${norm}`] = entry;
           fs.writeFileSync(m.filePath, JSON.stringify(dj, null, 2), "utf8");
@@ -672,7 +712,7 @@ export async function removeDomainFromRepo(domain, folderOrFilePath) {
       prepare() {
         if (fs.existsSync(filePath)) {
           const dj = JSON.parse(fs.readFileSync(filePath, "utf8"));
-          for (const key of variants) delete dj[key];
+          removeDomainKeys(dj, norm);
           fs.writeFileSync(filePath, JSON.stringify(dj, null, 2), "utf8");
         }
         for (const item of possiblePaths) {
@@ -700,7 +740,11 @@ export async function removeDomainFromRepo(domain, folderOrFilePath) {
 // 6. Quét và tổng hợp tất cả domains từ mọi repo & lịch sử triển khai
 export function listAllDomains() {
   const now = Date.now();
-  if (listAllDomainsCache.data && now - listAllDomainsCache.at < LIST_DOMAINS_TTL_MS) {
+  if (
+    listAllDomainsCache.data &&
+    now - listAllDomainsCache.at < LIST_DOMAINS_TTL_MS &&
+    listAllDomainsCache.mapAt === pagesDomainMapVersion()
+  ) {
     return listAllDomainsCache.data;
   }
 
@@ -719,11 +763,15 @@ export function listAllDomains() {
         const raw = dom.trim().toLowerCase();
         const norm = apexOf(raw);
         const fromWww = raw.startsWith("www.");
-        if (!norm) continue;
+        if (!norm || !norm.includes(".") || norm.endsWith(".pages.dev")) continue;
 
-        const mainUrl = conf.main_url || conf.url || conf.link || (typeof conf === "string" ? conf : "");
-        const messengerUrl = conf.messenger_url || conf.telegram_url || conf.tele || mainUrl;
-        const telegramUrl = conf.telegram_url || conf.tele || (messengerUrl !== mainUrl ? messengerUrl : "");
+        // typeof string TRƯỚC — String.prototype.link là hàm native
+        const str = (v) => (typeof v === "string" ? v : "");
+        const isObj = conf && typeof conf === "object";
+        const mainUrl = typeof conf === "string" ? conf : isObj ? str(conf.main_url) || str(conf.url) || str(conf.link) : "";
+        const messengerUrl = (isObj && (str(conf.messenger_url) || str(conf.telegram_url) || str(conf.tele))) || mainUrl;
+        const telegramUrl = (isObj && (str(conf.telegram_url) || str(conf.tele))) || (messengerUrl !== mainUrl ? messengerUrl : "");
+        const linkRow = { mainUrl, messengerUrl, telegramUrl };
 
         if (!domainMap.has(norm)) {
           domainMap.set(norm, {
@@ -733,6 +781,7 @@ export function listAllDomains() {
             telegramUrl,
             repos: [folder],
             filePaths: [f],
+            entries: { [folder]: linkRow },
             primaryFolder: folderName,
             folderPath: folder,
             sourceType: "landing_page",
@@ -743,6 +792,7 @@ export function listAllDomains() {
             existing.repos.push(folder);
             existing.filePaths.push(f);
           }
+          if (mainUrl && (!fromWww || !existing.entries[folder]?.mainUrl)) existing.entries[folder] = linkRow;
           if (mainUrl && (!fromWww || !existing.mainUrl)) {
             existing.mainUrl = mainUrl;
             existing.messengerUrl = messengerUrl;
@@ -753,7 +803,41 @@ export function listAllDomains() {
     } catch {}
   }
 
-  // B. Lịch sử mới nhất (success) thắng link đang nằm trong domains.json cũ.
+  // A2. Miền nằm trong nhiều repo: link đúng là link trong repo của project Pages đang gắn miền.
+  for (const row of domainMap.values()) {
+    const serving = getServingPagesProject(row.domain);
+    if (!serving) continue;
+    row.servingProject = serving.project;
+    row.servingAccountId = serving.accountId;
+    let folder = null;
+    for (const proj of serving.projects || [serving.project]) {
+      const tpl = templateForPagesProject(proj);
+      folder = tpl?.path ? row.repos.find((r) => sameTemplateFolder(r, tpl.path)) : null;
+      if (folder) {
+        row.servingProject = proj;
+        break;
+      }
+    }
+    if (!folder) continue;
+    const i = row.repos.indexOf(folder);
+    if (i > 0) {
+      row.repos.splice(i, 1);
+      row.repos.unshift(folder);
+      row.filePaths.unshift(row.filePaths.splice(i, 1)[0]);
+    }
+    row.primaryFolder = path.basename(folder);
+    row.folderPath = folder;
+    const e = row.entries[folder];
+    if (e?.mainUrl) {
+      row.mainUrl = e.mainUrl;
+      row.messengerUrl = e.messengerUrl;
+      row.telegramUrl = e.telegramUrl;
+    }
+  }
+
+  // B. Lịch sử chỉ điền link khi domains.json không có, hoặc miền đã rời Pages (302).
+  //    Link trong domains.json là link live; history có thể là lần push không lên live.
+  const pagesMapReady = pagesDomainMapVersion() > 0;
   try {
     const history = getHistory();
     const historyLinkApplied = new Set();
@@ -785,12 +869,16 @@ export function listAllDomains() {
 
       const existing = domainMap.get(norm);
       if (successLink && !historyLinkApplied.has(norm)) {
-        existing.mainUrl = histLink;
-        if (h.tele) {
-          existing.telegramUrl = h.tele;
-          existing.messengerUrl = h.tele;
-        }
         historyLinkApplied.add(norm);
+        const fileLink = existing.repos.length > 0 && !!existing.mainUrl;
+        const leftPages = pagesMapReady && existing.repos.length > 0 && !existing.servingProject;
+        if (!fileLink || leftPages) {
+          existing.mainUrl = histLink;
+          if (h.tele) {
+            existing.telegramUrl = h.tele;
+            existing.messengerUrl = h.tele;
+          }
+        }
       } else if (!existing.mainUrl && histLink && h.status !== "failed") {
         existing.mainUrl = histLink;
       }
@@ -851,7 +939,7 @@ export function listAllDomains() {
   const result = Array.from(domainMap.values())
     .filter((d) => isFrezeHubDomain(d.domain))
     .sort((a, b) => a.domain.localeCompare(b.domain));
-  listAllDomainsCache = { at: now, data: result };
+  listAllDomainsCache = { at: now, data: result, mapAt: pagesDomainMapVersion() };
   return result;
 }
 
