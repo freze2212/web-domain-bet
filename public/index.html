@@ -1529,7 +1529,7 @@
         </div>
         <div class="header-tools" style="display:flex;gap:8px;flex-wrap:wrap;">
           <a class="btn btn-secondary btn-sm assistant-hide" href="/admin-audit.html" target="_blank" rel="noopener">📜 Lịch Sử Quản Trị</a>
-          <button class="btn btn-secondary btn-sm assistant-hide" onclick="openDomainAssignModal()">🔗 Gán Tên Miền</button>
+          <button class="btn btn-secondary btn-sm" onclick="openDomainAssignModal()">🔗 Gán Tên Miền</button>
           <button class="btn btn-secondary btn-sm assistant-hide" onclick="openCreateUserModal('assistant')">🛡️ Tạo Trợ Lý</button>
           <button class="btn btn-primary btn-sm" onclick="openCreateUserModal('user')">➕ Thêm Thành Viên</button>
         </div>
@@ -1567,7 +1567,7 @@
                 <th>Vai trò</th>
                 <th>Trạng thái</th>
                 <th class="assistant-hide">Số dư</th>
-                <th class="assistant-hide">Miền đang giữ</th>
+                <th>Miền đang giữ</th>
                 <th>Ngày tạo</th>
                 <th>Thao tác</th>
               </tr>
@@ -1586,8 +1586,8 @@
       <div class="card" style="padding: 16px; margin-top: 16px;">
         <div class="section-header" style="margin-bottom: 10px;">
           <div>
-            <h3 style="margin:0;">Lịch sử thêm / sửa / xóa user</h3>
-            <p class="section-desc" style="margin:4px 0 0;">Ghi lại ai tạo, sửa hoặc xóa tài khoản.</p>
+            <h3 style="margin:0;">Lịch sử user và gán tên miền</h3>
+            <p class="section-desc" style="margin:4px 0 0;">Ghi lại ai tạo, sửa, xóa tài khoản và ai gán miền nào cho tài khoản nào.</p>
           </div>
           <button type="button" class="btn btn-secondary btn-sm" onclick="loadUserAudit()">🔄 Làm mới</button>
         </div>
@@ -1863,7 +1863,7 @@
             <label>Vai trò (Role)</label>
             <select id="crudRole" class="form-input">
               <option value="user">User (Thành viên / Đại lý)</option>
-              <option value="assistant">Trợ lý (chỉ thêm / sửa / xóa user)</option>
+              <option value="assistant">Trợ lý (thêm / sửa / xóa user, gán tên miền)</option>
               <option value="admin">Admin (Quản trị viên)</option>
             </select>
           </div>
@@ -2879,7 +2879,7 @@
     <div class="toast-message" id="toastMessage">Thông báo</div>
   </div>
 
-  <script src="app.js?v=20261004-nodefault"></script>
+  <script src="app.js?v=20261004-assistant-assign"></script>
 </body>
 </html>
 

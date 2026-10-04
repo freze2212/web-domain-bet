@@ -5109,7 +5109,7 @@ function renderMembersPage() {
         <td><span class="user-role-tag ${roleClass}">${roleText}</span></td>
         <td><span class="badge-status ${u.status === "active" ? "badge-success" : "badge-danger"}">${u.status === "active" ? "Hoạt động" : "Tạm khóa"}</span></td>
         <td class="assistant-hide" style="font-weight:700;color:var(--accent-emerald);">${(Number(u.balance) || 0).toLocaleString("vi-VN")} Xu</td>
-        <td class="assistant-hide" style="font-weight:600;color:var(--accent-cyan);">${u.domainCount || 0}</td>
+        <td style="font-weight:600;color:var(--accent-cyan);">${u.domainCount || 0}</td>
         <td style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);">${created}</td>
         <td>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -5294,7 +5294,8 @@ async function loadUsersList() {
     }
 
     if (assignUserSelect) {
-      assignUserSelect.innerHTML = allUsersCache.map((u) => `
+      const assignable = currentUser?.role === "assistant" ? allUsersCache.filter((u) => u.role === "user") : allUsersCache;
+      assignUserSelect.innerHTML = assignable.map((u) => `
         <option value="${u.id}">${u.username} (${u.fullName})</option>
       `).join("");
     }
@@ -5394,6 +5395,9 @@ const USER_AUDIT_LABELS = {
   PASSWORD_RESET: "Đổi mật khẩu",
   ROLE_CHANGE: "Đổi vai trò",
   STATUS_CHANGE: "Đổi trạng thái",
+  DOMAIN_ASSIGN: "Gán miền",
+  DOMAIN_UNASSIGN: "Thu hồi miền",
+  DOMAIN_REQUEST_APPROVE: "Duyệt cấp quyền miền",
 };
 
 async function loadUserAudit() {
@@ -5404,7 +5408,7 @@ async function loadUserAudit() {
     const data = await res.json();
     const items = (data.items || []).filter((item) => USER_AUDIT_LABELS[item.action]);
     if (!items.length) {
-      body.innerHTML = `<tr><td colspan="5" style="color:var(--text-dim);padding:14px;">Chưa có lịch sử thêm, sửa hoặc xóa user.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="5" style="color:var(--text-dim);padding:14px;">Chưa có lịch sử user hoặc gán miền.</td></tr>`;
       return;
     }
     body.innerHTML = items.map((item) => {
@@ -5594,8 +5598,9 @@ async function handleDomainAssignSubmit(e, confirmTransfer = false) {
           : `✅ Đã gán ${ok} tên miền cho thành viên!`
       );
       closeModal("domainAssignModal");
-      fetchDomains();
+      if (currentUser?.role !== "assistant") fetchDomains();
       loadUsersList();
+      loadUserAudit();
     } else {
       showToast(`❌ Lỗi: ${data.error}`);
     }

@@ -241,6 +241,9 @@ const USER_AUDIT_ACTIONS = new Set([
   "PASSWORD_RESET",
   "ROLE_CHANGE",
   "STATUS_CHANGE",
+  "DOMAIN_ASSIGN",
+  "DOMAIN_UNASSIGN",
+  "DOMAIN_REQUEST_APPROVE",
 ]);
 
 /** User thường không được mua miền trực tiếp — phải qua domain-orders + admin duyệt */
@@ -349,9 +352,12 @@ const server = http.createServer(async (req, res) => {
       "/api/admin/users/update",
       "/api/admin/users/delete",
       "/api/admin/audit-log",
+      "/api/admin/assign-domain",
+      "/api/admin/domain-permissions/assign",
+      "/api/domains-list",
     ]);
     if (!assistantAllowed.has(pathname)) {
-      sendJson(res, 403, { success: false, error: "Tài khoản trợ lý chỉ được thêm, sửa và xóa user." });
+      sendJson(res, 403, { success: false, error: "Tài khoản trợ lý chỉ được thêm, sửa, xóa user và gán tên miền." });
       return;
     }
   }
@@ -552,7 +558,7 @@ const server = http.createServer(async (req, res) => {
     }
     const users = listUsers().map((u) => ({
       ...u,
-      balance: getBalance(u.id),
+      balance: currentUser.role === "assistant" ? undefined : getBalance(u.id),
       domainCount: (listUserDomainNames(u.id) || []).length,
     }));
     sendJson(res, 200, { success: true, users });
@@ -1267,8 +1273,8 @@ const server = http.createServer(async (req, res) => {
 
   // POST /api/admin/assign-domain (Admin gán trực tiếp domain cho user — hỗ trợ 1 hoặc list)
   if (req.method === "POST" && (pathname === "/api/admin/assign-domain" || pathname === "/api/admin/domain-permissions/assign")) {
-    if (currentUser.role !== "admin") {
-      sendJson(res, 403, { success: false, error: "Chỉ Admin mới có quyền gán domain" });
+    if (currentUser.role !== "admin" && currentUser.role !== "assistant") {
+      sendJson(res, 403, { success: false, error: "Chỉ Admin hoặc trợ lý mới có quyền gán domain" });
       return;
     }
     try {
@@ -1298,6 +1304,10 @@ const server = http.createServer(async (req, res) => {
       if (!domains.length || !userId) throw new Error("Vui lòng cung cấp domain/domains và userId");
       const target = getUserById(userId);
       if (!target) throw new Error("Không tìm thấy thành viên");
+      if (currentUser.role === "assistant" && target.role !== "user") {
+        sendJson(res, 403, { success: false, error: "Trợ lý chỉ được gán tên miền cho tài khoản user." });
+        return;
+      }
 
       const conflicts = domains
         .map((d) => describeOwnerConflict(d, userId))
@@ -1319,14 +1329,26 @@ const server = http.createServer(async (req, res) => {
 
       const assignments = [];
       const failed = [];
+      const previousOwners = [];
       for (const d of domains) {
+        const prev = getDomainOwner(d);
         try {
-          assignments.push(assignDomain(d, userId, body.meta || {}, { allowTransfer: true }));
+          const meta = { ...(body.meta || {}), assignedBy: currentUser.username, assignedByRole: currentUser.role };
+          assignments.push(assignDomain(d, userId, meta, { allowTransfer: true }));
+          if (prev?.userId && prev.userId !== userId) {
+            const prevUser = getUserById(prev.userId);
+            previousOwners.push({ domain: d, userId: prev.userId, username: prevUser?.username || prev.username || prev.userId });
+          }
         } catch (err) {
           failed.push({ domain: d, error: err.message });
         }
       }
 
+      const assignedNames = assignments.map((a) => a?.domain).filter(Boolean);
+      const shownNames = assignedNames.slice(0, 20).join(", ") + (assignedNames.length > 20 ? `, … (+${assignedNames.length - 20})` : "");
+      const fromText = previousOwners.length
+        ? ` (đổi chủ: ${previousOwners.slice(0, 10).map((p) => `${p.domain} từ @${p.username}`).join(", ")}${previousOwners.length > 10 ? ", …" : ""})`
+        : "";
       logAdminAction({
         action: "DOMAIN_ASSIGN",
         actor: currentUser,
@@ -1336,11 +1358,8 @@ const server = http.createServer(async (req, res) => {
           domain: domains.length === 1 ? domains[0] : undefined,
           domains,
         },
-        summary:
-          domains.length === 1
-            ? `Gán miền ${domains[0]} → @${target?.username || userId}`
-            : `Gán ${assignments.length}/${domains.length} miền → @${target?.username || userId}`,
-        details: { meta: body.meta || {}, failed },
+        summary: `Gán ${assignedNames.length}/${domains.length} miền → @${target?.username || userId}: ${shownNames}${fromText}`,
+        details: { meta: body.meta || {}, assigned: assignedNames, previousOwners, failed },
       });
 
       sendJson(res, 200, {
@@ -1368,13 +1387,16 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       const body = await parseBody(req);
+      const prev = body.domain ? getDomainOwner(body.domain) : null;
+      const prevUser = prev?.userId ? getUserById(prev.userId) : null;
+      const prevName = prevUser?.username || prev?.username || prev?.userId || null;
       unassignDomain(body.domain);
       logAdminAction({
         action: "DOMAIN_UNASSIGN",
         actor: currentUser,
-        target: { domain: body.domain },
-        summary: `Thu hồi quyền miền ${body.domain}`,
-        details: {},
+        target: { domain: body.domain, userId: prev?.userId || null, username: prevName },
+        summary: prevName ? `Thu hồi quyền miền ${body.domain} khỏi @${prevName}` : `Thu hồi quyền miền ${body.domain}`,
+        details: { previousOwner: prev || null },
       });
       sendJson(res, 200, { success: true, message: `Đã thu hồi quyền quản lý tên miền ${body.domain}` });
     } catch (err) {
@@ -1866,10 +1888,15 @@ const server = http.createServer(async (req, res) => {
       const page = parsedUrl.searchParams.get("page") || "1";
       const limit = parsedUrl.searchParams.get("limit") || "50";
       const q = parsedUrl.searchParams.get("q") || "";
-      const all = parsedUrl.searchParams.get("all") === "1";
-      const fields = parsedUrl.searchParams.get("fields") || "";
+      const isAssistant = currentUser.role === "assistant";
+      const all = isAssistant || parsedUrl.searchParams.get("all") === "1";
+      if (isAssistant && pathname !== "/api/domains-list") {
+        sendJson(res, 403, { success: false, error: "Tài khoản trợ lý chỉ được thêm, sửa, xóa user và gán tên miền." });
+        return;
+      }
+      const fields = isAssistant ? "names" : parsedUrl.searchParams.get("fields") || "";
       const userAllowedDomains = listUserDomainNames(currentUser.userId);
-      const isAdminUser = currentUser.role === "admin";
+      const isAdminUser = currentUser.role === "admin" || isAssistant;
 
       const payload = queryEnrichedDomainsList(
         { isAdminUser, userAllowedDomains },
