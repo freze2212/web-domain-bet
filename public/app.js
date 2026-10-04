@@ -2792,6 +2792,7 @@ function openModal(modalId) {
   document.body.classList.add("modal-open");
   modal.classList.add("active");
   modal.style.display = "flex";
+  if (window.matchMedia("(pointer: coarse)").matches) return;
   requestAnimationFrame(() => {
     const focusable = modal.querySelector(
       "input:not([type=hidden]):not([disabled]), textarea:not([disabled]), select:not([disabled])"
@@ -5422,10 +5423,8 @@ async function loadUsersList() {
     }
 
     if (assignUserSelect) {
-      const assignable = currentUser?.role === "assistant" ? allUsersCache.filter((u) => u.role === "user") : allUsersCache;
-      assignUserSelect.innerHTML = assignable.map((u) => `
-        <option value="${u.id}">${u.username} (${u.fullName})</option>
-      `).join("");
+      renderAssignUserList();
+      refreshAssignSummary();
     }
   } catch {}
 }
@@ -5599,52 +5598,215 @@ function parseAssignDomainList(raw) {
   return [...new Set(parts)];
 }
 
+let assignDomainNames = [];
+let assignDomainNamesLoaded = false;
+
+function assignInvalidLines(raw) {
+  return String(raw || "")
+    .split(/[\n\r,;\t]+/)
+    .map((s) => s.trim())
+    .filter((s) => s && !parseAssignDomainList(s).length);
+}
+
 function refreshAssignDomainParsedCount() {
   const ta = document.getElementById("assignDomainList");
   const countEl = document.getElementById("assignDomainParsedCount");
-  if (!countEl) return;
+  const hint = document.getElementById("assignDomainParseHint");
   const n = parseAssignDomainList(ta?.value || "").length;
-  countEl.textContent = String(n);
+  if (countEl) countEl.textContent = String(n);
+  if (hint) {
+    const bad = assignInvalidLines(ta?.value || "");
+    hint.innerHTML = bad.length
+      ? `⚠️ Bỏ qua ${bad.length} dòng không phải tên miền: <code>${escapeHtml(bad.slice(0, 3).join(", "))}${bad.length > 3 ? "…" : ""}</code>`
+      : "";
+  }
+  refreshAssignSummary();
 }
 
-function addSelectedDomainToAssignList() {
-  const sel = document.getElementById("assignDomainSelect");
+function addDomainToAssignList(dom) {
   const ta = document.getElementById("assignDomainList");
-  const dom = (sel?.value || "").trim().toLowerCase();
+  dom = String(dom || "").trim().toLowerCase();
   if (!dom || !ta) return;
   const existing = parseAssignDomainList(ta.value);
   if (existing.includes(dom)) {
-    showToast(`ℹ️ [${dom}] đã có trong list`);
+    showToast(`ℹ️ ${dom} đã có trong danh sách`);
     return;
   }
   ta.value = existing.length ? `${existing.join("\n")}\n${dom}` : dom;
   refreshAssignDomainParsedCount();
-  showToast(`➕ Đã thêm [${dom}] vào list`);
+  renderAssignDomainResults();
+}
+
+function renderAssignDomainResults() {
+  const input = document.getElementById("assignDomainSearch");
+  const box = document.getElementById("assignDomainResults");
+  if (!input || !box) return;
+  const q = input.value.trim().toLowerCase();
+  if (!q || document.activeElement !== input) {
+    box.hidden = true;
+    return;
+  }
+  if (!assignDomainNamesLoaded) {
+    box.innerHTML = `<div class="assign-dd-empty">Đang tải danh sách miền…</div>`;
+    box.hidden = false;
+    return;
+  }
+  const inList = new Set(parseAssignDomainList(document.getElementById("assignDomainList")?.value || ""));
+  const starts = [];
+  const contains = [];
+  for (const d of assignDomainNames) {
+    const i = d.indexOf(q);
+    if (i === 0) starts.push(d);
+    else if (i > 0) contains.push(d);
+    if (starts.length >= 40) break;
+  }
+  const hits = [...starts, ...contains].slice(0, 40);
+  box.innerHTML = hits.length
+    ? hits
+        .map((d) => {
+          const added = inList.has(d);
+          return `<button type="button" class="assign-dd-item${added ? " is-added" : ""}" data-domain="${escapeHtml(d)}">
+            <span>${escapeHtml(d)}</span><em>${added ? "Đã thêm" : "+ Thêm"}</em>
+          </button>`;
+        })
+        .join("")
+    : `<div class="assign-dd-empty">Không có miền nào khớp “${escapeHtml(q)}”</div>`;
+  box.hidden = false;
+}
+
+function assignUserInitials(u) {
+  const words = (s) => String(s || "").replace(/\(.*?\)/g, " ").split(/[\s._-]+/).filter((w) => /^\p{L}/u.test(w));
+  const parts = words(u.fullName).length ? words(u.fullName) : words(u.username);
+  if (!parts.length) return String(u.username || "?").slice(0, 2).toUpperCase();
+  const s = parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : parts[0].slice(0, 2);
+  return s.toUpperCase();
+}
+
+function assignableUsers() {
+  const list = currentUser?.role === "assistant" ? allUsersCache.filter((u) => u.role === "user") : allUsersCache.slice();
+  const rank = (u) => (u.role === "user" ? 0 : u.role === "assistant" ? 1 : 2);
+  return list.sort((a, b) => rank(a) - rank(b) || String(a.username).localeCompare(String(b.username)));
+}
+
+function renderAssignUserList() {
+  const listEl = document.getElementById("assignUserList");
+  const hidden = document.getElementById("assignUserSelect");
+  if (!listEl || !hidden) return;
+  const q = (document.getElementById("assignUserSearch")?.value || "").trim().toLowerCase();
+  const users = assignableUsers().filter(
+    (u) => !q || String(u.username).toLowerCase().includes(q) || String(u.fullName || "").toLowerCase().includes(q)
+  );
+  if (!allUsersCache.length) {
+    listEl.innerHTML = `<div class="assign-dd-empty">Đang tải thành viên…</div>`;
+    return;
+  }
+  if (!users.length) {
+    listEl.innerHTML = `<div class="assign-dd-empty">Không có thành viên khớp “${escapeHtml(q)}”</div>`;
+    return;
+  }
+  listEl.innerHTML = users
+    .map((u) => {
+      const sel = hidden.value === u.id;
+      const roleClass = u.role === "admin" ? "admin" : u.role === "assistant" ? "assistant" : "user";
+      const roleText = u.role === "admin" ? "Admin" : u.role === "assistant" ? "Trợ lý" : "Thành viên";
+      const locked = u.status !== "active";
+      return `<button type="button" class="au-item${sel ? " is-selected" : ""}${locked ? " is-locked" : ""}" role="option" aria-selected="${sel}" data-id="${escapeHtml(u.id)}">
+        <span class="au-avatar au-${roleClass}">${escapeHtml(assignUserInitials(u))}</span>
+        <span class="au-main">
+          <b>@${escapeHtml(u.username)}</b>
+          <small>${escapeHtml(u.fullName || "—")}</small>
+        </span>
+        <span class="au-meta">
+          <span class="au-role au-role-${roleClass}">${roleText}${locked ? " · khóa" : ""}</span>
+          <small>${Number(u.domainCount) || 0} miền</small>
+        </span>
+        <span class="au-check" aria-hidden="true"></span>
+      </button>`;
+    })
+    .join("");
+}
+
+function refreshAssignSummary() {
+  const el = document.getElementById("assignSummary");
+  const btn = document.getElementById("btnConfirmAssignDomains");
+  if (!el) return;
+  const n = parseAssignDomainList(document.getElementById("assignDomainList")?.value || "").length;
+  const uid = document.getElementById("assignUserSelect")?.value || "";
+  const u = allUsersCache.find((x) => x.id === uid);
+  if (!u) el.innerHTML = n ? `<b>${n}</b> miền · chưa chọn thành viên` : "Chưa có miền và thành viên";
+  else el.innerHTML = `<b>${n}</b> miền → <b>@${escapeHtml(u.username)}</b>`;
+  if (btn && !btn.dataset.busy) {
+    btn.disabled = !n || !u;
+    btn.textContent = n ? `Gán ${n} miền` : "Gán tên miền";
+  }
+}
+
+function setupAssignModalOnce() {
+  const form = document.getElementById("domainAssignForm");
+  if (!form || form.dataset.ready) return;
+  form.dataset.ready = "1";
+  const ta = document.getElementById("assignDomainList");
+  const dSearch = document.getElementById("assignDomainSearch");
+  const dBox = document.getElementById("assignDomainResults");
+  const uSearch = document.getElementById("assignUserSearch");
+  const uList = document.getElementById("assignUserList");
+
+  ta?.addEventListener("input", refreshAssignDomainParsedCount);
+  dSearch?.addEventListener("input", renderAssignDomainResults);
+  dSearch?.addEventListener("focus", renderAssignDomainResults);
+  dSearch?.addEventListener("blur", () => setTimeout(() => { if (dBox) dBox.hidden = true; }, 150));
+  dSearch?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const first = dBox?.querySelector(".assign-dd-item:not(.is-added)");
+    if (first) addDomainToAssignList(first.dataset.domain);
+    else if (parseAssignDomainList(dSearch.value).length) addDomainToAssignList(parseAssignDomainList(dSearch.value)[0]);
+  });
+  dBox?.addEventListener("mousedown", (e) => e.preventDefault());
+  dBox?.addEventListener("click", (e) => {
+    const item = e.target.closest(".assign-dd-item");
+    if (item && !item.classList.contains("is-added")) addDomainToAssignList(item.dataset.domain);
+  });
+
+  uSearch?.addEventListener("input", renderAssignUserList);
+  uSearch?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    uList?.querySelector(".au-item")?.click();
+  });
+  uList?.addEventListener("click", (e) => {
+    const item = e.target.closest(".au-item");
+    if (!item) return;
+    document.getElementById("assignUserSelect").value = item.dataset.id;
+    renderAssignUserList();
+    refreshAssignSummary();
+  });
 }
 
 async function openDomainAssignModal(domainToPreselect = "") {
-  const domainSelect = document.getElementById("assignDomainSelect");
+  setupAssignModalOnce();
   const ta = document.getElementById("assignDomainList");
-  if (ta) {
-    ta.value = domainToPreselect ? String(domainToPreselect).trim().toLowerCase().replace(/^www\./, "") : "";
-    ta.oninput = refreshAssignDomainParsedCount;
-    refreshAssignDomainParsedCount();
-  }
-  if (domainSelect) {
-    domainSelect.innerHTML = `<option value="">Đang tải danh sách...</option>`;
-    try {
-      const res = await fetch("/api/domains-list?all=1&fields=names", { headers: authHeaders() });
-      const data = await res.json();
-      const names = Array.isArray(data.domains) ? data.domains : [];
-      domainSelect.innerHTML =
-        `<option value="">-- Chọn để thêm vào list --</option>` +
-        names.map((dom) => `<option value="${dom}">${dom}</option>`).join("");
-    } catch {
-      domainSelect.innerHTML = `<option value="">Không tải được danh sách</option>`;
-    }
-  }
-  loadUsersList();
+  if (ta) ta.value = domainToPreselect ? String(domainToPreselect).trim().toLowerCase().replace(/^www\./, "") : "";
+  const hidden = document.getElementById("assignUserSelect");
+  if (hidden) hidden.value = "";
+  ["assignDomainSearch", "assignUserSearch"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  refreshAssignDomainParsedCount();
+  renderAssignUserList();
   openModal("domainAssignModal");
+  loadUsersList();
+  try {
+    const res = await fetch("/api/domains-list?all=1&fields=names", { headers: authHeaders() });
+    const data = await res.json();
+    assignDomainNames = (Array.isArray(data.domains) ? data.domains : []).map((d) => String(d).toLowerCase()).sort();
+    assignDomainNamesLoaded = true;
+  } catch {
+    assignDomainNamesLoaded = true;
+    assignDomainNames = [];
+  }
+  renderAssignDomainResults();
 }
 
 function isHubAdminAccount(userId, username) {
@@ -5691,11 +5853,20 @@ async function handleDomainAssignSubmit(e, confirmTransfer = false) {
     return;
   }
 
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = `Đang gán ${domains.length} miền...`;
-  }
+  const setBusy = (busy) => {
+    if (!btn) return;
+    if (busy) {
+      btn.dataset.busy = "1";
+      btn.disabled = true;
+      btn.textContent = `Đang gán ${domains.length} miền...`;
+    } else {
+      delete btn.dataset.busy;
+      refreshAssignSummary();
+    }
+  };
+  setBusy(true);
 
+  let retryWithTransfer = false;
   try {
     const res = await fetch("/api/admin/assign-domain", {
       method: "POST",
@@ -5707,15 +5878,13 @@ async function handleDomainAssignSubmit(e, confirmTransfer = false) {
       const conflicts = (data.conflicts || (data.currentOwner ? [data.currentOwner] : [])).filter(
         (c) => c && !isHubAdminAccount(c.userId, c.username)
       );
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = "Xác Nhận Gán Domain";
+      setBusy(false);
+      if (conflicts.length) {
+        const lines = conflicts.map((c) => `${c.domain} đang thuộc @${c.username}`).join("\n");
+        if (!(await confirmCenter(`${lines}\n\nXác nhận chuyển các miền này sang thành viên vừa chọn?`))) return;
       }
-      if (!conflicts.length) return handleDomainAssignSubmit(null, true);
-      const lines = conflicts.map((c) => `${c.domain} đang thuộc @${c.username}`).join("\n");
-      const ok = await confirmCenter(`${lines}\n\nXác nhận chuyển các miền này sang thành viên vừa chọn?`);
-      if (!ok) return;
-      return handleDomainAssignSubmit(null, true);
+      retryWithTransfer = true;
+      return;
     }
     if (data.success) {
       const ok = data.assignedCount ?? domains.length;
@@ -5735,10 +5904,8 @@ async function handleDomainAssignSubmit(e, confirmTransfer = false) {
   } catch (err) {
     showToast(`❌ Lỗi kết nối: ${err.message}`);
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Xác Nhận Gán Domain";
-    }
+    setBusy(false);
+    if (retryWithTransfer) handleDomainAssignSubmit(null, true);
   }
 }
 
@@ -8085,6 +8252,238 @@ window.handleAdminApproveDomainOrder = handleAdminApproveDomainOrder;
 window.handleAdminRejectDomainOrder = handleAdminRejectDomainOrder;
 window.handleAdminFulfillDomainOrder = handleAdminFulfillDomainOrder;
 window.goToDomainOrdersHistory = goToDomainOrdersHistory;
+
+// ── 9. MOBILE SHELL: THANH TAB ĐÁY + MENU + BẢNG DẠNG THẺ ──────────────────
+const MNAV_ICONS = {
+  "tab-templates": '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  "tab-buy": '<circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.6 12.2a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 2-1.5L22 7H6"/>',
+  "tab-point": '<path d="M13 2 4 14h8l-1 8 9-12h-8l1-8z"/>',
+  "tab-batch": '<path d="m12 2 10 5-10 5L2 7l10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+  "tab-domains": '<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+  "tab-domain-perms": '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+  "tab-tasks": '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  "tab-check": '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+  "tab-wallet": '<rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/><path d="M16 15h2"/>',
+  "tab-members": '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  "tab-ledger": '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8M10 9H8"/>',
+  "tab-orders": '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  "tab-history": '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  "tab-settings": '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  refresh: '<path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+  login: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/>',
+};
+const MNAV_SHORT = {
+  "tab-templates": "Mẫu LP",
+  "tab-buy": "Mua miền",
+  "tab-point": "Trỏ miền",
+  "tab-batch": "Hàng loạt",
+  "tab-domains": "Tên miền",
+  "tab-domain-perms": "Xin quyền",
+  "tab-tasks": "Tiến trình",
+  "tab-check": "Kiểm tra",
+  "tab-wallet": "Ví",
+  "tab-members": "Thành viên",
+  "tab-ledger": "Giao dịch",
+  "tab-orders": "Đơn mua",
+  "tab-history": "Lịch sử",
+  "tab-settings": "Cài đặt",
+};
+const MNAV_PRIMARY = ["tab-domains", "tab-buy", "tab-tasks", "tab-wallet", "tab-members", "tab-templates"];
+const MNAV_ALERT_BADGES = new Set(["tab-tasks", "tab-orders", "tab-domain-perms"]);
+
+const mnavSvg = (key) =>
+  `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MNAV_ICONS[key] || MNAV_ICONS.more}</svg>`;
+
+function mnavVisibleTabs() {
+  return [...document.querySelectorAll("#mainNavMenu .nav-tab")].filter(
+    (b) => !b.hidden && !b.dataset.closed && getComputedStyle(b).display !== "none"
+  );
+}
+
+function mnavBadge(btn) {
+  if (!MNAV_ALERT_BADGES.has(btn.dataset.tab)) return "";
+  const b = btn.querySelector(".tab-badge");
+  if (!b || b.style.display === "none") return "";
+  const n = parseInt(b.textContent, 10);
+  return n > 0 ? `<span class="mnav-badge">${n > 99 ? "99+" : n}</span>` : "";
+}
+
+function closeMobileSheet() {
+  const sheet = document.getElementById("mobileSheet");
+  if (!sheet) return;
+  sheet.classList.remove("open");
+  sheet.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("msheet-open");
+}
+
+function openMobileSheet() {
+  const sheet = document.getElementById("mobileSheet");
+  if (!sheet) return;
+  renderMobileSheet();
+  sheet.classList.add("open");
+  sheet.setAttribute("aria-hidden", "false");
+  document.body.classList.add("msheet-open");
+}
+
+function renderMobileNav() {
+  const nav = document.getElementById("mobileNav");
+  if (!nav) return;
+  const tabs = mnavVisibleTabs();
+  const byId = new Map(tabs.map((b) => [b.dataset.tab, b]));
+  const primary = MNAV_PRIMARY.filter((id) => byId.has(id)).slice(0, 4).map((id) => byId.get(id));
+  const active = document.querySelector("#mainNavMenu .nav-tab.active")?.dataset.tab;
+  const moreActive = active && !primary.some((b) => b.dataset.tab === active);
+  const html =
+    primary
+      .map((b) => {
+        const id = b.dataset.tab;
+        return `<button type="button" class="mnav-item${id === active ? " active" : ""}" data-tab="${id}">
+          <span class="mnav-ic">${mnavSvg(id)}${mnavBadge(b)}</span><span class="mnav-lb">${MNAV_SHORT[id] || b.textContent.trim()}</span>
+        </button>`;
+      })
+      .join("") +
+    `<button type="button" class="mnav-item mnav-more-btn${moreActive ? " active" : ""}" data-more="1">
+      <span class="mnav-ic">${mnavSvg("more")}${tabs.some((b) => !primary.includes(b) && mnavBadge(b)) ? '<span class="mnav-dot"></span>' : ""}</span><span class="mnav-lb">Thêm</span>
+    </button>`;
+  if (nav.dataset.html !== html) {
+    nav.innerHTML = html;
+    nav.dataset.html = html;
+  }
+}
+
+function renderMobileSheet() {
+  const grid = document.getElementById("mobileSheetGrid");
+  const userBox = document.getElementById("mobileSheetUser");
+  const actions = document.getElementById("mobileSheetActions");
+  if (!grid || !userBox || !actions) return;
+  const active = document.querySelector("#mainNavMenu .nav-tab.active")?.dataset.tab;
+  grid.innerHTML = mnavVisibleTabs()
+    .map((b) => {
+      const id = b.dataset.tab;
+      const label = b.querySelector("span:not(.nav-tab-icon):not(.tab-badge)")?.textContent.trim() || MNAV_SHORT[id];
+      return `<button type="button" class="msheet-item${id === active ? " active" : ""}" data-tab="${id}">
+        <span class="mnav-ic">${mnavSvg(id)}${mnavBadge(b)}</span><span>${escapeHtml(label)}</span>
+      </button>`;
+    })
+    .join("");
+
+  if (isLoggedIn()) {
+    const u = currentUser;
+    const role = u.role === "admin" ? "Admin" : u.role === "assistant" ? "Trợ lý" : "Thành viên";
+    const bal = (Number(u.balance) || 0).toLocaleString("vi-VN");
+    userBox.innerHTML = `
+      <span class="msheet-avatar">${escapeHtml(assignUserInitials(u))}</span>
+      <div class="msheet-uinfo"><b>@${escapeHtml(u.username)}</b><small>${role}${u.role !== "assistant" ? ` · ${bal} Xu` : ""}</small></div>
+      ${u.role !== "assistant" ? `<button type="button" class="btn btn-primary btn-sm" data-act="topup">+ Nạp Xu</button>` : ""}`;
+    actions.innerHTML = `
+      <button type="button" class="msheet-act" data-act="refresh">${mnavSvg("refresh")}<span>Làm mới dữ liệu</span></button>
+      <button type="button" class="msheet-act is-danger" data-act="logout">${mnavSvg("logout")}<span>Đăng xuất</span></button>`;
+  } else {
+    userBox.innerHTML = `
+      <span class="msheet-avatar">?</span>
+      <div class="msheet-uinfo"><b>Khách</b><small>Tra cứu miễn phí — mua cần đăng nhập</small></div>`;
+    actions.innerHTML = `<button type="button" class="msheet-act is-primary" data-act="login">${mnavSvg("login")}<span>Đăng nhập</span></button>`;
+  }
+}
+
+function mnavGo(tabId) {
+  closeMobileSheet();
+  switchToTab(tabId);
+  window.scrollTo(0, 0);
+}
+
+const MC_ACTION_RE = /thao tác|hành động|action/i;
+
+function labelTablesForCards(root = document) {
+  root.querySelectorAll("table.domains-table, table.data-table").forEach((table) => {
+    const rows = table.querySelectorAll(":scope > tbody > tr:not([data-mc])");
+    if (!rows.length) return;
+    const heads = [...table.querySelectorAll(":scope > thead th")].map((th) =>
+      th.textContent.replace(/\s*\(.*?\)\s*/g, " ").replace(/\s+/g, " ").trim()
+    );
+    if (!heads.length) return;
+    const idxCol = heads.findIndex((h) => h === "#" || /^stt$/i.test(h));
+    const preferred = heads.findIndex((h) => /^(tên miền|domain|username)/i.test(h));
+    const titleCol = preferred >= 0 ? preferred : heads.findIndex((h, i) => i !== idxCol && h && !MC_ACTION_RE.test(h));
+    table.classList.add("mc-table");
+    rows.forEach((tr) => {
+      tr.dataset.mc = "1";
+      const cells = [...tr.children];
+      if (cells.length === 1 || cells.some((td) => td.colSpan > 1)) {
+        tr.classList.add("mc-row-full");
+        return;
+      }
+      cells.forEach((td, i) => {
+        const label = heads[i] || "";
+        td.dataset.label = label;
+        if (i === idxCol) td.classList.add("mc-idx");
+        else if (i === titleCol) td.classList.add("mc-title");
+        else if (MC_ACTION_RE.test(label) || td.querySelectorAll(".btn, .btn-switch-mode").length > 1) td.classList.add("mc-actions");
+        else if (!td.textContent.trim() && !td.querySelector("img,svg,input,select,button")) td.classList.add("mc-empty");
+        else if (td.textContent.trim().length > 22 || td.querySelector("div, table, ul, br, select, input")) td.classList.add("mc-wide");
+      });
+    });
+  });
+}
+
+function initMobileShell() {
+  const nav = document.getElementById("mobileNav");
+  const sheet = document.getElementById("mobileSheet");
+  const menu = document.getElementById("mainNavMenu");
+  if (!nav || !sheet || !menu) return;
+
+  nav.addEventListener("click", (e) => {
+    const item = e.target.closest(".mnav-item");
+    if (!item) return;
+    if (item.dataset.more) return sheet.classList.contains("open") ? closeMobileSheet() : openMobileSheet();
+    mnavGo(item.dataset.tab);
+  });
+  sheet.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) return closeMobileSheet();
+    const item = e.target.closest(".msheet-item");
+    if (item) return mnavGo(item.dataset.tab);
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!act) return;
+    closeMobileSheet();
+    if (act === "topup") openTopupModal();
+    else if (act === "refresh") document.getElementById("globalRefreshBtn")?.click();
+    else if (act === "logout") handleLogout();
+    else if (act === "login") openLoginModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeMobileSheet();
+  });
+
+  let navQueued = false;
+  const queueNav = () => {
+    if (navQueued) return;
+    navQueued = true;
+    requestAnimationFrame(() => {
+      navQueued = false;
+      renderMobileNav();
+      if (sheet.classList.contains("open")) renderMobileSheet();
+    });
+  };
+  new MutationObserver(queueNav).observe(menu, { subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"], childList: true, characterData: true });
+  new MutationObserver(queueNav).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+
+  let tablesQueued = false;
+  new MutationObserver(() => {
+    if (tablesQueued) return;
+    tablesQueued = true;
+    requestAnimationFrame(() => {
+      tablesQueued = false;
+      labelTablesForCards();
+    });
+  }).observe(document.body, { childList: true, subtree: true });
+
+  renderMobileNav();
+  labelTablesForCards();
+}
+
+initMobileShell();
 
 
 

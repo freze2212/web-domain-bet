@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261001-assistant">
+  <link rel="stylesheet" href="style.css?v=20261004-mobile-ui">
   <script>document.documentElement.classList.add("auth-pending");</script>
 </head>
 <body class="auth-pending">
@@ -1463,7 +1463,7 @@
       </div>
 
       <!-- Balance Summary Cards -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 24px;">
+      <div class="wallet-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 24px;">
         <div class="card" style="padding: 20px; border-left: 4px solid var(--accent-emerald);">
           <span style="font-size: 12px; color: var(--text-dim);">SỐ DƯ HIỆN TẠI</span>
           <div style="font-size: 28px; font-weight: 800; color: var(--accent-emerald); margin-top: 4px;" id="walletCardBalance">0.00$</div>
@@ -1780,7 +1780,7 @@
           <div>
             <div class="form-group">
               <label>Số Lượng Xu Cần Nạp <span style="color: var(--accent-amber); font-size: 12px;">(100k VNĐ = 100 Xu • 1 Xu = 1.000 VNĐ)</span></label>
-              <div style="display: flex; gap: 8px;">
+              <div class="topup-amount-row" style="display: flex; gap: 8px;">
                 <input type="number" step="10" min="10" id="topupAmountInput" class="form-input" value="100" oninput="refreshVietQr()">
                 <button type="button" class="btn btn-secondary btn-sm" onclick="setTopupAmount(100)">100 Xu</button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="setTopupAmount(200)">200 Xu</button>
@@ -1890,53 +1890,68 @@
   <!-- Modal: Gán Tên Miền Cho Người Dùng -->
   <div id="domainAssignModal" class="modal">
     <div class="modal-backdrop" onclick="closeModal('domainAssignModal')"></div>
-    <div class="modal-content modal-md">
+    <div class="modal-content assign-modal">
       <div class="modal-header">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <span style="font-size: 22px;">🔗</span>
+        <div class="mh-title">
+          <span class="mh-icon">🔗</span>
           <div>
-            <h3>Gán Quyền Quản Lý Tên Miền</h3>
-            <span class="modal-subtitle">Chuyển quyền quản lý domain cho đại lý cụ thể</span>
+            <h3>Gán tên miền cho thành viên</h3>
+            <span class="mh-sub">Chuyển quyền quản lý domain sang tài khoản đại lý</span>
           </div>
         </div>
-        <button class="modal-close" onclick="closeModal('domainAssignModal')">&times;</button>
+        <button type="button" class="modal-close" onclick="closeModal('domainAssignModal')" aria-label="Đóng">&times;</button>
       </div>
-      <div class="modal-body">
-        <form id="domainAssignForm" onsubmit="handleDomainAssignSubmit(event)">
-          <div class="form-group">
-            <label for="assignDomainList">Danh sách tên miền cần gán <span class="required">*</span></label>
+      <form id="domainAssignForm" class="assign-form" onsubmit="handleDomainAssignSubmit(event)" novalidate>
+        <div class="modal-body">
+          <section class="assign-step">
+            <div class="assign-step-head">
+              <span class="assign-step-no">1</span>
+              <div class="assign-step-text">
+                <b>Tên miền cần gán</b>
+                <small>Dán danh sách (mỗi dòng 1 miền) hoặc tìm trong hệ thống</small>
+              </div>
+              <span class="assign-count"><b id="assignDomainParsedCount">0</b> miền</span>
+            </div>
+            <div class="assign-search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <input type="search" id="assignDomainSearch" placeholder="Tìm miền trong hệ thống để thêm nhanh…" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
+              <div class="assign-dd" id="assignDomainResults" hidden></div>
+            </div>
             <textarea
               id="assignDomainList"
-              class="form-input font-mono"
-              rows="8"
-              placeholder="Dán list dài, mỗi dòng 1 miền:&#10;trangchugg88.fit&#10;trangchugg88.ink&#10;trangchugg88.xyz&#10;..."
-              required
+              class="form-control font-mono assign-textarea"
+              rows="5"
+              placeholder="trangchugg88.fit&#10;trangchugg88.ink&#10;trangchugg88.xyz"
+              autocapitalize="off"
+              spellcheck="false"
             ></textarea>
-            <div id="assignDomainParseHint" style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">
-              Đã nhận: <strong id="assignDomainParsedCount" style="color: var(--accent-cyan);">0</strong> tên miền
+            <div class="assign-hint" id="assignDomainParseHint"></div>
+          </section>
+
+          <section class="assign-step">
+            <div class="assign-step-head">
+              <span class="assign-step-no">2</span>
+              <div class="assign-step-text">
+                <b>Thành viên nhận</b>
+                <small>Tìm theo username hoặc họ tên rồi bấm chọn</small>
+              </div>
             </div>
-          </div>
-          <div class="form-group">
-            <label for="assignDomainSelect">Hoặc thêm nhanh 1 miền từ hệ thống</label>
-            <div style="display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap;">
-              <select id="assignDomainSelect" class="form-input" style="flex: 1; min-width: 180px;">
-                <option value="">-- Chọn để thêm vào list --</option>
-              </select>
-              <button type="button" class="btn btn-secondary btn-sm" id="btnAssignAddSelectedDomain" onclick="addSelectedDomainToAssignList()">
-                ➕ Thêm vào list
-              </button>
+            <input type="hidden" id="assignUserSelect">
+            <div class="assign-search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <input type="search" id="assignUserSearch" placeholder="Tìm username, họ tên…" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
             </div>
-          </div>
-          <div class="form-group">
-            <label for="assignUserSelect">Gán Cho Thành Viên <span class="required">*</span></label>
-            <select id="assignUserSelect" class="form-input" required></select>
-          </div>
-          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; flex-wrap: wrap;">
+            <div class="assign-user-list" id="assignUserList" role="listbox" aria-label="Chọn thành viên"></div>
+          </section>
+        </div>
+        <div class="modal-footer assign-footer">
+          <div class="assign-summary" id="assignSummary">Chưa chọn thành viên</div>
+          <div class="assign-actions">
             <button type="button" class="btn btn-secondary" onclick="closeModal('domainAssignModal')">Hủy</button>
-            <button type="submit" class="btn btn-primary" id="btnConfirmAssignDomains">Xác Nhận Gán Domain</button>
+            <button type="submit" class="btn btn-primary" id="btnConfirmAssignDomains">Gán tên miền</button>
           </div>
-        </form>
-      </div>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -2900,7 +2915,19 @@
     <div class="toast-message" id="toastMessage">Thông báo</div>
   </div>
 
-  <script src="app.js?v=20261004-flow-review"></script>
+  <!-- Mobile: thanh tab đáy + menu đầy đủ (dựng từ #mainNavMenu bởi app.js) -->
+  <nav class="mnav" id="mobileNav" aria-label="Điều hướng chính"></nav>
+  <div class="msheet" id="mobileSheet" aria-hidden="true">
+    <div class="msheet-backdrop" data-close="1"></div>
+    <div class="msheet-panel" role="dialog" aria-label="Menu">
+      <div class="msheet-grip" data-close="1"></div>
+      <div class="msheet-user" id="mobileSheetUser"></div>
+      <div class="msheet-grid" id="mobileSheetGrid"></div>
+      <div class="msheet-actions" id="mobileSheetActions"></div>
+    </div>
+  </div>
+
+  <script src="app.js?v=20261004-mobile-ui"></script>
 </body>
 </html>
 
