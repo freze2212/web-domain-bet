@@ -188,8 +188,14 @@ export function register({ username, password, fullName, role = "user" }) {
   };
 }
 
+/** Phiên chỉ hợp lệ khi tài khoản còn tồn tại, đang hoạt động và chưa đổi mật khẩu sau lúc đăng nhập. */
 export function verifyToken(token) {
-  return verifyJwt(token);
+  const session = verifyJwt(token);
+  if (!session?.userId) return null;
+  const u = loadUsers().find((x) => x.id === session.userId);
+  if (!u || u.status !== "active") return null;
+  if (u.sessionsValidAfter && Number(session.iat || 0) < u.sessionsValidAfter) return null;
+  return { ...session, username: u.username, fullName: u.fullName, role: u.role };
 }
 
 export function listUsers() {
@@ -249,7 +255,10 @@ export function updateUserByAdmin(userId, { fullName, password, role, status }) 
   if (!u) throw new Error("Không tìm thấy người dùng");
 
   if (fullName !== undefined) u.fullName = fullName;
-  if (password) u.passwordHash = hashPassword(password);
+  if (password) {
+    u.passwordHash = hashPassword(password);
+    u.sessionsValidAfter = Date.now();
+  }
   if (role !== undefined) u.role = role === "admin" || role === "assistant" ? role : "user";
   if (status !== undefined) u.status = status;
 
