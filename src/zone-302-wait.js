@@ -1,7 +1,7 @@
 import { findZoneByName, getOrCreateZone, getZoneNameservers, setupDirect302Redirect } from "./cloudflare.js";
-import { updateNameservers } from "./spaceship.js";
+import { getDomainInfo, updateNameservers } from "./spaceship.js";
 import { getHistory, setHistoryProgress, updateHistoryItem } from "./history.js";
-import { completeTask, failTask, getTask } from "./task-queue.js";
+import { completeTask, failTask, getTask, listActiveTasks, markTaskWaitingZone, updateTaskProgress } from "./task-queue.js";
 import { syncDeployOwnership } from "./ownership.js";
 import { markDomainOrderFulfilled, refundFailedDomainOrder } from "./domain-orders.js";
 
@@ -27,6 +27,42 @@ export async function pointNameserversFor302(domain, { waitMs = INLINE_WAIT_MS, 
     zone = (await findZoneByName(domain).catch(() => null)) || zone;
   }
   return { active: zone?.status === "active", zone, nameservers };
+}
+
+/**
+ * Gọi lúc khởi động, TRƯỚC khi đóng job treo: job 302 bị restart cắt ngang mà miền đã thuộc mình
+ * → chuyển sang chế độ chờ zone để resumePendingZoneRedirects tự làm nốt (trỏ NS + Page Rule).
+ * Job mua chưa xong (Spaceship chưa có miền) giữ nguyên để bị đóng thất bại như cũ.
+ */
+export async function adoptInterrupted302Jobs() {
+  const jobs = listActiveTasks().filter(
+    (t) => t.type === "DEPLOY_302" && !t.params?.waitZone302 && t.params?.domain && t.params?.link
+  );
+  let adopted = 0;
+  for (const t of jobs) {
+    const { domain, link, historyId, isBuy, orderId = null } = t.params;
+    if (isBuy) {
+      const owned = await Promise.race([
+        getDomainInfo(domain).catch(() => null),
+        sleep(15000).then(() => null),
+      ]);
+      if (owned?.lifecycleStatus !== "registered") continue;
+    }
+    const msg = "Hub vừa khởi động lại — miền đã thuộc mình, tự chạy tiếp bước trỏ NS + 302...";
+    markTaskWaitingZone(t.id);
+    updateTaskProgress(t.id, 65, msg, msg, "info");
+    if (historyId) {
+      updateHistoryItem(historyId, {
+        status: "in_progress",
+        progress: msg,
+        error: null,
+        link,
+        details: { step: msg, waitZone302: true, link, orderId, resumedAfterRestart: true, nsEnsured: false },
+      });
+    }
+    adopted++;
+  }
+  return adopted;
 }
 
 let resumeRunning = false;
@@ -60,7 +96,16 @@ export async function resumePendingZoneRedirects() {
         if (h.taskId && getTask(h.taskId)) failTask(h.taskId, new Error(error), "Hết thời gian chờ zone");
         continue;
       }
-      const zone = await findZoneByName(h.domain).catch(() => null);
+      let zone = await findZoneByName(h.domain).catch(() => null);
+      if (!zone || (h.details?.resumedAfterRestart && !h.details?.nsEnsured)) {
+        try {
+          zone = (await pointNameserversFor302(h.domain, { waitMs: 0 })).zone || zone;
+          updateHistoryItem(h.id, { details: { nsEnsured: true } });
+        } catch (nsErr) {
+          console.error(`[302-wait] trỏ NS ${h.domain}:`, nsErr.message);
+          continue;
+        }
+      }
       if (zone?.status !== "active") {
         const step = `Đã trỏ NS. Zone Cloudflare đang "${zone?.status || "pending"}" — tự tạo 302 khi active.`;
         if (h.progress !== step) setHistoryProgress(h.id, step, { waitZone302: true, link: h.link });

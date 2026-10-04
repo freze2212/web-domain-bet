@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listTemplates, getTemplate, findTemplateByDomain, updateTemplateDomainsJson } from "./templates.js";
-import { checkDomainAvailability, registerDomain, resolveContactId, updateNameservers, getDomainInfo, quoteSpaceshipPurchase, assertSpaceshipBuyConfirmed, checkDomainsAvailabilityBatch } from "./spaceship.js";
+import { checkDomainAvailability, registerDomain, resolveContactId, updateNameservers, getDomainInfo, quoteSpaceshipPurchase, assertSpaceshipBuyConfirmed, checkDomainsAvailabilityBatch, spaceshipCostUsd } from "./spaceship.js";
 import {
   setupCloudflare,
   setupDirect302Redirect,
@@ -32,6 +32,7 @@ import { normalizeDomain, normalizeUrl, extractDomainsFromText, isRealLink } fro
 import { findDomainInRepos, checkDomainCfAccount, updateDomainInExactRepos, listAllDomains, removeDomainFromRepo, smartSetLink, detectBrandFromDomain, invalidateDomainListCache } from "./repo-scanner.js";
 import { adminSkipPayload, listHubZonesFromCache, isAdminCfZone, invalidateCfZoneCacheMem } from "./cf-account-guard.js";
 import { invalidateOwnershipCache } from "./ownership.js";
+import { getDomainBusy, domainBusyPayload, rejectIfDomainBusy, withDomainLock } from "./domain-busy.js";
 import { invalidateEnrichedDomainsCache, queryEnrichedDomainsList } from "./domains-list-service.js";
 import { logAdminAction, listAdminAudit } from "./admin-audit.js";
 import { getHistory, addHistoryItem, updateHistoryItem, clearHistory, setHistoryProgress, reconcileStaleHistory } from "./history.js";
@@ -1495,6 +1496,8 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
+      if (rejectIfDomainBusy(res, sendJson, domain)) return;
+
       // Nếu là User thường và isBuy = true -> Trừ tiền ví trước
       let price = 0;
       if (isBuy && currentUser.role !== "admin") {
@@ -1580,6 +1583,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      if (rejectIfDomainBusy(res, sendJson, domain)) return;
+
       const task = createTask({
         type: toMode === "302" ? "SWITCH_TO_302" : "SWITCH_TO_LP",
         domain,
@@ -1645,6 +1650,8 @@ const server = http.createServer(async (req, res) => {
         });
         return;
       }
+
+      if (rejectIfDomainBusy(res, sendJson, domain)) return;
 
       const task = createTask({
         type: "UPDATE_LINK",
@@ -2127,11 +2134,32 @@ const server = http.createServer(async (req, res) => {
       }
 
       const domain = normalizeDomain(body.domain);
+      let checkError = null;
       const [info, cfInfo, zone] = await Promise.all([
-        checkDomainAvailability(domain).catch(() => ({ result: "unknown" })),
+        checkDomainAvailability(domain).catch((e) => {
+          checkError = e.message;
+          return { result: "unknown" };
+        }),
         checkDomainCfAccount(domain).catch(() => ({ accountName: "Chưa rõ" })),
         findZoneByName(domain).catch(() => null),
       ]);
+
+      let spaceshipOwned = null;
+      if (info.result === "taken") {
+        const owned = await getDomainInfo(domain).catch(() => null);
+        if (owned?.lifecycleStatus) {
+          spaceshipOwned = {
+            lifecycleStatus: owned.lifecycleStatus,
+            registeredAt: owned.registrationDate || null,
+            expiresAt: owned.expirationDate || null,
+          };
+        }
+      }
+      const hubOwner = spaceshipOwned ? getDomainOwner(domain) : null;
+      const cost =
+        currentUser?.role === "admin" && !checkError
+          ? await spaceshipCostUsd(domain, info).catch(() => null)
+          : null;
 
       let activeRule = null;
       if (zone) {
@@ -2173,8 +2201,32 @@ const server = http.createServer(async (req, res) => {
         isAvailable,
         isBuyable,
         isPremium,
-        availability: isAvailable ? "available" : (isPremium ? "premium_unavailable" : (info.result === "registered" ? "registered" : "unavailable")),
-        statusMessage: isPremium ? "❌ Tên miền không khả dụng (Premium/Aftermarket)" : (isAvailable ? "✅ Còn trống để mua" : "❌ Đã có chủ / Không còn"),
+        availability: checkError
+          ? "unknown"
+          : isAvailable
+            ? "available"
+            : isPremium
+              ? "premium_unavailable"
+              : spaceshipOwned
+                ? "owned_by_us"
+                : info.result === "taken"
+                  ? "taken"
+                  : "unavailable",
+        checkError,
+        spaceshipOwned,
+        hubOwner: hubOwner
+          ? { username: getUserById(hubOwner.userId)?.username || hubOwner.username || hubOwner.userId || null }
+          : null,
+        cost,
+        statusMessage: checkError
+          ? "⚠️ Chưa kiểm tra được Spaceship"
+          : isPremium
+            ? "❌ Tên miền không khả dụng (Premium/Aftermarket)"
+            : isAvailable
+              ? "✅ Còn trống để mua"
+              : spaceshipOwned
+                ? "✅ Đã thuộc tài khoản Spaceship của mình"
+                : "❌ Đã có người khác đăng ký",
         priceXu,
         priceVnd,
         priceUsd: exactPriceUsd,
@@ -2208,6 +2260,22 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       sendJson(res, 500, { success: false, error: err.message });
     }
+    return;
+  }
+
+  // GET /api/domain-busy?domain= — miền có tiến trình đang chạy không (khoá đổi link / đổi mẫu)
+  if (req.method === "GET" && pathname === "/api/domain-busy") {
+    const domain = normalizeDomain(parsedUrl.searchParams.get("domain") || "");
+    if (!domain) {
+      sendJson(res, 400, { success: false, error: "Thiếu tên miền" });
+      return;
+    }
+    if (!canUserManageDomain(currentUser, domain)) {
+      sendJson(res, 403, { success: false, error: `⛔ Bạn chưa được cấp quyền quản lý tên miền [${domain}].` });
+      return;
+    }
+    const busy = getDomainBusy(domain);
+    sendJson(res, 200, busy ? { ...domainBusyPayload(busy), success: true, isBusy: true } : { success: true, isBusy: false });
     return;
   }
 
@@ -2530,8 +2598,14 @@ const server = http.createServer(async (req, res) => {
       const logs = [];
       let fixed;
       try {
-        fixed = await fixDomain(domain, { log: (m) => logs.push(m) });
+        fixed = await withDomainLock(domain, "Sửa lỗi tên miền", currentUser, () =>
+          fixDomain(domain, { log: (m) => logs.push(m) })
+        );
       } catch (fixErr) {
+        if (fixErr.code === "DOMAIN_BUSY") {
+          sendJson(res, 409, domainBusyPayload(fixErr.busy));
+          return;
+        }
         sendJson(res, 400, { success: false, error: fixErr.message, logs });
         return;
       }
@@ -2581,7 +2655,9 @@ const server = http.createServer(async (req, res) => {
           }
 
           const logs = [];
-          const fixed = await fixDomain(dom, { log: (m) => logs.push(m) });
+          const fixed = await withDomainLock(dom, "Sửa lỗi hàng loạt", currentUser, () =>
+            fixDomain(dom, { log: (m) => logs.push(m) })
+          );
           if (fixed.changed && fixed.link) {
             await new Promise((r) => setTimeout(r, 3000));
             await verifyHistoryItem({ domain: dom, id: dom, link: fixed.link }, true).catch(() => {});
@@ -2652,15 +2728,21 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const repairResult = await autoRepairDomain(item, Boolean(isFullRebuild));
+      const repairResult = await withDomainLock(targetDomain, "Tự động sửa / cài lại", currentUser, () =>
+        autoRepairDomain(item, Boolean(isFullRebuild))
+      );
       sendJson(res, 200, { success: true, ...repairResult });
     } catch (err) {
+      if (err.code === "DOMAIN_BUSY") {
+        sendJson(res, 409, domainBusyPayload(err.busy));
+        return;
+      }
       sendJson(res, 500, { success: false, error: err.message });
     }
     return;
   }
 
-  function startDeployTracking({ domain, currentUser, actionType, actionLabel, link, tele, template, isBuy, mode }) {
+  function startDeployTracking({ domain, currentUser, actionType, actionLabel, link, tele, template, isBuy, mode, orderId = null }) {
     const historyId = `hist_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const task = createTask({
       type: mode === "302" ? "DEPLOY_302" : "DEPLOY_LP",
@@ -2675,6 +2757,7 @@ const server = http.createServer(async (req, res) => {
         isBuy: !!isBuy,
         mode: mode === "302" ? "302" : "LP",
         historyId,
+        orderId,
         targetUserId: currentUser.userId || currentUser.id || null,
       },
     });
@@ -3002,9 +3085,10 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (activeDeployLocks.has(domain)) {
-        sendJson(res, 429, { success: false, error: `Tên miền [${domain}] đang được xử lý. Vui lòng chờ vài giây.` });
+        sendJson(res, 409, domainBusyPayload({ domain, label: "Đang cài đặt tên miền" }));
         return;
       }
+      if (rejectIfDomainBusy(res, sendJson, domain)) return;
       activeDeployLocks.add(domain);
 
       const link = normalizeUrl(rawLink);
@@ -3098,9 +3182,10 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (activeDeployLocks.has(domain)) {
-        sendJson(res, 429, { success: false, error: `Tên miền [${domain}] đang được xử lý. Vui lòng chờ vài giây.` });
+        sendJson(res, 409, domainBusyPayload({ domain, label: "Đang cài đặt tên miền" }));
         return;
       }
+      if (rejectIfDomainBusy(res, sendJson, domain)) return;
       activeDeployLocks.add(domain);
 
       const link = normalizeUrl(rawLink);
@@ -3115,6 +3200,7 @@ const server = http.createServer(async (req, res) => {
         template: null,
         isBuy,
         mode: "302",
+        orderId: body.orderId || null,
       });
       deployTask = tracking.task;
       deployHistId = tracking.historyId;
@@ -3173,11 +3259,20 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const result = await smartSetLink(domain, link, tele, {
-        userId: currentUser.userId,
-        username: currentUser.username,
-        fullName: currentUser.fullName,
-      });
+      let result;
+      try {
+        result = await withDomainLock(domain, "Đổi link đích", currentUser, () =>
+          smartSetLink(domain, link, tele, {
+            userId: currentUser.userId,
+            username: currentUser.username,
+            fullName: currentUser.fullName,
+          })
+        );
+      } catch (lockErr) {
+        if (lockErr.code !== "DOMAIN_BUSY") throw lockErr;
+        sendJson(res, 409, domainBusyPayload(lockErr.busy));
+        return;
+      }
       if (result.success) {
         syncDeployOwnershipPreserve(domain, currentUser, body, {
           mode: result.mode || "LP",
@@ -3220,11 +3315,13 @@ const server = http.createServer(async (req, res) => {
             });
             continue;
           }
-          const resItem = await smartSetLink(dom, link, "", {
-            userId: currentUser.userId,
-            username: currentUser.username,
-            fullName: currentUser.fullName,
-          });
+          const resItem = await withDomainLock(dom, "Đổi link hàng loạt", currentUser, () =>
+            smartSetLink(dom, link, "", {
+              userId: currentUser.userId,
+              username: currentUser.username,
+              fullName: currentUser.fullName,
+            })
+          );
           results.push({
             domain: dom,
             status: resItem.success ? "success" : "error",
@@ -3299,6 +3396,8 @@ const server = http.createServer(async (req, res) => {
       }
       const activeLink = linkRes.link;
       const activeTele = linkRes.tele || "";
+
+      if (rejectIfDomainBusy(res, sendJson, domain)) return;
 
       histId = `hist_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       addHistoryItem({

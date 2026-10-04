@@ -2037,6 +2037,27 @@
     </div>
   </div>
 
+  <!-- Miền đang có tiến trình chạy → chặn đổi link / đổi mẫu -->
+  <div id="domainBusyModal" class="modal">
+    <div class="modal-backdrop" onclick="closeModal('domainBusyModal')"></div>
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <div>
+          <h3>⏳ Vui lòng chờ tiến trình xong</h3>
+          <span id="domainBusyDomain" class="modal-subtitle"></span>
+        </div>
+        <button class="modal-close" onclick="closeModal('domainBusyModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="domainBusyMessage" style="line-height: 1.6;"></p>
+        <p style="font-size: 12px; color: #94a3b8;">Khi tiến trình thành công hoặc thất bại (xem tab Tiến trình / Lịch sử) thì mới đổi link hay đổi mẫu tiếp được.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary btn-sm" onclick="closeModal('domainBusyModal')">Đã hiểu</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal 2: Sửa Link Nhanh (Edit Link Modal) -->
   <div id="editLinkModal" class="modal">
     <div class="modal-backdrop" onclick="closeModal('editLinkModal')"></div>
@@ -2879,7 +2900,7 @@
     <div class="toast-message" id="toastMessage">Thông báo</div>
   </div>
 
-  <script src="app.js?v=20261004-assistant-assign"></script>
+  <script src="app.js?v=20261004-domain-busy"></script>
 </body>
 </html>
 

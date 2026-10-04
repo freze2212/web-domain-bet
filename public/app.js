@@ -72,8 +72,43 @@ window.fetch = async function (url, options = {}) {
       openLoginModal();
     }
   }
+  if (response.status === 409 && typeof url === "string" && url.startsWith("/api/")) {
+    response
+      .clone()
+      .json()
+      .then((data) => {
+        if (data?.code === "DOMAIN_BUSY") showDomainBusyPopup(data);
+      })
+      .catch(() => {});
+  }
   return response;
 };
+
+function showDomainBusyPopup(data) {
+  const domEl = document.getElementById("domainBusyDomain");
+  const msgEl = document.getElementById("domainBusyMessage");
+  if (!msgEl) {
+    alert(data?.error || "Tên miền đang có tiến trình chạy. Vui lòng chờ xong.");
+    return;
+  }
+  if (domEl) domEl.textContent = data?.busy?.domain ? `Tên miền: ${data.busy.domain}` : "";
+  msgEl.textContent = data?.error || "Tên miền đang có tiến trình chạy. Vui lòng chờ xong.";
+  openModal("domainBusyModal");
+}
+
+/** Hỏi server trước khi mở form đổi link / đổi mẫu. false = đang bận (đã hiện popup). */
+async function ensureDomainNotBusy(domain) {
+  if (!domain) return true;
+  try {
+    const res = await fetch(`/api/domain-busy?domain=${encodeURIComponent(domain)}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (data?.isBusy) {
+      showDomainBusyPopup(data);
+      return false;
+    }
+  } catch {}
+  return true;
+}
 
 let allTemplates = [];
 let allDomains = [];
@@ -688,6 +723,7 @@ function syncSwitchTemplateLinkFields(resolved) {
 }
 
 async function openSwitchTemplateModal(domain, currentTplId = "", currentLink = "", currentTele = "") {
+  if (!(await ensureDomainNotBusy(domain))) return;
   activeDomainToEdit = domain;
   const subtitleEl = document.getElementById("switchTemplateDomainSubtitle");
   if (subtitleEl) subtitleEl.textContent = `Tên miền: ${domain}`;
@@ -1336,6 +1372,14 @@ function escapeHtmlText(value) {
     .replace(/"/g, "&quot;");
 }
 
+function formatSpaceshipCostHtml(cost) {
+  if (!cost || !Number.isFinite(Number(cost.regUsd))) return "";
+  const usd = (v) => `$${Number(v).toFixed(2)}`;
+  const privacy = cost.privacyUsd > 0 ? ` + privacy ${usd(cost.privacyUsd)}` : "";
+  const note = cost.isPremium ? " (giá premium Spaceship)" : cost.isUnlisted ? " (đuôi chưa có trong bảng giá — giá mặc định)" : "";
+  return `<div style="font-size: 12px; color: #fbbf24; margin-top: 4px;">💵 Giá gốc Spaceship: <b>${usd(cost.regUsd)}</b>/năm đầu${privacy} · gia hạn <b>${usd(cost.renewUsd)}</b>/năm${note}</div>`;
+}
+
 async function checkDomainAvailabilityLive(domain, statusEl) {
   if (!domain) {
     showToast("⚠️ Vui lòng nhập tên miền trước!");
@@ -1353,7 +1397,22 @@ async function checkDomainAvailabilityLive(domain, statusEl) {
       body: JSON.stringify({ domain }),
     });
     const data = await res.json();
+    if (!data.success) {
+      if (statusEl) {
+        statusEl.className = "field-feedback unavailable";
+        statusEl.innerHTML = `❌ Không kiểm tra được: ${escapeHtmlText(data.error || "lỗi máy chủ")}`;
+      }
+      return;
+    }
     if (data.success) {
+      const costHtml = formatSpaceshipCostHtml(data.cost);
+      if (data.availability === "unknown") {
+        if (statusEl) {
+          statusEl.className = "field-feedback unavailable";
+          statusEl.innerHTML = `⚠️ Chưa kiểm tra được trên Spaceship (${escapeHtmlText(data.checkError || "lỗi kết nối")}). Bấm <b>Check Giá</b> lại sau vài giây.`;
+        }
+        return;
+      }
       if (data.isAvailable && !data.isPremium) {
         if (statusEl) {
           statusEl.className = "field-feedback available";
@@ -1364,6 +1423,7 @@ async function checkDomainAvailabilityLive(domain, statusEl) {
               <div>
                 ✅ Tên miền còn trống! Báo giá: <b style="color: #10b981; font-size: 14px;">${formatted}</b>
                 <span style="font-size: 11px; color: #38bdf8; margin-left: 6px;">[${ruleLabel}]</span>
+                ${costHtml}
               </div>
               ${
                 isAdminUser()
@@ -1382,9 +1442,20 @@ async function checkDomainAvailabilityLive(domain, statusEl) {
         if (statusEl) {
           statusEl.className = "field-feedback unavailable";
           if (data.isPremium) {
-            statusEl.innerHTML = `❌ Tên miền không khả dụng (Thuộc danh mục Premium / Aftermarket - Không hỗ trợ đăng ký)`;
+            statusEl.innerHTML = `❌ Tên miền không khả dụng (Thuộc danh mục Premium / Aftermarket - Không hỗ trợ đăng ký)${costHtml}`;
+          } else if (data.availability === "owned_by_us") {
+            statusEl.className = "field-feedback available";
+            const own = data.spaceshipOwned || {};
+            const fmt = (iso) => (iso ? new Date(iso).toLocaleString("vi-VN") : "?");
+            const holder = data.hubOwner?.username ? ` · Đang giao cho <b>@${escapeHtmlText(data.hubOwner.username)}</b>` : "";
+            const modeLabel = { LANDING_PAGE: "Landing Page", DIRECT_302: "302" }[data.currentMode] || "Chưa cài";
+            statusEl.innerHTML =
+              `✅ Miền <b>đã thuộc tài khoản Spaceship của mình</b> — mua lúc ${fmt(own.registeredAt)}, hết hạn ${fmt(own.expiresAt)}.` +
+              `<br>Đang chạy: <b>${modeLabel}</b> · CF: <b>${escapeHtmlText(data.cfAccount || "Chưa rõ")}</b>${holder}` +
+              `<br><span style="font-size: 12px; color: #94a3b8;">Bấm mua sẽ không trừ tiền Spaceship nữa, chỉ cài lại Cloudflare / Landing.</span>` +
+              costHtml;
           } else {
-            statusEl.innerHTML = `ℹ️ Tên miền đã có chủ sở hữu / Đã được đăng ký trước đó. (Tài khoản CF: <b>${data.cfAccount || "Chưa rõ"}</b>)`;
+            statusEl.innerHTML = `❌ Tên miền đã có <b>người khác</b> đăng ký — không mua được.${costHtml}`;
           }
         }
       }
@@ -2769,7 +2840,8 @@ function openPreviewModal(templateId) {
   openModal("previewModal");
 }
 
-function openEditLinkModal(domain, currentLink = "", currentTele = "") {
+async function openEditLinkModal(domain, currentLink = "", currentTele = "") {
+  if (!(await ensureDomainNotBusy(domain))) return;
   activeDomainToEdit = domain;
   const sub = document.getElementById("editLinkDomainSubtitle");
   const linkInp = document.getElementById("editLinkInput");
@@ -6681,6 +6753,7 @@ async function saveActiveTemplateFile(deployNow = false) {
 
 // ── 11. 1-CLICK 302 🔁 LANDING PAGE SWITCHER ──────────────────────────────
 async function openSwitchModeModal(domain, currentMode, currentLink) {
+  if (!(await ensureDomainNotBusy(domain))) return;
   const domainInput = document.getElementById("switchModeDomain");
   const title = document.getElementById("switchModalDomainTitle");
   const modeSelect = document.getElementById("switchToMode");

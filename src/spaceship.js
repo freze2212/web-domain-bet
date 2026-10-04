@@ -114,54 +114,65 @@ export async function quoteSpaceshipPurchase(domain) {
     };
   }
 
-  const premium = pickRegisterPrice(availability);
-  let regUsd;
-  let priceSource;
-
-  if (premium) {
-    regUsd = premium.price;
-    priceSource = "spaceship_api";
-  } else {
-    const { getPricing } = await import("./wallet.js");
-    const pricing = getPricing();
-    const tld = norm.includes(".") ? norm.slice(norm.lastIndexOf(".")) : "";
-    const tldVal = tld ? pricing.tldPrices?.[tld] : null;
-    if (typeof tldVal === "object" && tldVal !== null) {
-      regUsd = Number(tldVal.spaceshipReg ?? tldVal.reg);
-    } else if (tldVal != null) {
-      regUsd = Number(tldVal);
-    } else {
-      regUsd = Number(pricing.defaultPrice || 4.98);
-    }
-    if (!Number.isFinite(regUsd)) regUsd = Number(pricing.defaultPrice || 4.98);
-    priceSource = "spaceship_catalog";
-  }
-
-  const { getPricing } = await import("./wallet.js");
-  const pricingCfg = getPricing();
-  const privacyUsd =
-    privacyLevel === "high" ? Number(pricingCfg.spaceshipPrivacyHighUsd ?? 0) || 0 : 0;
-  const totalUsd = Math.round((regUsd + privacyUsd) * 100) / 100;
+  const cost = await spaceshipCostUsd(norm, availability);
 
   return {
     domain: norm,
     canPurchase: true,
     alreadyOwned: false,
     skipCharge: false,
-    isPremium: Boolean(premium),
-    regUsd,
-    privacyLevel,
-    privacyUsd,
-    privacyLabel: privacyLevel === "high" ? "WHOIS Privacy (high)" : "Public WHOIS (không privacy)",
-    totalUsd,
+    isPremium: cost.isPremium,
+    regUsd: cost.regUsd,
+    privacyLevel: cost.privacyLevel,
+    privacyUsd: cost.privacyUsd,
+    privacyLabel: cost.privacyLevel === "high" ? "WHOIS Privacy (high)" : "Public WHOIS (không privacy)",
+    totalUsd: cost.totalUsd,
     currency: "USD",
-    formattedTotal: `$${totalUsd.toFixed(2)} USD`,
-    priceSource,
+    formattedTotal: `$${cost.totalUsd.toFixed(2)} USD`,
+    priceSource: cost.priceSource,
     years: 1,
     message:
-      priceSource === "spaceship_catalog"
+      cost.priceSource === "spaceship_catalog"
         ? "Giá TLD thường lấy từ bảng Spaceship trên hub (API không trả giá trước khi mua)"
         : "Giá premium từ Spaceship API",
+  };
+}
+
+/** Giá gốc Spaceship (USD/năm): premium lấy từ API availability, TLD thường từ bảng giá hub. */
+export async function spaceshipCostUsd(domain, availability = null) {
+  const norm = String(domain || "").trim().toLowerCase().replace(/^www\./, "");
+  const { getPricing } = await import("./wallet.js");
+  const pricing = getPricing();
+  const fallback = Number(pricing.defaultPrice || 4.98);
+  const tld = norm.includes(".") ? norm.slice(norm.lastIndexOf(".")) : "";
+  const tldVal = tld ? pricing.tldPrices?.[tld] : null;
+  const premium = pickRegisterPrice(availability);
+
+  let regUsd;
+  let renewUsd;
+  if (typeof tldVal === "object" && tldVal !== null) {
+    regUsd = Number(tldVal.spaceshipReg ?? tldVal.reg);
+    renewUsd = Number(tldVal.spaceshipRenew ?? tldVal.renew ?? regUsd);
+  } else if (tldVal != null) {
+    regUsd = Number(tldVal);
+    renewUsd = regUsd;
+  }
+  const isUnlisted = !Number.isFinite(regUsd);
+  if (isUnlisted) regUsd = fallback;
+  if (!Number.isFinite(renewUsd)) renewUsd = regUsd;
+  if (premium) regUsd = premium.price;
+
+  const privacyLevel = resolvePrivacyLevel(norm);
+  const privacyUsd = privacyLevel === "high" ? Number(pricing.spaceshipPrivacyHighUsd ?? 0) || 0 : 0;
+  return {
+    regUsd,
+    renewUsd,
+    privacyLevel,
+    privacyUsd,
+    totalUsd: Math.round((regUsd + privacyUsd) * 100) / 100,
+    isPremium: Boolean(premium),
+    isUnlisted: isUnlisted && !premium,
+    priceSource: premium ? "spaceship_api" : "spaceship_catalog",
   };
 }
 
@@ -218,6 +229,12 @@ export async function waitForAsyncOperation(operationId) {
 export async function registerDomain(domain, contactId) {
   const norm = domain.trim().toLowerCase();
   const privacyLevel = resolvePrivacyLevel(norm);
+
+  const owned = await getDomainInfo(norm).catch(() => null);
+  if (owned?.lifecycleStatus === "registered") {
+    console.log(`ℹ️ Tên miền [${norm}] đã có trong tài khoản Spaceship — không gửi lệnh mua.`);
+    return { purchased: true, alreadyRegistered: true };
+  }
 
   // Tự động chuẩn bị Extended Attributes cho tên miền đuôi .US
   let contactAttributes = [];
@@ -285,16 +302,12 @@ export async function registerDomain(domain, contactId) {
       msg.includes("already exists") ||
       msg.includes("already owned")
     ) {
-      // Kiểm tra nếu tên miền đã thuộc tài khoản Spaceship của bạn
-      try {
-        const info = await getDomainInfo(domain);
-        if (info && !info.error) {
-          console.log(`ℹ️ Tên miền [${domain}] đã có sẵn trong tài khoản Spaceship. Tiếp tục bước cấu hình.`);
-          return { purchased: true, alreadyRegistered: true };
-        }
-      } catch {}
-      console.log(`ℹ️ Tên miền [${domain}] đã được đăng ký trước đó. Bỏ qua bước mua và tiếp tục bước cấu hình.`);
-      return { purchased: true, alreadyRegistered: true };
+      const info = await getDomainInfo(domain).catch(() => null);
+      if (info?.lifecycleStatus) {
+        console.log(`ℹ️ Tên miền [${domain}] đã có sẵn trong tài khoản Spaceship. Tiếp tục bước cấu hình.`);
+        return { purchased: true, alreadyRegistered: true };
+      }
+      throw new Error(`Tên miền [${domain}] đã có người khác đăng ký — không mua được, không cài tiếp.`);
     }
     throw err;
   }

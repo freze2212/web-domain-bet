@@ -5,6 +5,7 @@ import { queryEnrichedDomainsList } from "./domains-list-service.js";
 import { initMongoStores, loadAllStores } from "./mongo-stores.js";
 import { reconcileStaleHistory } from "./history.js";
 import { reconcileStaleTasks } from "./task-queue.js";
+import { adoptInterrupted302Jobs } from "./zone-302-wait.js";
 import { startPagesDomainMapRefresher } from "./pages-domain-map.js";
 import { listAllDomains } from "./repo-scanner.js";
 
@@ -15,7 +16,13 @@ async function main() {
 
   await initMongoStores();
   await loadAllStores();
-  // Job không sống qua restart. Đóng hết RUNNING / in_progress còn sót trước khi nhận request.
+  // Job 302 đã mua xong miền → chuyển sang chờ zone để tự chạy tiếp; còn lại không sống qua restart thì đóng.
+  try {
+    const adopted = await adoptInterrupted302Jobs();
+    if (adopted) console.log(`[302-wait] Nhận lại ${adopted} job 302 bị restart cắt ngang`);
+  } catch (e) {
+    console.error("[302-wait] adoptInterrupted302Jobs:", e.message);
+  }
   reconcileStaleTasks(0);
   reconcileStaleHistory(0);
 

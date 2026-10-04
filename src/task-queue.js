@@ -182,6 +182,22 @@ export function failTask(id, error, failMessage = "Tác vụ thất bại") {
   return task;
 }
 
+export function listActiveTasks() {
+  return Array.from(tasksMap.values()).filter((t) => t.status === "RUNNING" || t.status === "PENDING");
+}
+
+/** Task PENDING/RUNNING (kể cả đang chờ zone 302) của một miền. */
+export function findActiveTaskForDomain(domain) {
+  const norm = String(domain || "").trim().toLowerCase().replace(/^www\./, "");
+  if (!norm) return null;
+  for (const task of tasksMap.values()) {
+    if (task.status !== "RUNNING" && task.status !== "PENDING") continue;
+    const d = String(task.domain || task.params?.domain || "").trim().toLowerCase().replace(/^www\./, "");
+    if (d === norm) return task;
+  }
+  return null;
+}
+
 export function getTask(id) {
   return tasksMap.get(id) || null;
 }
