@@ -23,6 +23,8 @@ credentials*.json
 scratch_*.js
 
 # Scripts chứa secret cứng / one-off nguy hiểm
+scripts/_*
+scripts/test_all_phases.js
 scripts/sync_to_vps.js
 scripts/deploy_vps.js
 scripts/deploy_gg88pr_vps.js
