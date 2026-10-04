@@ -88,7 +88,6 @@ import {
   markTaskWaitingZone,
 } from "./task-queue.js";
 import {
-  executeBuyAndDeploy,
   executeSwitchMode,
   executeUpdateLink,
 } from "./task-workers.js";
@@ -1430,117 +1429,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // POST /api/tasks/buy-and-deploy (ASYNC WORKER - Phản hồi < 100ms)
+  // POST /api/tasks/buy-and-deploy — đã đóng: mua không qua popup báo giá Spaceship. Dùng /api/deploy-lp hoặc /api/deploy-302.
   if (req.method === "POST" && pathname === "/api/tasks/buy-and-deploy") {
-    try {
-      const body = await parseBody(req);
-      const domain = normalizeDomain(body.domain || "");
-      let link = "";
-      try {
-        link = normalizeUrl(body.link || "");
-      } catch {}
-      const isBuy = Boolean(body.isBuy);
-      const mode = body.mode === "302" ? "302" : "LP";
-      const templateId = mode === "LP" ? body.templateId || null : null;
-
-      if (!domain) {
-        sendJson(res, 400, { success: false, error: "Vui lòng nhập tên miền hợp lệ" });
-        return;
-      }
-      if (!isRealLink(link)) {
-        sendJson(res, 400, { success: false, error: "Vui lòng nhập đường link đích" });
-        return;
-      }
-      if (mode === "LP" && !getTemplate(templateId)) {
-        sendJson(res, 400, { success: false, error: "Vui lòng chọn mẫu Landing Page" });
-        return;
-      }
-
-      // Trỏ miền có sẵn thuộc Admin CF → không can thiệp
-      if (!isBuy) {
-        const adminSkip = adminSkipPayload(domain);
-        if (adminSkip) {
-          sendJson(res, 403, adminSkip);
-          return;
-        }
-      }
-
-      // User thường không mua trực tiếp — phải domain-orders + admin duyệt
-      if (rejectNonAdminDirectBuy(res, currentUser, isBuy)) return;
-
-      // Kiểm tra quyền đối với tên miền có sẵn (nếu không phải mua mới)
-      if (!isBuy && !canUserManageDomain(currentUser, domain)) {
-        sendJson(res, 403, {
-          success: false,
-          error: `⛔ Bạn chưa được cấp quyền quản lý tên miền [${domain}]. Vui lòng gửi yêu cầu cấp quyền tới Admin!`,
-          unauthorizedDomain: domain,
-        });
-        return;
-      }
-
-      // Kiểm tra hạn mức giá tối đa nếu là mua mới (isBuy = true)
-      if (isBuy) {
-        const priceDetail = calculateDomainPriceDetail(domain);
-        const pricing = getPricing();
-        const maxLimit = typeof pricing.maxAutoBuyPriceUsd === "number" ? pricing.maxAutoBuyPriceUsd : 12.00;
-
-        if (priceDetail.regPrice > maxLimit && currentUser.role !== "admin") {
-          sendJson(res, 403, {
-            success: false,
-            error: `⚠️ Tên miền [${domain}] có giá $${priceDetail.regPrice.toFixed(2)} USD vượt quá hạn mức tối đa tự động mua ($${maxLimit.toFixed(2)} USD). Vui lòng liên hệ Admin phê duyệt.`,
-            requiredApproval: true,
-            priceUsd: priceDetail.regPrice,
-            maxLimitUsd: maxLimit,
-          });
-          return;
-        }
-      }
-
-      if (rejectIfDomainBusy(res, sendJson, domain)) return;
-
-      // Nếu là User thường và isBuy = true -> Trừ tiền ví trước
-      let price = 0;
-      if (isBuy && currentUser.role !== "admin") {
-        price = calculateDomainPrice(domain);
-        deductBalance(currentUser.userId, price, `Mua tên miền ${domain}`, { domain, mode });
-      }
-
-      // Tạo Job trong Background Task Queue
-      const task = createTask({
-        type: isBuy ? "BUY_DOMAIN" : "DEPLOY_DOMAIN",
-        domain,
-        userId: currentUser.userId,
-        title: `${isBuy ? "Mua & Cài đặt" : "Trỏ cấu hình"}: ${domain} (${mode})`,
-        params: {
-          domain,
-          link,
-          templateId,
-          isBuy,
-          mode,
-          userId: currentUser.userId,
-          username: currentUser.username,
-          fullName: currentUser.fullName,
-          deductedAmount: price,
-        },
-      });
-
-      // Kích hoạt worker chạy ngầm ngay lập tức (không block HTTP response)
-      setImmediate(() => {
-        executeBuyAndDeploy(task.id);
-      });
-
-      sendJson(res, 200, {
-        success: true,
-        message: `Tác vụ [${domain}] đã được đưa vào hàng đợi xử lý ngầm.`,
-        jobId: task.id,
-        task,
-      });
-    } catch (err) {
-      sendJson(res, 400, { success: false, error: err.message });
-    }
+    sendJson(res, 410, { success: false, error: "Endpoint đã đóng. Dùng form Mua & Cài (có báo giá Spaceship) — /api/deploy-lp hoặc /api/deploy-302." });
     return;
   }
-
   // POST /api/tasks/switch-mode (ASYNC WORKER - Chuyển đổi 302 <-> LP)
   if (req.method === "POST" && pathname === "/api/tasks/switch-mode") {
     try {

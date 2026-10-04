@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { getHistory, updateHistoryItem } from "./history.js";
 import { resumePendingZoneRedirects } from "./zone-302-wait.js";
+import { getDomainBusy, withDomainLock } from "./domain-busy.js";
 import { ensureLiveDomainLink, isLiveJsonWaitRunning, releaseLiveJsonWait, trackLiveJsonWait } from "./cloudflare.js";
 import { getDomainEntry } from "./lp-link-patch.js";
 
@@ -500,14 +501,16 @@ export async function verifyHistoryItem(itemOrId, force = false) {
     // 1014 = CNAME trỏ Pages project không còn / chưa gắn custom domain → tự sửa 1 lần
     const errText = String(checkResult.error || "");
     const looks1014 = /1014|Cross-User Banned/i.test(errText) || (checkResult.status === 403 && checkResult.isCfError);
-    if (looks1014 && !item.details?.autoRepaired1014 && !item.actionType?.includes("302")) {
+    if (looks1014 && !item.details?.autoRepaired1014 && !item.actionType?.includes("302") && !getDomainBusy(domain)) {
       console.warn(`🛠️ [${domain}] Phát hiện 1014 — tự gắn lại Pages + CNAME...`);
       try {
         updateHistoryItem(item.id || domain, {
           details: { ...(item.details || {}), autoRepaired1014: true, autoRepairAt: new Date().toISOString() },
           lastCheckError: "Đang tự sửa Error 1014 (gắn lại Pages/CNAME)...",
         });
-        await autoRepairDomain(item, false).catch(() => {});
+        await withDomainLock(domain, "Tự sửa lỗi 1014 (ngầm)", { username: "hệ thống" }, () =>
+          autoRepairDomain(item, false)
+        ).catch(() => {});
         // Kiểm tra lại ngay sau sửa
         const retry = await checkDomainHttp(domain);
         if (retry.is200) {
@@ -557,8 +560,22 @@ export async function runVerificationQueue() {
 
   try {
     const history = getHistory();
+    const latestIdByDomain = new Map();
+    for (const h of history) {
+      const key = String(h.domain || "").trim().toLowerCase();
+      if (!key || key === "n/a") continue;
+      const prev = latestIdByDomain.get(key);
+      if (!prev || new Date(h.timestamp || 0) > new Date(prev.timestamp || 0)) latestIdByDomain.set(key, h);
+    }
+    // Chỉ kiểm tra dòng mới nhất của mỗi miền (dòng cũ mang link/mẫu đã bị thay), bỏ qua miền đang có tiến trình.
     const pendingItems = history.filter(
-      (h) => h.status === "success" && h.domain && h.domain !== "N/A" && h.liveStatus !== "200_OK"
+      (h) =>
+        h.status === "success" &&
+        h.domain &&
+        h.domain !== "N/A" &&
+        h.liveStatus !== "200_OK" &&
+        latestIdByDomain.get(h.domain.trim().toLowerCase())?.id === h.id &&
+        !getDomainBusy(h.domain)
     );
 
     if (pendingItems.length === 0) return { checked: 0, verified: 0 };

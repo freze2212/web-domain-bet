@@ -8,6 +8,14 @@ function norm(domain) {
   return String(domain || "").trim().toLowerCase().replace(/^www\./, "");
 }
 
+let lastReconcileAt = 0;
+function reconcileThrottled() {
+  if (Date.now() - lastReconcileAt < 10_000) return;
+  lastReconcileAt = Date.now();
+  reconcileStaleTasks();
+  reconcileStaleHistory();
+}
+
 /**
  * Miền đang có tiến trình chạy? Trả về null nếu rảnh.
  * Nguồn: hàng đợi task, lịch sử in_progress (đổi mẫu, chờ zone 302, chờ live) và khoá đồng bộ.
@@ -19,7 +27,7 @@ export function getDomainBusy(domain) {
   const inline = inlineLocks.get(d);
   if (inline) return { domain: d, label: inline.label, since: inline.since, username: inline.username || null };
 
-  reconcileStaleTasks();
+  reconcileThrottled();
   const task = findActiveTaskForDomain(d);
   if (task) {
     return {
@@ -32,7 +40,6 @@ export function getDomainBusy(domain) {
     };
   }
 
-  reconcileStaleHistory();
   const row = getHistory().find(
     (h) => (h.status === "in_progress" || h.status === "pending") && norm(h.domain) === d
   );
