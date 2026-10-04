@@ -803,7 +803,8 @@ export async function publishRepoChanges(cwd, { commitMsg, prepare }) {
         fs.existsSync(path.join(cwd, rel))
       );
       if (rels.length) await execAsync(`git add -- ${rels.join(" ")}`, { cwd });
-      const st = await execAsync("git status --porcelain -- domains.json config.js js/config.js index.html _redirects", { cwd });
+      await execAsync("git add -u", { cwd });
+      const st = await execAsync("git diff --cached --name-only", { cwd });
       if (String(st.stdout || "").trim()) {
         const safeMsg = String(commitMsg || "Update domain link").replace(/"/g, "'");
         await execAsync(`git commit -m "${safeMsg}"`, { cwd });
