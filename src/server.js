@@ -1,5 +1,6 @@
 import http from "node:http";
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -788,7 +789,10 @@ const server = http.createServer(async (req, res) => {
       const provided =
         (req.headers["x-webhook-secret"] || "").toString().trim() ||
         (req.headers["authorization"] || "").toString().replace(/^Bearer\s+/i, "").trim();
-      if (!provided || provided !== secret) {
+      const providedBuf = Buffer.from(provided);
+      const secretBuf = Buffer.from(secret);
+      const secretOk = providedBuf.length === secretBuf.length && crypto.timingSafeEqual(providedBuf, secretBuf);
+      if (!provided || !secretOk) {
         sendJson(res, 401, { success: false, error: "Webhook secret không hợp lệ" });
         return;
       }
@@ -879,6 +883,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await parseBody(req);
       const target = getUserById(body.userId);
+      if (!target) {
+        sendJson(res, 400, { success: false, error: "Không tìm thấy thành viên để nạp Xu" });
+        return;
+      }
       const resTopup = topupBalance(body.userId, body.amount, body.note || "Nạp tiền từ Admin", currentUser.username);
       logAdminAction({
         action: "USER_TOPUP",
