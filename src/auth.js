@@ -109,6 +109,10 @@ export function saveUsers(users) {
   setStore("users", Array.isArray(users) ? users : []);
 }
 
+/** Nội dung chuyển khoản "NAP <username>" chỉ bắt được [a-z0-9_] */
+const USERNAME_RE = /^[a-z0-9_]{3,32}$/;
+const USERNAME_RULE = "Tên đăng nhập 3–32 ký tự, chỉ gồm chữ không dấu, số và dấu gạch dưới (_)";
+
 export function login(username, password) {
   const users = loadUsers();
   const u = users.find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
@@ -143,10 +147,8 @@ export function login(username, password) {
 }
 
 export function register({ username, password, fullName, role = "user" }) {
-  const cleanUsername = username.trim().toLowerCase();
-  if (!cleanUsername || cleanUsername.length < 3) {
-    throw new Error("Tên đăng nhập phải có ít nhất 3 ký tự");
-  }
+  const cleanUsername = String(username || "").trim().toLowerCase();
+  if (!USERNAME_RE.test(cleanUsername)) throw new Error(USERNAME_RULE);
   if (!password || password.length < 5) {
     throw new Error("Mật khẩu phải có ít nhất 5 ký tự");
   }
@@ -224,8 +226,8 @@ export function getUserById(id) {
 }
 
 export function createUserByAdmin({ username, password, fullName, role = "user", initialBalance = 0 }) {
-  const cleanUsername = username.trim().toLowerCase();
-  if (!cleanUsername || cleanUsername.length < 3) throw new Error("Tên đăng nhập tối thiểu 3 ký tự");
+  const cleanUsername = String(username || "").trim().toLowerCase();
+  if (!USERNAME_RE.test(cleanUsername)) throw new Error(USERNAME_RULE);
   if (!password || password.length < 5) throw new Error("Mật khẩu tối thiểu 5 ký tự");
 
   const users = loadUsers();

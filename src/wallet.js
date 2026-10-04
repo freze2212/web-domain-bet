@@ -259,9 +259,9 @@ export function getBalance(userId) {
   return typeof wallets[userId] === "number" ? wallets[userId] : 0;
 }
 
-export function topupBalance(userId, amount, note = "Nạp Xu vào ví", createdBy = "admin") {
+export function topupBalance(userId, amount, note = "Nạp Xu vào ví", createdBy = "admin", meta = {}) {
   const num = parseFloat(amount);
-  if (isNaN(num) || num <= 0) {
+  if (!Number.isFinite(num) || num <= 0 || num > 100_000_000) {
     throw new Error("Số lượng Xu nạp không hợp lệ");
   }
 
@@ -280,6 +280,7 @@ export function topupBalance(userId, amount, note = "Nạp Xu vào ví", created
     newBalance,
     note,
     createdBy,
+    meta,
   });
 
   return { userId, balance: newBalance };
@@ -328,7 +329,7 @@ export function addTransaction(tx) {
     timestamp: new Date().toISOString(),
   };
   transactions.unshift(record);
-  saveJson(TRANSACTIONS_FILE, transactions.slice(0, 500));
+  saveJson(TRANSACTIONS_FILE, transactions.slice(0, 5000));
   return record;
 }
 
@@ -348,12 +349,23 @@ export function processBankWebhook(payload) {
   const content = (payload.description || payload.content || payload.msg || "").toUpperCase();
   const amountVnd = parseFloat(payload.amount || payload.transferAmount || 0);
 
-  if (!content || amountVnd <= 0) {
+  if (!content || !Number.isFinite(amountVnd) || amountVnd <= 0) {
     throw new Error("Dữ liệu webhook ngân hàng không hợp lệ");
+  }
+  const direction = String(payload.transferType || "in").toLowerCase();
+  if (direction !== "in") {
+    return { success: true, ignored: true, reason: `Bỏ qua giao dịch chiều [${direction}]` };
+  }
+
+  const bankRef = String(payload.referenceCode || payload.id || payload.transactionId || "").trim();
+  if (bankRef) {
+    const seen = loadJson(TRANSACTIONS_FILE, []).some((t) => t?.meta?.bankRef === bankRef);
+    if (seen) return { success: true, duplicate: true, bankRef };
   }
 
   // Bóc tách Username từ nội dung chuyển khoản: NAP <username>
-  const regex = new RegExp(`${bank.prefix}\\s+([A-Za-z0-9_]+)`, "i");
+  const prefix = String(bank.prefix || "NAP").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(?:^|[^A-Z0-9])${prefix}\\s+([A-Za-z0-9_]+)`, "i");
   const match = content.match(regex);
   if (!match) {
     throw new Error(`Nội dung chuyển khoản không khớp cú pháp [${bank.prefix} USERNAME]`);
@@ -367,12 +379,16 @@ export function processBankWebhook(payload) {
   }
 
   // Quy đổi VND sang Xu (100.000 VNĐ = 100 Xu => 1 Xu = 1.000 VNĐ)
-  const amountXu = Math.round(amountVnd / 1000);
+  const amountXu = Math.floor(amountVnd / 1000);
+  if (amountXu < 1) {
+    throw new Error(`Số tiền ${amountVnd.toLocaleString("vi-VN")} VNĐ dưới mức tối thiểu 1.000 VNĐ = 1 Xu`);
+  }
   const topupRes = topupBalance(
     user.id,
     amountXu,
-    `Tự động nạp ${amountXu.toLocaleString("vi-VN")} Xu qua QR Ngân Hàng (${amountVnd.toLocaleString("vi-VN")} VNĐ) - Ref: ${payload.referenceCode || payload.id || "BANK_AUTO"}`,
-    "AUTO_WEBHOOK"
+    `Tự động nạp ${amountXu.toLocaleString("vi-VN")} Xu qua QR Ngân Hàng (${amountVnd.toLocaleString("vi-VN")} VNĐ) - Ref: ${bankRef || "BANK_AUTO"}`,
+    "AUTO_WEBHOOK",
+    bankRef ? { bankRef } : {}
   );
 
   return {

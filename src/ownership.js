@@ -63,10 +63,13 @@ export function assignDomain(domain, userId, meta = {}, options = {}) {
     err.currentOwner = conflict;
     throw err;
   }
+  const sameOwner = existing?.userId === userId;
+  const { username: _u, fullName: _f, assignedBy: _b, assignedByRole: _r, orderId: _o, ...domainMeta } = existing || {};
   map[norm] = {
+    ...(sameOwner ? existing : domainMeta),
     domain: norm,
     userId,
-    assignedAt: new Date().toISOString(),
+    assignedAt: sameOwner && existing?.assignedAt ? existing.assignedAt : new Date().toISOString(),
     ...meta,
   };
   saveOwnership(map);

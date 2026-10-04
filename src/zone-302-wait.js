@@ -3,7 +3,7 @@ import { getDomainInfo, updateNameservers } from "./spaceship.js";
 import { getHistory, setHistoryProgress, updateHistoryItem } from "./history.js";
 import { completeTask, failTask, getTask, listActiveTasks, markTaskWaitingZone, updateTaskProgress } from "./task-queue.js";
 import { syncDeployOwnership } from "./ownership.js";
-import { markDomainOrderFulfilled, refundFailedDomainOrder } from "./domain-orders.js";
+import { markDomainOrderFulfilled } from "./domain-orders.js";
 
 export const ZONE_302_WAIT_MS = 6 * 60 * 60 * 1000;
 const INLINE_WAIT_MS = 3 * 60 * 1000;
@@ -83,15 +83,8 @@ export async function resumePendingZoneRedirects() {
     for (const h of waiting) {
       const born = new Date(h.timestamp || 0).getTime();
       if (born && now - born > ZONE_302_WAIT_MS) {
-        let error = `Zone Cloudflare của [${h.domain}] vẫn pending sau 6 giờ. Nameserver đã trỏ — kiểm tra registry rồi thử lại.`;
-        try {
-          const refund = refundFailedDomainOrder(h.details?.orderId, h.domain, error);
-          if (refund.refunded) {
-            error += ` Đã hoàn ${refund.amount} Xu vào ví và gỡ miền khỏi tài khoản. Admin duyệt lại để cài tiếp.`;
-          }
-        } catch (refundErr) {
-          console.error(`[302-wait] hoàn Xu ${h.domain}:`, refundErr.message);
-        }
+        // Miền đã mua xong trước khi chờ zone → không hoàn Xu, đơn giữ "đã duyệt" để Thử lại cài tiếp
+        const error = `Zone Cloudflare của [${h.domain}] vẫn pending sau 6 giờ. Nameserver đã trỏ — kiểm tra registry rồi bấm Thử lại (không mua lại).`;
         updateHistoryItem(h.id, { status: "failed", progress: null, error, details: { waitZone302: false } });
         if (h.taskId && getTask(h.taskId)) failTask(h.taskId, new Error(error), "Hết thời gian chờ zone");
         continue;

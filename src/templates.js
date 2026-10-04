@@ -793,16 +793,16 @@ export async function alignRepoToOrigin(cwd) {
   return branch;
 }
 
-export async function publishRepoChanges(cwd, { commitMsg, prepare }) {
+export async function publishRepoChanges(cwd, { commitMsg, prepare, extraPaths = [] }) {
   let lastErr = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const branch = await alignRepoToOrigin(cwd);
       if (prepare) await prepare();
-      const rels = ["domains.json", "data/domains.json", "config.js", "js/config.js", "index.html", "_redirects"].filter((rel) =>
-        fs.existsSync(path.join(cwd, rel))
-      );
-      if (rels.length) await execAsync(`git add -- ${rels.join(" ")}`, { cwd });
+      const rels = [
+        ...new Set(["domains.json", "data/domains.json", "config.js", "js/config.js", "index.html", "_redirects", ...extraPaths]),
+      ].filter((rel) => fs.existsSync(path.join(cwd, rel)));
+      if (rels.length) await execAsync(`git add -- ${rels.map((r) => `"${r}"`).join(" ")}`, { cwd });
       await execAsync("git add -u", { cwd });
       const st = await execAsync("git diff --cached --name-only", { cwd });
       if (String(st.stdout || "").trim()) {
@@ -824,6 +824,35 @@ function withTemplateLock(tplPath, fn) {
   const nextLock = currentLock.then(() => fn(), () => fn());
   templateLocks.set(tplPath, nextLock.catch(() => {}));
   return nextLock;
+}
+
+/** Đường dẫn file mẫu hợp lệ (tương đối, không thoát thư mục, không đụng .git / file ẩn). */
+export function resolveTemplateFile(template, relFile) {
+  const root = path.resolve(template.path);
+  const rel = String(relFile || "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!rel || /["`$]/.test(rel)) return null;
+  const full = path.resolve(root, rel);
+  const relToRoot = path.relative(root, full);
+  if (!relToRoot || relToRoot.startsWith("..") || path.isAbsolute(relToRoot)) return null;
+  if (relToRoot.split(/[\\/]/).some((seg) => seg.startsWith(".") || seg === "node_modules")) return null;
+  return { full, rel: relToRoot.replace(/\\/g, "/") };
+}
+
+/** Lưu 1 file mẫu = commit + push lên origin (Pages build từ Git). Không push được thì báo lỗi. */
+export async function saveTemplateFile(template, relFile, content) {
+  const target = resolveTemplateFile(template, relFile);
+  if (!target) throw new Error("Đường dẫn file không hợp lệ");
+  return withTemplateLock(template.path, async () => {
+    await ensureTemplateGitCheckout(template);
+    return publishRepoChanges(template.path, {
+      commitMsg: `Hub edit ${target.rel}`,
+      extraPaths: [target.rel],
+      prepare() {
+        fs.mkdirSync(path.dirname(target.full), { recursive: true });
+        fs.writeFileSync(target.full, String(content), "utf8");
+      },
+    });
+  });
 }
 
 export async function updateTemplateDomainsJson(template, domain, mainUrl, messengerUrl = "", opts = {}) {

@@ -291,7 +291,7 @@ function bootHubApp() {
   fetchTemplates();
   setupForms();
   setupPickerListeners();
-  if (guestMode) return;
+  if (guestMode || currentUser?.role === "assistant") return;
   fetchDomainBadgeCount();
   fetchHistoryBadgeCount();
   loadCurrentCfToken();
@@ -1338,7 +1338,7 @@ function setupForms() {
                         ${isOk ? '✅ Thành Công' : '❌ Thất Bại'}
                       </span>
                     </td>
-                    <td><span class="dom-tag">${item.type === 'landing_page' ? 'Landing Page' : '302 Redirect'}</span></td>
+                    <td><span class="dom-tag">${item.type === 'landing_page' ? 'Landing Page' : item.type === 'redirect_302' ? '302 Redirect' : '—'}</span></td>
                     <td style="font-size: 12px; color: ${isOk ? 'var(--accent-emerald)' : 'var(--accent-red)'};">
                       ${isOk ? 'Đã đổi link đích & purge cache' : (item.error || 'Lỗi không xác định')}
                     </td>
@@ -2471,7 +2471,10 @@ function renderBatchCheckTable() {
     .map((r, index) => {
       let scoreBadgeColor = "var(--accent-emerald)";
       let scoreBadgeText = "🟢 100% Hoàn Hảo";
-      if (r.overallStatus === "CRITICAL" || r.healthScore < 5) {
+      if (r.overallStatus === "ERROR" || !(r.maxScore > 0)) {
+        scoreBadgeColor = "var(--accent-rose)";
+        scoreBadgeText = `🔴 Lỗi kiểm tra${r.error ? `: ${r.error}` : ""}`;
+      } else if (r.overallStatus === "CRITICAL" || r.healthScore < 5) {
         scoreBadgeColor = "var(--accent-rose)";
         scoreBadgeText = "🔴 Sự Cố";
       } else if (r.overallStatus === "DEGRADED" || r.healthScore < r.maxScore) {
@@ -3106,14 +3109,14 @@ function setupPickerListeners() {
       } else if (targetType === "buy") {
         if (buyLpTemplateSelect) {
           buyLpTemplateSelect.value = t.id;
-          updateTemplatePreview(t.id, "buy");
+          triggerTemplatePreviewChange(t.id, buyLpTemplatePreview);
         }
         document.querySelector('.nav-tab[data-tab="tab-buy"]')?.click();
         showToast(`✅ Đã chọn mẫu [${t.name}] cho Form Mua Miền!`);
       } else if (targetType === "point") {
         if (pointLpTemplateSelect) {
           pointLpTemplateSelect.value = t.id;
-          updateTemplatePreview(t.id, "point");
+          triggerTemplatePreviewChange(t.id, pointLpTemplatePreview);
         }
         document.querySelector('.nav-tab[data-tab="tab-point"]')?.click();
         showToast(`✅ Đã chọn mẫu [${t.name}] cho Form Trỏ Miền!`);
@@ -3586,7 +3589,7 @@ function renderBatchTable() {
         .join("");
 
       let statusBadge = `<span style="color: var(--text-dim); font-size: 11px;">⏳ Sẵn sàng</span>`;
-      if (item.status === "running") {
+      if (item.status === "running" || item.status === "processing") {
         statusBadge = `<span style="color: var(--accent-amber); font-weight: 600; font-size: 11px;"><span class="spinner" style="width: 10px; height: 10px; display: inline-block; vertical-align: middle; margin-right: 4px;"></span>${item.statusText}</span>`;
       } else if (item.status === "success") {
         statusBadge = `<span style="color: var(--accent-emerald); font-weight: 700; font-size: 11px;">✅ Hoàn tất</span>`;
@@ -3798,6 +3801,7 @@ async function startBatchExecution() {
   let completedCount = 0;
   let successCount = 0;
   let failCount = 0;
+  let queuedCount = 0;
 
   // Render initial running state
   if (progressBar) progressBar.style.width = `0%`;
@@ -3873,6 +3877,10 @@ async function startBatchExecution() {
           item.status = resData.queued || res.status === 202 ? "processing" : "success";
           item.statusText = resData.queued || res.status === 202 ? "Đang xử lý ngầm..." : "Thành công!";
           if (item.status === "success") successCount++;
+          else {
+            queuedCount++;
+            if (resData.taskId) watchBatchTask(item, resData.taskId);
+          }
           monitoredDomainsFor200.add(domain.toLowerCase());
           addLog(
             `⏳ [${domain}] ${resData.queued || res.status === 202 ? "ĐÃ NHẬN — xử lý ngầm" : "CÀI ĐẶT THÀNH CÔNG"} — tab Tiến trình`,
@@ -3902,7 +3910,7 @@ async function startBatchExecution() {
       if (progressBar) progressBar.style.width = `${percent}%`;
       if (progressPercent) progressPercent.textContent = `${percent}%`;
       if (progressLabel) {
-        progressLabel.textContent = `Đang chạy song song: ${completedCount}/${selectedList.length} hoàn tất (${successCount} thành công, ${failCount} lỗi)...`;
+        progressLabel.textContent = `Đang gửi: ${completedCount}/${selectedList.length} (${successCount} xong, ${queuedCount} đang chạy ngầm, ${failCount} lỗi)...`;
       }
       renderBatchTable();
     }
@@ -3923,7 +3931,9 @@ async function startBatchExecution() {
   if (progressBar) progressBar.style.width = "100%";
   if (progressPercent) progressPercent.textContent = "100%";
   if (progressLabel) {
-    progressLabel.textContent = `Hoàn tất: ${successCount} thành công, ${failCount} thất bại / Tổng ${completedCount} miền.`;
+    progressLabel.textContent = queuedCount
+      ? `Đã gửi ${completedCount} miền: ${successCount} xong, ${queuedCount} đang chạy ngầm (bảng tự cập nhật), ${failCount} lỗi.`
+      : `Hoàn tất: ${successCount} thành công, ${failCount} thất bại / Tổng ${completedCount} miền.`;
   }
 
   const btnRetry = document.getElementById("btnRetryBatchErrors");
@@ -3935,11 +3945,54 @@ async function startBatchExecution() {
   isBatchRunning = false;
   syncBatchKeepLandingUi();
 
-  addLog(`🏁 HOÀN TẤT TIẾN TRÌNH! Thành công: ${successCount} | Thất bại: ${failCount}`, successCount > 0 ? "success" : "error");
+  addLog(
+    `🏁 ĐÃ GỬI XONG! Xong: ${successCount} | Đang chạy ngầm: ${queuedCount} | Lỗi: ${failCount}`,
+    successCount + queuedCount > 0 ? "success" : "error"
+  );
 
   fetchDomains();
   fetchHistory();
-  showToast(`🎉 Chạy hàng loạt hoàn tất! ${successCount} thành công, ${failCount} lỗi.`, "success");
+  showToast(
+    queuedCount
+      ? `📨 Đã gửi ${queuedCount} miền chạy ngầm — bảng sẽ tự báo xong/lỗi từng miền. ${failCount} lỗi ngay khi gửi.`
+      : `🎉 Chạy hàng loạt hoàn tất! ${successCount} thành công, ${failCount} lỗi.`,
+    "success"
+  );
+}
+
+/** Theo dõi task chạy ngầm của 1 dòng hàng loạt tới khi SUCCESS / FAILED. */
+function watchBatchTask(item, taskId) {
+  const startedAt = Date.now();
+  const tick = async () => {
+    if (Date.now() - startedAt > 7 * 60 * 60 * 1000) return;
+    try {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`);
+      const data = await res.json().catch(() => ({}));
+      const task = data.task;
+      if (task?.status === "SUCCESS") {
+        item.status = "success";
+        item.statusText = "Thành công!";
+        renderBatchTable();
+        return;
+      }
+      if (task?.status === "FAILED") {
+        item.status = "error";
+        item.statusText = "Lỗi";
+        item.error = task.error || "Tiến trình thất bại";
+        renderBatchTable();
+        const btnRetry = document.getElementById("btnRetryBatchErrors");
+        if (btnRetry && !isBatchRunning) btnRetry.style.display = "inline-block";
+        return;
+      }
+      if (task?.currentStep) {
+        item.statusText = task.currentStep;
+        renderBatchTable();
+      }
+      if (res.status === 404) return;
+    } catch {}
+    setTimeout(tick, 6000);
+  };
+  setTimeout(tick, 4000);
 }
 
 function retryFailedBatchItems() {
@@ -4090,6 +4143,7 @@ async function fetchHistorySilent() {
 
 function startHistoryPolling() {
   if (historyPollingInterval) clearInterval(historyPollingInterval);
+  if (currentUser?.role === "assistant") return;
   // 5s đủ cho popup 200; tránh giật UI mỗi 2.5s
   historyPollingInterval = setInterval(() => {
     fetchHistorySilent();
@@ -4462,6 +4516,8 @@ async function verifyAllPendingDomains() {
     if (data.success) {
       showToast(`✨ Đã quét ${data.checked} miền, xác thực ${data.verified} miền 200 OK thành công!`);
       fetchHistory();
+    } else {
+      showToast(`❌ ${data.error || "Không quét được"}`);
     }
   } catch (err) {
     showToast("❌ Lỗi kết nối: " + err.message);
@@ -5955,6 +6011,7 @@ function syncOptimisticTasksFromServer(tasks) {
 }
 
 function rescheduleTaskPolling() {
+  if (currentUser?.role === "assistant") return;
   const running = getDisplayTasks().filter((t) => isTaskRunningStatus(t.status)).length;
   const ms = running > 0 ? TASK_POLL_FAST_MS : TASK_POLL_SLOW_MS;
   if (taskPollingInterval) clearInterval(taskPollingInterval);
@@ -6128,6 +6185,7 @@ function getDisplayTasks() {
         id: h.taskId || h.id,
         title: `${h.actionLabel || "Thất bại"} — ${h.domain}`,
         domain: h.domain,
+        actionType: h.actionType,
         status: "FAILED",
         progress: 100,
         currentStep: h.error || "Cài đặt thất bại",
@@ -6277,7 +6335,7 @@ function renderTasks() {
                 : ""
             }
             ${
-              t.status === "FAILED"
+              t.status === "FAILED" && canRetryAsDeploy(t)
                 ? `<button class="btn btn-primary btn-sm" onclick="retryFailedDeploy('${safeId}')" style="background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); border-color: #f59e0b; font-weight: 700;">🔄 Thử Lại</button>`
                 : ""
             }
@@ -6321,7 +6379,7 @@ function openTaskDetail(taskId) {
       </div>`
       )
       .join("");
-    if (task.status === "FAILED") {
+    if (task.status === "FAILED" && canRetryAsDeploy(task)) {
       const safeId = String(task.id || "").replace(/'/g, "\\'");
       logs.innerHTML += `
         <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08);">
@@ -6333,6 +6391,15 @@ function openTaskDetail(taskId) {
   }
 
   openModal("taskDetailModal");
+}
+
+/** Chỉ tiến trình mua / trỏ / cài mới thử lại bằng deploy-lp / deploy-302 */
+function canRetryAsDeploy(t) {
+  const typ = String(t?.type || "").toUpperCase();
+  if (/^DEPLOY_(LP|302)$/.test(typ)) return true;
+  if (typ) return false;
+  const h = (allHistory || []).find((x) => x.id === t?.id || x.taskId === t?.id);
+  return /^(BUY|POINT)_/.test(String(t?.actionType || h?.actionType || ""));
 }
 
 /** Ghép lại args deploy từ task FAILED hoặc lịch sử failed */
@@ -6356,7 +6423,7 @@ function buildRetryDeployArgs(refId) {
     return {
       domain: p.domain || hist.domain,
       link: p.link || hist?.link || "",
-      tele: p.tele || hist?.tele || p.link || hist?.link || "",
+      tele: p.tele || hist?.tele || "",
       templateId: p.templateId || hist?.templateId || "",
       isBuy: buy,
       type: mode.includes("302") ? "302" : "lp",
@@ -6760,12 +6827,13 @@ async function openSwitchModeModal(domain, currentMode, currentLink) {
   const targetUrlInput = document.getElementById("switchModeTargetUrl");
   const tplSelect = document.getElementById("switchModeTemplate");
 
-  if (domainInput) domainInput.value = domain;
-  if (title) title.textContent = `Tên miền: ${domain} (Hiện tại: ${currentMode || "Chưa rõ"})`;
-
   const fromList = (typeof allDomains !== "undefined" ? allDomains : [])?.find?.(
     (d) => d.domain?.toLowerCase() === String(domain || "").toLowerCase()
   );
+  if (!currentMode && fromList) currentMode = fromList.sourceType === "redirect_302" ? "302" : "LP";
+
+  if (domainInput) domainInput.value = domain;
+  if (title) title.textContent = `Tên miền: ${domain} (Hiện tại: ${currentMode || "Chưa rõ"})`;
   const quickLink =
     (currentLink && currentLink !== "Chưa gán link" ? currentLink : "") ||
     fromList?.mainUrl ||
@@ -7197,7 +7265,7 @@ async function loadMyApprovedDomains() {
             <td style="color: var(--text-dim); font-family: var(--font-mono);">${idx + 1}</td>
             <td><strong style="font-size: 14px; color: #fff; font-family: var(--font-mono);">${d.domain}</strong></td>
             <td><span class="dom-tag lp">${d.primaryFolder || d.templateName || "Landing Page"}</span></td>
-            <td><span style="font-size: 12px; color: var(--accent-cyan); word-break: break-all;">${d.currentLink || "-"}</span></td>
+            <td><span style="font-size: 12px; color: var(--accent-cyan); word-break: break-all;">${d.mainUrl || d.currentLink || "-"}</span></td>
             <td><span class="badge-status badge-success" style="font-weight: 700;">🟢 Đang Quản Trị</span></td>
             <td style="text-align: right;">
               <div style="display: flex; gap: 6px; justify-content: flex-end;">
@@ -7207,8 +7275,8 @@ async function loadMyApprovedDomains() {
                 <button class="btn btn-secondary btn-sm" onclick="openSwitchTemplateModal('${d.domain}')" title="Gán mẫu Landing Page khác">
                   🎨 Đổi Mẫu
                 </button>
-                <button class="btn btn-secondary btn-sm" onclick="openSwitchModeModal('${d.domain}')" title="Chuyển sang 302">
-                  🔀 302
+                <button class="btn btn-secondary btn-sm" onclick="openSwitchModeModal('${d.domain}', '${d.sourceType === "redirect_302" ? "302" : "LP"}', '${d.mainUrl || ""}')" title="Chuyển giữa 302 và Landing Page">
+                  🔀 ${d.sourceType === "redirect_302" ? "LP" : "302"}
                 </button>
               </div>
             </td>

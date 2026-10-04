@@ -283,6 +283,23 @@ export function refundFailedDomainOrder(orderId, domain, reason) {
   };
 }
 
+/** Từ chối mọi đơn còn chờ duyệt của 1 user (khi xoá user). */
+export function rejectPendingOrdersForUser(userId, adminUser, reason) {
+  const orders = loadOrders();
+  const now = new Date().toISOString();
+  let n = 0;
+  for (const o of orders) {
+    if (o.userId !== userId || o.status !== "pending") continue;
+    o.status = "rejected";
+    o.resolvedAt = now;
+    o.resolvedBy = adminUser?.username || "admin";
+    o.rejectReason = reason;
+    n++;
+  }
+  if (n) saveOrders(orders);
+  return n;
+}
+
 /** Admin đánh dấu đơn đã mua Spaceship + cài xong */
 export function markDomainOrderFulfilled(orderId, adminUser, { deployMode } = {}) {
   const orders = loadOrders();
