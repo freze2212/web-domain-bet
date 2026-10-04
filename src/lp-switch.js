@@ -34,6 +34,8 @@ export async function switchDomainToTemplate({ domain, template, link, tele = ""
     config.cloudflare.accountId();
   const rootProject = stripPagesDev(template.cnameTarget) || template.pagesProject;
 
+  const oldProjects = [...(getServingPagesProject(domain)?.projects || [])];
+
   const current = findServingTemplate(domain);
   if (current?.template?.id === template.id) {
     onProgress(`Miền đã chạy mẫu [${template.name}] — chỉ cập nhật link...`);
@@ -43,10 +45,10 @@ export async function switchDomainToTemplate({ domain, template, link, tele = ""
       liveTimeoutMs: 8 * 60_000,
     });
     if (!sync?.liveEnsure?.ok) throw new Error(sync?.liveEnsure?.error || "Live chưa nhận link mới");
-    return { sameTemplate: true, finalTarget: `${current.project}.pages.dev`, removedFrom: [], detachedFrom: [] };
+    onProgress("Đang dọn miền khỏi mẫu cũ (nếu lần đổi trước còn sót)...");
+    const cleaned = await cleanupOldPlaces(domain, template, current.project, oldProjects);
+    return { sameTemplate: true, finalTarget: `${current.project}.pages.dev`, ...cleaned };
   }
-
-  const oldProjects = [...(getServingPagesProject(domain)?.projects || [])];
 
   // 1. Mẫu mới phát link trước khi có khách vào
   onProgress(`Đang ghi link vào mẫu [${template.name}] (miền vẫn chạy chỗ cũ)...`);
@@ -108,13 +110,22 @@ export async function switchDomainToTemplate({ domain, template, link, tele = ""
   if (cnameNow && cnameNow !== instance) {
     throw new Error(`CNAME đang trỏ ${cnameNow}, không phải ${instance}. Chưa dọn chỗ cũ.`);
   }
-  await waitForPagesDomainActive(instance, domain, accountId, 120_000, pagesTokenForAccount(accountId));
+  let pagesActive = true;
+  try {
+    await waitForPagesDomainActive(instance, domain, accountId, 120_000, pagesTokenForAccount(accountId));
+  } catch {
+    pagesActive = false;
+    onProgress("Cloudflare chưa báo active sau 2 phút — mở thử miền xem đã chạy mẫu mới chưa...");
+    if (!(await waitDomainServesProject(domain, instance, 6 * 60_000))) {
+      throw new Error(`Đã trỏ DNS nhưng sau 8 phút miền vẫn chưa phát trang của [${instance}]. Chưa dọn chỗ cũ.`);
+    }
+  }
   const live = await ensureLiveDomainLink(domain, link, {
     projectName: instance,
     cnameTarget: finalTarget,
     accountId,
     sinceMs,
-    timeoutMs: 3 * 60_000,
+    timeoutMs: pagesActive ? 3 * 60_000 : 8 * 60_000,
   });
   if (!live.ok) throw new Error(`Đã trỏ DNS nhưng miền chưa phát đúng link. Chưa dọn chỗ cũ. ${live.error || ""}`.trim());
 
@@ -122,6 +133,33 @@ export async function switchDomainToTemplate({ domain, template, link, tele = ""
   onProgress("Đang dọn miền khỏi mẫu cũ...");
   const cleaned = await cleanupOldPlaces(domain, template, instance, oldProjects);
   return { sameTemplate: false, finalTarget, live, ...cleaned };
+}
+
+async function fetchPage(url) {
+  try {
+    const r = await fetch(`${url}${url.includes("?") ? "&" : "?"}_hub=${Date.now()}`, {
+      headers: { "user-agent": "Mozilla/5.0 (LandingHub-switch-check)", "cache-control": "no-cache" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) return null;
+    return (await r.text())
+      .replace(/<script[^>]*cloudflareinsights[\s\S]*?<\/script>/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Miền đang phát đúng trang chủ của project (Cloudflare đôi khi báo pending dù đã phục vụ). */
+async function waitDomainServesProject(domain, project, timeoutMs) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const [onDomain, onProject] = await Promise.all([fetchPage(`https://${domain}/`), fetchPage(`https://${project}.pages.dev/`)]);
+    if (onDomain && onProject && onDomain === onProject) return true;
+    await new Promise((r) => setTimeout(r, 10_000));
+  }
+  return false;
 }
 
 /** Gỡ miền khỏi domains.json của các mẫu khác và khỏi các project Pages khác project đang phục vụ. */
