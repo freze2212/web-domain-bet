@@ -27,6 +27,12 @@ const stripPagesDev = (s) => String(s || "").trim().replace(/\.pages\.dev$/i, ""
 export async function switchDomainToTemplate({ domain, template, link, tele = "", pagesOpts = {}, onProgress = () => {} }) {
   if (!link) throw new Error(NO_LINK_ERROR);
   if (!template?.pagesProject) throw new Error(`Mẫu [${template?.name || "?"}] chưa có project Pages`);
+  const zoneNow = await findZoneByName(domain).catch(() => null);
+  if (zoneNow?.status && zoneNow.status !== "active") {
+    throw new Error(
+      `Zone Cloudflare của [${domain}] đang "${zoneNow.status}" (NS vừa đổi, chưa nhận) — Pages chưa thể chạy trên miền. Chưa đổi gì, miền vẫn chạy chỗ cũ. Chờ zone active (vài phút đến vài giờ) rồi đổi lại.`
+    );
+  }
   const accountId =
     pagesOpts.accountId ||
     (await resolvePagesAccountIdForDomain(domain, template.pagesProject, template.pagesAccountId || null).catch(() => null)) ||
