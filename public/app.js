@@ -1421,12 +1421,14 @@ async function checkDomainAvailabilityLive(domain, statusEl) {
         if (statusEl) {
           statusEl.className = "field-feedback available";
           const formatted = `${data.priceXu || 250} Xu (≈ ${((data.priceVnd || 250000) / 1000).toLocaleString("vi-VN")}k đ)`;
-          const ruleLabel = escapeHtmlText(data.ruleApplied || "Quy chuẩn");
+          const ruleTag = data.ruleApplied
+            ? `<span style="font-size: 11px; color: #38bdf8; margin-left: 6px;">[${escapeHtmlText(data.ruleApplied)}]</span>`
+            : "";
           statusEl.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
               <div>
-                ✅ Tên miền còn trống! Báo giá: <b style="color: #10b981; font-size: 14px;">${formatted}</b>
-                <span style="font-size: 11px; color: #38bdf8; margin-left: 6px;">[${ruleLabel}]</span>
+                ✅ Tên miền còn trống! Giá bán: <b style="color: #10b981; font-size: 14px;">${formatted}</b>
+                ${ruleTag}
                 ${costHtml}
               </div>
               ${

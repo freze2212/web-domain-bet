@@ -187,6 +187,19 @@ const MIME_TYPES = {
   ".webp": "image/webp",
 };
 
+const COST_FIELDS = new Set(["priceUsd", "renewPriceUsd", "cost", "ruleApplied", "regUsd", "renewUsd"]);
+/** Giá gốc Spaceship (USD, mức giá gốc) chỉ admin thấy — user / khách chỉ thấy giá bán Xu. */
+function hideCostForNonAdmin(data, user) {
+  if (user?.role === "admin" || !data || typeof data !== "object") return data;
+  if (Array.isArray(data)) return data.map((x) => hideCostForNonAdmin(x, user));
+  const out = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (COST_FIELDS.has(k)) continue;
+    out[k] = v && typeof v === "object" ? hideCostForNonAdmin(v, user) : v;
+  }
+  return out;
+}
+
 function sendJson(res, statusCode, data) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
@@ -1210,11 +1223,11 @@ const server = http.createServer(async (req, res) => {
         deployMode: body.deployMode || "LP",
       });
 
-      sendJson(res, 200, {
+      sendJson(res, 200, hideCostForNonAdmin({
         success: true,
         message: "Yêu cầu của bạn đã gửi đi thành công! Vui lòng theo dõi lịch sử để theo dõi tiến độ tên miền.",
         ...orderResult,
-      });
+      }, currentUser));
     } catch (err) {
       sendJson(res, 400, { success: false, error: err.message });
     }
@@ -1240,7 +1253,7 @@ const server = http.createServer(async (req, res) => {
         success: true,
         count: orders.length,
         pendingCount,
-        orders,
+        orders: hideCostForNonAdmin(orders, currentUser),
       });
     } catch (err) {
       sendJson(res, 500, { success: false, error: err.message });
@@ -2167,7 +2180,7 @@ const server = http.createServer(async (req, res) => {
         currentMode = "PREMIUM_UNAVAILABLE";
       }
 
-      sendJson(res, 200, {
+      sendJson(res, 200, hideCostForNonAdmin({
         success: true,
         domain,
         isAvailable,
@@ -2228,7 +2241,7 @@ const server = http.createServer(async (req, res) => {
             messengerUrl: cfg.messenger_url || "",
           };
         }),
-      });
+      }, currentUser));
     } catch (err) {
       sendJson(res, 500, { success: false, error: err.message });
     }
@@ -2258,6 +2271,10 @@ const server = http.createServer(async (req, res) => {
       const domain = normalizeDomain(body.domain || "");
       if (!domain) {
         sendJson(res, 400, { success: false, error: "Vui lòng cung cấp tên miền" });
+        return;
+      }
+      if (currentUser?.role !== "admin") {
+        sendJson(res, 403, { success: false, error: "Chỉ admin xem báo giá Spaceship" });
         return;
       }
       const quote = await quoteSpaceshipPurchase(domain);
@@ -2334,7 +2351,7 @@ const server = http.createServer(async (req, res) => {
         seed,
         count: suggestions.length,
         availableCount: suggestions.filter((s) => s.isAvailable).length,
-        suggestions,
+        suggestions: hideCostForNonAdmin(suggestions, currentUser),
       });
     } catch (err) {
       sendJson(res, 500, { success: false, error: err.message });
@@ -2380,6 +2397,7 @@ const server = http.createServer(async (req, res) => {
               renewPriceUsd,
               priceFormatted: `${priceRule.priceXu} Xu (≈ ${(priceRule.priceVnd / 1000).toLocaleString("vi-VN")}k đ)`,
               ruleApplied: priceRule.ruleApplied,
+              requiresApproval: exactPriceUsd > 12,
             };
           } catch (e) {
             return {
@@ -2403,7 +2421,7 @@ const server = http.createServer(async (req, res) => {
         success: true,
         count: results.length,
         availableCount: results.filter((r) => r.isAvailable).length,
-        results,
+        results: hideCostForNonAdmin(results, currentUser),
       });
     } catch (err) {
       sendJson(res, 500, { success: false, error: err.message });
