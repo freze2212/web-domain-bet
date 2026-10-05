@@ -80,7 +80,8 @@ export async function resumePendingZoneRedirects() {
         h.domain &&
         h.link
     );
-    for (const h of waiting) {
+    // Cũ trước, mới sau: cùng miền có nhiều job chờ thì link mới nhất thắng
+    for (const h of waiting.reverse()) {
       const born = new Date(h.timestamp || 0).getTime();
       if (born && now - born > ZONE_302_WAIT_MS) {
         // Miền đã mua xong trước khi chờ zone → không hoàn Xu, đơn giữ "đã duyệt" để Thử lại cài tiếp

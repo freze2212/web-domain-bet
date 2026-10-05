@@ -1841,6 +1841,30 @@ export async function updateOrCreatePageRule(domain, targetUrl, statusCode = 302
 }
 
 // ── Cài đặt trỏ 302 trực tiếp (Direct 302 Redirect) ─────────────────────────
+/** Page Rule chỉ chạy khi apex có record proxied — thiếu thì tạo A 8.8.8.8 proxied, có mà chưa proxied thì bật proxy. */
+export async function ensureProxiedApexFor302(domain) {
+  const zone = await findZoneByName(domain);
+  if (!zone) return { ok: false, reason: "no_zone" };
+  const zOpts = { token: tokenForZone(zone) };
+  const records = await cfRequest(`/zones/${zone.id}/dns_records`, zOpts);
+  const apex = (records || []).find(
+    (r) => String(r.name || "").toLowerCase().replace(/\.$/, "") === domain && ["A", "AAAA", "CNAME"].includes(r.type)
+  );
+  if (!apex) {
+    await cfRequest(`/zones/${zone.id}/dns_records`, {
+      method: "POST",
+      ...zOpts,
+      body: { type: "A", name: "@", content: "8.8.8.8", proxied: true, ttl: 1 },
+    });
+    return { ok: true, action: "created" };
+  }
+  if (!apex.proxied) {
+    await cfRequest(`/zones/${zone.id}/dns_records/${apex.id}`, { method: "PATCH", ...zOpts, body: { proxied: true } });
+    return { ok: true, action: "proxied" };
+  }
+  return { ok: true, action: "exists" };
+}
+
 export async function setupDirect302Redirect(domain, targetUrl, opts = {}) {
   // Gỡ khỏi Cloudflare Pages (ưu tiên project đúng mẫu — tránh quét hàng trăm project)
   await removeDomainFromAllPagesProjects(domain, null, {

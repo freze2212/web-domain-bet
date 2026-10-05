@@ -1196,7 +1196,11 @@ function setupForms() {
             body: JSON.stringify({ domain, link: newLink, tele: newTele }),
           });
           const data = await res.json();
-          if (data.success && data.verified !== false) {
+          if (data.success && data.pending) {
+            showToast(`⏳ ${data.message || `[${domain}] đang chờ zone Cloudflare active`}`, "info");
+            fetchDomains();
+            fetchHistory();
+          } else if (data.success && data.verified !== false) {
             const liveHint = data.liveLink ? ` → ${data.liveLink}` : "";
             showToast(`✅ Live đã khớp link [${domain}]${liveHint}`, "success");
             fetchDomains();
@@ -1975,7 +1979,7 @@ async function requireSpaceshipBatchBuyConfirmation(domains) {
   return byDomain;
 }
 
-async function handleDeployApiResponse(res, data, domain) {
+async function handleDeployApiResponse(res, data, domain, isBuy = false) {
   const d = (domain || "").toLowerCase();
   if (res.status === 202 || data?.queued) {
     showToast(`⏳ [${domain}] đang xử lý ngầm — theo dõi tab Tiến trình`, "info");
@@ -1992,7 +1996,7 @@ async function handleDeployApiResponse(res, data, domain) {
   if (d) monitoredDomainsFor200.delete(d);
   const errMsg = data?.error || `HTTP ${res.status}`;
   showToast(`❌ THẤT BẠI [${domain}]: ${errMsg}`, "error");
-  alert(`❌ Mua/cài đặt thất bại: ${domain}\n\n${errMsg}`);
+  alert(`❌ ${isBuy ? "Mua & cài" : "Cài đặt"} thất bại: ${domain}\n\n${errMsg}`);
   return "fail";
 }
 
@@ -2064,7 +2068,7 @@ async function executeDeployFlow({ domain, link, tele, templateId, isBuy, type, 
         body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
-      await handleDeployApiResponse(res, data, d);
+      await handleDeployApiResponse(res, data, d, buy);
     } catch (err) {
       if (d) monitoredDomainsFor200.delete(d.toLowerCase());
       showToast(`⏳ [${d}] lỗi kết nối — kiểm tra tab Tiến trình (job có thể vẫn chạy)`, "warning");
@@ -4301,9 +4305,13 @@ function renderHistoryTable() {
             <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
               <span style="font-size: 13px;">🔴</span>
               <span style="color: var(--accent-rose); font-weight: 700; font-size: 12px;">Thất Bại</span>
-              <button class="btn btn-primary btn-sm" style="padding: 2px 8px; font-size: 10px; font-weight: 700; background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); border-color: #f59e0b;" onclick="retryFailedDeploy('${h.taskId || h.id}')" title="Nạp Spaceship (nếu hết tiền) rồi thử lại">
-                🔄 Thử Lại
-              </button>
+              ${
+                isSetLinkRetry(h)
+                  ? `<button class="btn btn-primary btn-sm" style="padding: 2px 8px; font-size: 10px; font-weight: 700; background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); border-color: #f59e0b;" onclick="retryFailedSetLink('${h.id}')" title="Cập nhật lại link (không mua, không trừ tiền)">🔄 Thử Lại</button>`
+                  : canRetryAsDeploy(h)
+                    ? `<button class="btn btn-primary btn-sm" style="padding: 2px 8px; font-size: 10px; font-weight: 700; background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); border-color: #f59e0b;" onclick="retryFailedDeploy('${h.taskId || h.id}')" title="Thử lại mua / cài">🔄 Thử Lại</button>`
+                    : ""
+              }
             </div>
             <span style="font-size: 11px; color: var(--accent-rose); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${String(h.error || "").replace(/"/g, "&quot;")}">
               ${h.error || "Lỗi cấu hình"}
@@ -6502,8 +6510,8 @@ function renderTasks() {
                 : ""
             }
             ${
-              t.status === "FAILED" && canRetryAsDeploy(t)
-                ? `<button class="btn btn-primary btn-sm" onclick="retryFailedDeploy('${safeId}')" style="background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); border-color: #f59e0b; font-weight: 700;">🔄 Thử Lại</button>`
+              t.status === "FAILED" && canRetryFailed(t)
+                ? `<button class="btn btn-primary btn-sm" onclick="retryFailed('${safeId}')" style="background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); border-color: #f59e0b; font-weight: 700;">🔄 Thử Lại</button>`
                 : ""
             }
             <button class="btn btn-secondary btn-sm" onclick="openTaskDetail('${safeId}')" ${t._fromHistory || t._fromOrder || t._optimistic ? "disabled title='Xem tab Lịch sử nếu cần'" : ""}>📜 Nhật ký</button>
@@ -6546,18 +6554,27 @@ function openTaskDetail(taskId) {
       </div>`
       )
       .join("");
-    if (task.status === "FAILED" && canRetryAsDeploy(task)) {
+    if (task.status === "FAILED" && canRetryFailed(task)) {
       const safeId = String(task.id || "").replace(/'/g, "\\'");
       logs.innerHTML += `
         <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08);">
-          <button class="btn btn-primary btn-sm" onclick="closeModal('taskDetailModal'); retryFailedDeploy('${safeId}')" style="background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); border-color: #f59e0b; font-weight: 700;">
-            🔄 Thử Lại Mua / Cài
+          <button class="btn btn-primary btn-sm" onclick="closeModal('taskDetailModal'); retryFailed('${safeId}')" style="background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); border-color: #f59e0b; font-weight: 700;">
+            ${isSetLinkRetry(task) ? "🔄 Cập Nhật Lại Link" : "🔄 Thử Lại Mua / Cài"}
           </button>
         </div>`;
     }
   }
 
   openModal("taskDetailModal");
+}
+
+/** Đổi link đích (set-link): thử lại bằng /api/set-link, không bao giờ đi luồng mua */
+function isSetLinkRetry(t) {
+  const typ = String(t?.type || "").toUpperCase();
+  if (typ === "UPDATE_LINK") return true;
+  if (typ) return false;
+  const h = (allHistory || []).find((x) => x.id === t?.id || x.taskId === t?.id);
+  return String(t?.actionType || h?.actionType || "").toUpperCase() === "SET_LINK";
 }
 
 /** Chỉ tiến trình mua / trỏ / cài mới thử lại bằng deploy-lp / deploy-302 */
@@ -6568,6 +6585,55 @@ function canRetryAsDeploy(t) {
   const h = (allHistory || []).find((x) => x.id === t?.id || x.taskId === t?.id);
   return /^(BUY|POINT)_/.test(String(t?.actionType || h?.actionType || ""));
 }
+
+function canRetryFailed(t) {
+  return isSetLinkRetry(t) || canRetryAsDeploy(t);
+}
+
+window.retryFailedSetLink = async function retryFailedSetLink(refId) {
+  const id = String(refId || "");
+  const task = allTasks.find((t) => t.id === id);
+  const hist = (allHistory || []).find((h) => h.id === id || h.taskId === id);
+  const p = task?.params || {};
+  const domain = p.domain || hist?.domain || task?.domain || "";
+  const link = p.newLink || (hist?.link !== "N/A" ? hist?.link : "") || "";
+  const tele = p.teleLink || hist?.tele || "";
+  if (!domain || !link) {
+    showToast("❌ Không tìm thấy miền / link đích để thử lại.", "error");
+    return;
+  }
+  if (!confirm(`Cập nhật lại link cho [${domain}]?\n\n→ ${link}\n\nChỉ đổi link, không mua miền, không trừ tiền.`)) return;
+  markHubInflight(domain, true);
+  showToast(`🔄 Đang cập nhật lại link [${domain}]...`, "info");
+  try {
+    const res = await fetch("/api/set-link", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ domain, link, tele }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.success && data.pending) {
+      showToast(`⏳ ${data.message || `[${domain}] đang chờ zone Cloudflare active`}`, "info");
+    } else if (data.success && data.verified !== false) {
+      showToast(`✅ Live đã khớp link [${domain}]${data.liveLink ? ` → ${data.liveLink}` : ""}`, "success");
+    } else {
+      showToast(`❌ ${data.error || "Live chưa khớp link đích"}`, "error");
+    }
+  } catch (err) {
+    showToast(`❌ Lỗi kết nối khi cập nhật [${domain}]: ${err.message}`, "error");
+  } finally {
+    markHubInflight(domain, false);
+    fetchDomains();
+    fetchHistory();
+    loadTasksList();
+  }
+};
+
+window.retryFailed = function retryFailed(refId) {
+  const id = String(refId || "");
+  const ref = allTasks.find((t) => t.id === id) || (allHistory || []).find((h) => h.id === id || h.taskId === id) || { id };
+  return isSetLinkRetry(ref) ? window.retryFailedSetLink(id) : window.retryFailedDeploy(id);
+};
 
 /** Ghép lại args deploy từ task FAILED hoặc lịch sử failed */
 function buildRetryDeployArgs(refId) {
@@ -6609,8 +6675,8 @@ window.retryFailedDeploy = async function retryFailedDeploy(refId) {
     return;
   }
   const ok = confirm(
-    `Thử lại ${args.isBuy ? "MUA & CÀI" : "CÀI"} cho [${args.domain}]?\n\n` +
-      `Nếu lỗi hết tiền Spaceship: nạp balance trước, rồi bấm OK để báo giá và mua lại.`
+    `Thử lại ${args.isBuy ? "MUA & CÀI" : "CÀI"} cho [${args.domain}]?` +
+      (args.isBuy ? `\n\nNếu lỗi hết tiền Spaceship: nạp balance trước, rồi bấm OK để báo giá và mua lại.` : "")
   );
   if (!ok) return;
   showToast(`🔄 Đang thử lại [${args.domain}]...`, "info");

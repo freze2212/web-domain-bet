@@ -11,6 +11,7 @@ import {
   findZoneByName,
   getOrCreateZone,
   updateOrCreatePageRule,
+  ensureProxiedApexFor302,
   deleteForwardingPageRules,
   findActiveForwardingRule,
   cfRequest,
@@ -1256,8 +1257,49 @@ export async function smartSetLink(rawDomain, rawLink, rawTele = "", actor = {})
     }
   }
 
+  // Zone chưa active (vừa đổi NS) → 302 chưa thể live: xếp chờ, resumePendingZoneRedirects tự tạo khi active
+  const queue302UntilZoneActive = (zone) => {
+    const step = `Zone Cloudflare đang "${zone?.status || "pending"}" (NS vừa đổi) — hub tự tạo 302 khi zone active, không cần bấm lại.`;
+    for (const old of getHistory()) {
+      if (old.id !== histId && old.domain === domain && old.actionType === "SET_LINK" && old.details?.waitZone302 && (old.status === "in_progress" || old.status === "pending")) {
+        updateHistoryItem(old.id, { status: "cancelled", progress: null, details: { waitZone302: false, closedAs: "superseded_by_later_result", laterId: histId } });
+      }
+    }
+    updateHistoryItem(histId, {
+      actionLabel: "Tạo Mới Link 302 (Page Rule)",
+      templateName: "Direct 302 Redirect",
+      status: "in_progress",
+      progress: step,
+      error: null,
+      liveStatus: "WAIT_ZONE",
+      cfAccount: cfInfo.accountName,
+      details: { mode: "redirect_302", step, waitZone302: true, link, nsEnsured: true },
+    });
+    return {
+      success: true,
+      pending: true,
+      verified: false,
+      type: "redirect_302",
+      domain, link, tele,
+      cfAccount: cfInfo.accountName,
+      histId,
+      message: `[${domain}] zone Cloudflare đang chờ active — 302 → ${link} sẽ tự lên khi NS nhận (thường vài phút đến vài giờ).`,
+    };
+  };
+  if (cfInfo.zone && cfInfo.zone.status && cfInfo.zone.status !== "active") {
+    let zone = cfInfo.zone;
+    try {
+      const { pointNameserversFor302 } = await import("./zone-302-wait.js");
+      zone = (await pointNameserversFor302(domain, { waitMs: 0 })).zone || zone;
+    } catch (nsErr) {
+      console.error(`[set-link 302] trỏ NS ${domain}:`, nsErr.message);
+    }
+    if (zone?.status !== "active") return queue302UntilZoneActive(zone);
+  }
+
   try {
     const prResult = await updateOrCreatePageRule(domain, link);
+    await ensureProxiedApexFor302(domain).catch((e) => console.error(`[set-link 302] DNS apex ${domain}:`, e.message));
     if (cfInfo.zone) {
       await cfRequest("/zones/" + cfInfo.zone.id + "/purge_cache", {
         method: "POST",
@@ -1315,9 +1357,12 @@ export async function smartSetLink(rawDomain, rawLink, rawTele = "", actor = {})
     };
   } catch (prErr) {
     try {
-      setHistoryProgress(histId, "Đang tạo zone / Page Rule 302...");
-      await getOrCreateZone(domain);
+      setHistoryProgress(histId, "Đang tạo zone / trỏ NS / Page Rule 302...");
+      const { pointNameserversFor302 } = await import("./zone-302-wait.js");
+      const { zone: newZone } = await pointNameserversFor302(domain, { waitMs: 0 });
+      if (newZone?.status !== "active") return queue302UntilZoneActive(newZone);
       const prResult = await updateOrCreatePageRule(domain, link);
+      await ensureProxiedApexFor302(domain).catch((e) => console.error(`[set-link 302] DNS apex ${domain}:`, e.message));
       setHistoryProgress(histId, "Đang chờ 302 redirect khớp link...");
       const r302 = await waitFor302RedirectMatch(domain, link);
       if (!r302.ok) {
