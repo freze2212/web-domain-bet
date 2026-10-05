@@ -371,6 +371,74 @@ function computeHistoryStats(history) {
   };
 }
 
+function historyDay(h) {
+  const t = new Date(h.timestamp || 0).getTime();
+  if (!t) return "Không rõ";
+  const d = new Date(t + 7 * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
+}
+
+function historyStatusLabel(h) {
+  if (h.status === "in_progress" || h.status === "pending") return "Đang xử lý";
+  if (h.status === "failed") return "Thất bại";
+  if (h.status === "cancelled") return "Đã huỷ";
+  if (h.liveStatus === "200_OK") return "Thành công (200)";
+  const ageMin = (Date.now() - new Date(h.timestamp || 0).getTime()) / 60000;
+  if (h.liveStatus === "ERROR_15M_ALERT" || ageMin >= 15) return "Chưa 200 (>15p)";
+  return "Đang chờ 200";
+}
+
+/** Cột lọc kiểu Excel của bảng lịch sử: key → giá trị hiển thị dùng để lọc / gom nhóm. */
+const HISTORY_COLUMNS = {
+  date: historyDay,
+  user: (h) => h.username || h.fullName || h.userId || "Hệ thống",
+  domain: (h) => h.domain || "N/A",
+  action: (h) => h.actionLabel || h.actionType || "N/A",
+  template: (h) => h.templateName || "Trỏ 302",
+  link: (h) => h.link || "N/A",
+  status: historyStatusLabel,
+};
+
+function parseHistoryFilters(raw) {
+  const out = {};
+  try {
+    const obj = JSON.parse(raw || "{}");
+    for (const key of Object.keys(HISTORY_COLUMNS)) {
+      if (Array.isArray(obj?.[key]) && obj[key].length) out[key] = new Set(obj[key].map(String));
+    }
+  } catch {}
+  return out;
+}
+
+function applyHistoryFilters(list, filters, skipKey = null) {
+  const entries = Object.entries(filters).filter(([k]) => k !== skipKey);
+  if (!entries.length) return list;
+  return list.filter((h) => entries.every(([k, set]) => set.has(HISTORY_COLUMNS[k](h))));
+}
+
+function sortHistoryRows(list, key, dir) {
+  if (!key || !HISTORY_COLUMNS[key]) return list;
+  const sign = dir === "asc" ? 1 : -1;
+  const ts = (h) => new Date(h.timestamp || 0).getTime();
+  return [...list].sort((a, b) =>
+    key === "date"
+      ? sign * (ts(a) - ts(b))
+      : sign * String(HISTORY_COLUMNS[key](a)).localeCompare(String(HISTORY_COLUMNS[key](b)), "vi") || ts(b) - ts(a)
+  );
+}
+
+function historyTableRowsFor(user, parsedUrl) {
+  const q = (parsedUrl.searchParams.get("q") || "").trim();
+  let history = filterHistoryForUser(getHistory(), user);
+  if (q) history = history.filter((h) => historyMatchesQuery(h, q));
+  return {
+    history,
+    base: history.filter((h) => h.status !== "in_progress" && h.status !== "pending"),
+    filters: parseHistoryFilters(parsedUrl.searchParams.get("f")),
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   // CORS Preflight
   if (req.method === "OPTIONS") {
@@ -1933,19 +2001,47 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // GET /api/history/facets?col=&q=&f= — danh sách giá trị 1 cột (kiểu AutoFilter Excel), đã áp các cột lọc khác
+  if (req.method === "GET" && pathname === "/api/history/facets") {
+    try {
+      const col = parsedUrl.searchParams.get("col") || "";
+      if (!HISTORY_COLUMNS[col]) {
+        sendJson(res, 400, { success: false, error: "Cột lọc không hợp lệ" });
+        return;
+      }
+      const { base, filters } = historyTableRowsFor(currentUser, parsedUrl);
+      const counts = new Map();
+      for (const h of applyHistoryFilters(base, filters, col)) {
+        const v = HISTORY_COLUMNS[col](h);
+        counts.set(v, (counts.get(v) || 0) + 1);
+      }
+      const dayKey = (v) => v.split("/").reverse().join("");
+      const values = [...counts]
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) =>
+          col === "date" ? dayKey(b.value).localeCompare(dayKey(a.value)) : b.count - a.count || a.value.localeCompare(b.value, "vi")
+        );
+      sendJson(res, 200, { success: true, col, total: values.length, values: values.slice(0, 1000), selected: [...(filters[col] || [])] });
+    } catch (err) {
+      sendJson(res, 500, { success: false, error: err.message });
+    }
+    return;
+  }
+
   // GET /api/history
   if (req.method === "GET" && pathname === "/api/history") {
     try {
       const page = Math.max(1, parseInt(parsedUrl.searchParams.get("page") || "1", 10));
       const limit = Math.min(200, Math.max(1, parseInt(parsedUrl.searchParams.get("limit") || "50", 10)));
-      const q = (parsedUrl.searchParams.get("q") || "").trim();
       const all = parsedUrl.searchParams.get("all") === "1";
 
-      let history = filterHistoryForUser(getHistory(), currentUser);
-      if (q) history = history.filter((h) => historyMatchesQuery(h, q));
-
-      const stats = computeHistoryStats(history);
-      const tableRows = history.filter((h) => h.status !== "in_progress" && h.status !== "pending");
+      const { history, base, filters } = historyTableRowsFor(currentUser, parsedUrl);
+      const stats = computeHistoryStats(applyHistoryFilters(history, filters));
+      const tableRows = sortHistoryRows(
+        applyHistoryFilters(base, filters),
+        parsedUrl.searchParams.get("sort"),
+        parsedUrl.searchParams.get("dir")
+      );
 
       if (all) {
         sendJson(res, 200, { success: true, count: tableRows.length, history: tableRows, stats });

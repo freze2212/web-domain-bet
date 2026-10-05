@@ -98,18 +98,27 @@ export function getStore(name) {
   return mem[name];
 }
 
+const pendingWrites = new Set();
+
+/** Gộp ghi: nhiều lần set liên tiếp cùng store chỉ ghi 1 lần với bản mới nhất (history ~MB/lần ghi). */
 export function setStore(name, value) {
   mem[name] = value;
-  if (!db) return;
-  let snapshot;
-  try {
-    snapshot = JSON.parse(JSON.stringify(value));
-  } catch (err) {
-    console.error(`[mongo] ${name} không serialize:`, err.message);
-    return;
-  }
+  if (!db || pendingWrites.has(name)) return;
+  pendingWrites.add(name);
   queue = queue
-    .then(() => writePayload(name, snapshot))
+    .then(async () => {
+      pendingWrites.delete(name);
+      let payload;
+      try {
+        payload = JSON.stringify(mem[name] ?? null);
+      } catch (err) {
+        console.error(`[mongo] ${name} không serialize:`, err.message);
+        return;
+      }
+      const col = db.collection(name);
+      await col.deleteMany({});
+      await col.insertOne({ payload });
+    })
     .catch((err) => {
       console.error(`[mongo] ghi ${name} lỗi:`, err.message);
     });

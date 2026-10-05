@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261004-mobile-ui">
+  <link rel="stylesheet" href="style.css?v=20261005-hist-filter">
   <script>document.documentElement.classList.add("auth-pending");</script>
 </head>
 <body class="auth-pending">
@@ -1146,17 +1146,18 @@
           <p>Đang tải dữ liệu lịch sử...</p>
         </div>
 
-        <table class="domains-table" id="historyTable" style="display: none;">
+        <div id="historyFilterBar" class="hf-bar"></div>
+        <table class="domains-table history-table" id="historyTable" style="display: none;">
           <thead>
             <tr>
               <th>#</th>
-              <th>Thời Gian</th>
-              <th>Tài Khoản</th>
-              <th>Tên Miền</th>
-              <th>Hành Động</th>
-              <th>Mẫu Giao Diện</th>
-              <th>Link Đích</th>
-              <th>Trạng Thái Kiểm Tra</th>
+              <th data-hcol="date">Thời Gian</th>
+              <th data-hcol="user">Tài Khoản</th>
+              <th data-hcol="domain">Tên Miền</th>
+              <th data-hcol="action" class="hcol-action">Hành Động</th>
+              <th data-hcol="template">Mẫu Giao Diện</th>
+              <th data-hcol="link">Link Đích</th>
+              <th data-hcol="status">Trạng Thái Kiểm Tra</th>
               <th style="text-align: right;">Thao Tác</th>
             </tr>
           </thead>
@@ -2927,7 +2928,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=20261005-retry-link"></script>
+  <script src="app.js?v=20261005-hist-filter"></script>
 </body>
 </html>
 

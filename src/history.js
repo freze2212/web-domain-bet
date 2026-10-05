@@ -62,8 +62,8 @@ export function addHistoryItem(item) {
 
     list.unshift(newEntry);
 
-    // Giữ tối đa 500 bản ghi gần nhất
-    const trimmed = list.slice(0, 500);
+    // Giữ tối đa 2000 bản ghi gần nhất
+    const trimmed = list.slice(0, 2000);
     persistHistory(trimmed);
     return newEntry;
   } catch (err) {

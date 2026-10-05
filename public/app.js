@@ -4069,8 +4069,7 @@ async function fetchHistory(page = historyPage, opts = {}) {
   }
 
   try {
-    const q = encodeURIComponent(currentHistorySearch || "");
-    const res = await fetch(`/api/history?page=${historyPage}&limit=${historyLimit}&q=${q}`, {
+    const res = await fetch(`/api/history?page=${historyPage}&limit=${historyLimit}&${historyFilterQuery()}`, {
       headers: authHeaders(),
     });
     const data = await res.json();
@@ -4081,8 +4080,9 @@ async function fetchHistory(page = historyPage, opts = {}) {
       historyTotal = data.total ?? allHistory.length;
       historyTotalPages = data.totalPages ?? 1;
       updateHistoryStats(data.stats);
+      renderHistoryFilterBar();
 
-      const fp = historyPageFingerprint(allHistory, historyPage, historyTotal, currentHistorySearch);
+      const fp = historyPageFingerprint(allHistory, historyPage, historyTotal, historyFilterQuery());
       if (fp !== historyRenderFingerprint) {
         historyRenderFingerprint = fp;
         renderHistoryTable();
@@ -4390,8 +4390,8 @@ function renderHistoryTable() {
               ${h.domain}
             </a>
           </td>
-          <td>
-            <span class="dom-repo-tag" style="background: rgba(99, 102, 241, 0.15); border-color: ${actionBadgeColor}; color: #fff;">
+          <td class="hcol-action">
+            <span class="dom-repo-tag hist-action-tag" style="border-color: ${actionBadgeColor};">
               ${h.actionLabel || h.actionType}
             </span>
           </td>
@@ -4577,6 +4577,242 @@ if (clearHistoryBtn) {
     }
   });
 }
+
+// ── Lọc cột kiểu Excel (bảng lịch sử) — lọc / sắp xếp chạy trên server, áp cho toàn bộ lịch sử ──
+const HISTORY_COL_LABELS = {
+  date: "Thời gian",
+  user: "Tài khoản",
+  domain: "Tên miền",
+  action: "Hành động",
+  template: "Mẫu giao diện",
+  link: "Link đích",
+  status: "Trạng thái",
+};
+const HF_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>`;
+let historyFilters = {};
+let historySort = { key: "", dir: "" };
+let hfPop = null;
+
+function historyFilterQuery() {
+  const parts = [`q=${encodeURIComponent(currentHistorySearch || "")}`];
+  if (Object.keys(historyFilters).length) parts.push(`f=${encodeURIComponent(JSON.stringify(historyFilters))}`);
+  if (historySort.key) parts.push(`sort=${historySort.key}&dir=${historySort.dir}`);
+  return parts.join("&");
+}
+
+function applyHistoryFilterChange() {
+  historyRenderFingerprint = "";
+  fetchHistory(1);
+}
+
+function setupHistoryHeaderFilters() {
+  document.querySelectorAll("#historyTable th[data-hcol]").forEach((th) => {
+    if (th.dataset.hfBound) return;
+    th.dataset.hfBound = "1";
+    const label = th.textContent.trim();
+    th.innerHTML = `<span class="hf-th"><span>${label}</span><button type="button" class="hf-btn" aria-label="Lọc / sắp xếp ${label}">${HF_ICON}</button></span>`;
+    th.querySelector(".hf-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openHistoryFilterPopover(th.dataset.hcol, e.currentTarget);
+    });
+  });
+}
+
+function renderHistoryFilterBar() {
+  document.querySelectorAll("#historyTable th[data-hcol]").forEach((th) => {
+    const key = th.dataset.hcol;
+    const btn = th.querySelector(".hf-btn");
+    if (!btn) return;
+    btn.classList.toggle("is-active", !!historyFilters[key] || historySort.key === key);
+    btn.dataset.sort = historySort.key === key ? historySort.dir : "";
+  });
+  const bar = document.getElementById("historyFilterBar");
+  if (!bar) return;
+  const chips = Object.entries(historyFilters).map(([key, vals]) => {
+    const text = vals.length === 1 ? vals[0] : `${vals.length} giá trị`;
+    return `<span class="hf-chip"><button type="button" class="hf-chip-open" data-col="${key}"><b>${HISTORY_COL_LABELS[key]}:</b> ${escapeHtmlText(text)}</button><button type="button" class="hf-chip-x" data-col="${key}" aria-label="Bỏ lọc ${HISTORY_COL_LABELS[key]}">×</button></span>`;
+  });
+  if (historySort.key) {
+    chips.push(
+      `<span class="hf-chip"><button type="button" class="hf-chip-open" data-col="${historySort.key}"><b>Sắp xếp:</b> ${HISTORY_COL_LABELS[historySort.key]} ${historySort.dir === "asc" ? "↑" : "↓"}</button><button type="button" class="hf-chip-x" data-sort="1" aria-label="Bỏ sắp xếp">×</button></span>`
+    );
+  }
+  const colBtns = Object.entries(HISTORY_COL_LABELS)
+    .map(([k, l]) => `<button type="button" class="hf-col-btn${historyFilters[k] || historySort.key === k ? " is-active" : ""}" data-col="${k}">${l} ▾</button>`)
+    .join("");
+  bar.innerHTML = `
+    <div class="hf-cols">${colBtns}</div>
+    ${
+      chips.length
+        ? `<div class="hf-chips">${chips.join("")}<button type="button" class="hf-clear-all">Xoá tất cả lọc</button><span class="hf-count">${historyTotal} dòng khớp</span></div>`
+        : ""
+    }`;
+}
+
+function closeHistoryFilterPopover() {
+  hfPop?.remove();
+  hfPop = null;
+}
+
+function positionHistoryFilterPopover(pop, anchor) {
+  if (window.matchMedia("(max-width: 760px)").matches) return;
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth || 300;
+  pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+  pop.style.top = `${Math.min(r.bottom + 6, window.innerHeight - 200)}px`;
+  pop.style.maxHeight = `${Math.max(200, window.innerHeight - Math.min(r.bottom + 6, window.innerHeight - 200) - 12)}px`;
+}
+
+async function openHistoryFilterPopover(col, anchor) {
+  if (!HISTORY_COL_LABELS[col]) return;
+  closeHistoryFilterPopover();
+  const pop = document.createElement("div");
+  pop.className = "hf-pop";
+  pop.innerHTML = `<div class="hf-pop-head">${HISTORY_COL_LABELS[col]}</div><div class="hf-note">Đang tải giá trị...</div>`;
+  document.body.appendChild(pop);
+  hfPop = pop;
+  positionHistoryFilterPopover(pop, anchor);
+
+  let data = null;
+  try {
+    const qs = new URLSearchParams({ col, q: currentHistorySearch || "" });
+    if (Object.keys(historyFilters).length) qs.set("f", JSON.stringify(historyFilters));
+    data = await (await fetch(`/api/history/facets?${qs}`, { headers: authHeaders() })).json();
+  } catch {}
+  if (hfPop !== pop) return;
+  if (!data?.success) {
+    pop.querySelector(".hf-note").textContent = `Không tải được danh sách giá trị${data?.error ? `: ${data.error}` : ""}`;
+    return;
+  }
+
+  const values = (data.values || []).map((v, i) => ({ ...v, i }));
+  const current = historyFilters[col] ? new Set(historyFilters[col]) : null;
+  const checked = new Set(values.filter((v) => !current || current.has(v.value)).map((v) => v.value));
+  const isDate = col === "date";
+  const sortCls = (dir) => (historySort.key === col && historySort.dir === dir ? "is-active" : "");
+  pop.innerHTML = `
+    <div class="hf-pop-head">${HISTORY_COL_LABELS[col]}</div>
+    <div class="hf-sort">
+      <button type="button" data-dir="asc" class="${sortCls("asc")}">${isDate ? "↑ Cũ → mới" : "↑ A → Z"}</button>
+      <button type="button" data-dir="desc" class="${sortCls("desc")}">${isDate ? "↓ Mới → cũ" : "↓ Z → A"}</button>
+    </div>
+    <input type="search" class="hf-search" placeholder="Tìm trong ${values.length} giá trị..." autocomplete="off" spellcheck="false">
+    <label class="hf-item hf-all"><input type="checkbox"><span>(Chọn tất cả)</span></label>
+    <div class="hf-list"></div>
+    ${data.total > values.length ? `<div class="hf-note">Hiện ${values.length}/${data.total} giá trị — gõ ô tìm để thu hẹp</div>` : ""}
+    <div class="hf-foot">
+      <button type="button" class="btn btn-secondary btn-sm hf-reset">Bỏ lọc cột</button>
+      <span style="flex: 1;"></span>
+      <button type="button" class="btn btn-secondary btn-sm hf-cancel">Huỷ</button>
+      <button type="button" class="btn btn-primary btn-sm hf-ok">OK</button>
+    </div>`;
+  positionHistoryFilterPopover(pop, anchor);
+
+  const list = pop.querySelector(".hf-list");
+  const search = pop.querySelector(".hf-search");
+  const allBox = pop.querySelector(".hf-all input");
+  const visible = () => {
+    const s = search.value.trim().toLowerCase();
+    return s ? values.filter((v) => v.value.toLowerCase().includes(s)) : values;
+  };
+  const syncAll = () => {
+    const vis = visible();
+    allBox.checked = vis.length > 0 && vis.every((v) => checked.has(v.value));
+    allBox.indeterminate = !allBox.checked && vis.some((v) => checked.has(v.value));
+  };
+  const renderList = () => {
+    const vis = visible();
+    list.innerHTML =
+      vis
+        .slice(0, 400)
+        .map(
+          (v) =>
+            `<label class="hf-item"><input type="checkbox" data-i="${v.i}" ${checked.has(v.value) ? "checked" : ""}><span class="hf-val" title="${escapeHtmlText(v.value)}">${escapeHtmlText(v.value)}</span><span class="hf-cnt">${v.count}</span></label>`
+        )
+        .join("") || `<div class="hf-note">Không có giá trị khớp</div>`;
+    syncAll();
+  };
+  renderList();
+
+  list.addEventListener("change", (e) => {
+    const v = values[Number(e.target.dataset.i)];
+    if (!v) return;
+    if (e.target.checked) checked.add(v.value);
+    else checked.delete(v.value);
+    syncAll();
+  });
+  allBox.addEventListener("change", () => {
+    for (const v of visible()) {
+      if (allBox.checked) checked.add(v.value);
+      else checked.delete(v.value);
+    }
+    renderList();
+  });
+  search.addEventListener("input", () => {
+    // Như Excel: gõ tìm thì mặc định chọn hết kết quả khớp, OK chỉ giữ các dòng khớp đang tick
+    if (search.value.trim()) for (const v of visible()) checked.add(v.value);
+    renderList();
+  });
+  search.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") pop.querySelector(".hf-ok").click();
+  });
+  pop.querySelectorAll(".hf-sort button").forEach((b) =>
+    b.addEventListener("click", () => {
+      const same = historySort.key === col && historySort.dir === b.dataset.dir;
+      historySort = same ? { key: "", dir: "" } : { key: col, dir: b.dataset.dir };
+      closeHistoryFilterPopover();
+      applyHistoryFilterChange();
+    })
+  );
+  pop.querySelector(".hf-reset").addEventListener("click", () => {
+    delete historyFilters[col];
+    if (historySort.key === col) historySort = { key: "", dir: "" };
+    closeHistoryFilterPopover();
+    applyHistoryFilterChange();
+  });
+  pop.querySelector(".hf-cancel").addEventListener("click", closeHistoryFilterPopover);
+  pop.querySelector(".hf-ok").addEventListener("click", () => {
+    const pool = search.value.trim() ? visible() : values;
+    const sel = pool.filter((v) => checked.has(v.value)).map((v) => v.value);
+    if (!sel.length) {
+      showToast("Chọn ít nhất 1 giá trị để lọc", "error");
+      return;
+    }
+    if (sel.length === values.length) delete historyFilters[col];
+    else historyFilters[col] = sel;
+    closeHistoryFilterPopover();
+    applyHistoryFilterChange();
+  });
+  if (!window.matchMedia("(pointer: coarse)").matches) search.focus();
+}
+
+document.getElementById("historyFilterBar")?.addEventListener("click", (e) => {
+  const t = e.target.closest("button");
+  if (!t) return;
+  if (t.classList.contains("hf-chip-x")) {
+    if (t.dataset.sort) historySort = { key: "", dir: "" };
+    else delete historyFilters[t.dataset.col];
+    applyHistoryFilterChange();
+  } else if (t.classList.contains("hf-clear-all")) {
+    historyFilters = {};
+    historySort = { key: "", dir: "" };
+    applyHistoryFilterChange();
+  } else if (t.dataset.col) {
+    e.stopPropagation();
+    openHistoryFilterPopover(t.dataset.col, t);
+  }
+});
+document.addEventListener("mousedown", (e) => {
+  if (hfPop && !hfPop.contains(e.target) && !e.target.closest(".hf-btn, .hf-col-btn, .hf-chip-open")) closeHistoryFilterPopover();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && hfPop) closeHistoryFilterPopover();
+});
+window.addEventListener("resize", () => {
+  if (hfPop && !window.matchMedia("(max-width: 760px)").matches) closeHistoryFilterPopover();
+});
+setupHistoryHeaderFilters();
+renderHistoryFilterBar();
 
 // Copy text utility
 function copyText(text) {
