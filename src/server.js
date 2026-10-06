@@ -2802,6 +2802,79 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // POST /api/point-ns-cf — chỉ tạo zone + trỏ NS Spaceship về Cloudflare (không cài mẫu, không mua, không trừ Xu).
+  // Mỗi request 1 miền để giao diện chạy lần lượt, tránh timeout proxy.
+  if (req.method === "POST" && pathname === "/api/point-ns-cf") {
+    if (!requireAdmin(res, currentUser)) return;
+    try {
+      const body = await parseBody(req);
+      const domain = normalizeDomain(body.domain || "");
+      if (!domain || !domain.includes(".")) {
+        sendJson(res, 400, { success: false, error: "Tên miền không hợp lệ" });
+        return;
+      }
+      const adminSkip = adminSkipPayload(domain);
+      if (adminSkip) {
+        sendJson(res, 200, { ...adminSkip, domain, result: "skipped" });
+        return;
+      }
+      const normNs = (a) => (a || []).map((s) => String(s).toLowerCase().replace(/\.$/, "")).sort();
+      const sameNs = (a, b) => a.length > 0 && JSON.stringify(normNs(a)) === JSON.stringify(normNs(b));
+
+      let out;
+      try {
+        out = await withDomainLock(domain, "Trỏ NS về Cloudflare", currentUser, async () => {
+          let info;
+          try {
+            info = await getDomainInfo(domain);
+          } catch (e) {
+            if (!/404|not found/i.test(String(e.message || ""))) throw e;
+            return {
+              success: false,
+              result: "not_in_spaceship",
+              error: "Không có trong tài khoản Spaceship hub đang dùng",
+            };
+          }
+          const nsBefore = normNs(info?.nameservers?.hosts);
+          let zone = await findZoneByName(domain).catch(() => null);
+          const zoneCreated = !zone;
+          if (!zone) zone = await getOrCreateZone(domain);
+          const target = normNs(getZoneNameservers(zone));
+          if (!target.length) throw new Error("Cloudflare chưa trả nameserver cho zone");
+          const base = { domain, nsBefore, nsTarget: target, zoneCreated, zoneStatus: zone?.status || "pending" };
+          if (sameNs(nsBefore, target)) {
+            return { success: true, result: "already", ...base };
+          }
+          await updateNameservers(domain, target);
+          const after = await getDomainInfo(domain).catch(() => null);
+          const nsAfter = normNs(after?.nameservers?.hosts);
+          return { success: true, result: sameNs(nsAfter, target) ? "changed" : "sent", nsAfter, ...base };
+        });
+      } catch (lockErr) {
+        if (lockErr.code === "DOMAIN_BUSY") {
+          sendJson(res, 409, domainBusyPayload(lockErr.busy));
+          return;
+        }
+        throw lockErr;
+      }
+
+      if (out.result === "changed" || out.result === "sent") {
+        logAdminAction({
+          action: "DOMAIN_POINT_NS_CF",
+          actor: currentUser,
+          target: { domain },
+          summary: `Trỏ NS ${domain} → ${out.nsTarget.join(", ")}`,
+          details: { nsBefore: out.nsBefore, nsTarget: out.nsTarget, zoneCreated: out.zoneCreated },
+        });
+        invalidateCfZoneCacheMem();
+      }
+      sendJson(res, 200, { domain, ...out });
+    } catch (err) {
+      sendJson(res, 500, { success: false, error: err.message });
+    }
+    return;
+  }
+
   // POST /api/auto-repair (Tự động chẩn đoán & tái triển khai toàn diện)
   if (req.method === "POST" && pathname === "/api/auto-repair") {
     try {

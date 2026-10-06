@@ -467,12 +467,11 @@ function setupSubPills() {
         document.getElementById("form-buy-302").style.display = "none";
         const fBatch = document.getElementById("form-check-batch");
         if (fBatch) fBatch.style.display = "block";
-      } else if (targetSub === "point-lp") {
-        document.getElementById("form-point-lp").style.display = "block";
-        document.getElementById("form-point-302").style.display = "none";
-      } else if (targetSub === "point-302") {
-        document.getElementById("form-point-lp").style.display = "none";
-        document.getElementById("form-point-302").style.display = "block";
+      } else if (String(targetSub || "").startsWith("point-")) {
+        ["point-lp", "point-302", "point-ns"].forEach((sub) => {
+          const el = document.getElementById(`form-${sub}`);
+          if (el) el.style.display = sub === targetSub ? "block" : "none";
+        });
       }
     });
   });
@@ -1169,6 +1168,72 @@ function setupForms() {
       }
 
       await executeDeployFlow({ domain, link, isBuy: false, type: "302" });
+    };
+  }
+
+  // Form 4b: Chỉ trỏ NS về Cloudflare (admin)
+  const pointNsForm = document.getElementById("pointNsForm");
+  if (pointNsForm) {
+    pointNsForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const raw = document.getElementById("pointNsDomains").value;
+      const domains = [
+        ...new Set(
+          raw
+            .split(/[\s,;]+/)
+            .map((d) => d.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""))
+            .filter((d) => d.includes("."))
+        ),
+      ];
+      if (!domains.length) {
+        showToast("⚠️ Nhập ít nhất 1 tên miền!");
+        return;
+      }
+      if (!confirm(`Trỏ NS ${domains.length} miền về Cloudflare?\n\n${domains.join("\n")}\n\nChỉ đổi nameserver trên Spaceship. Không cài mẫu, không mua, không trừ Xu.`)) return;
+
+      const btn = document.getElementById("btnPointNs");
+      const tbody = document.getElementById("pointNsTbody");
+      const summary = document.getElementById("pointNsSummary");
+      document.getElementById("pointNsResults").style.display = "block";
+      btn.disabled = true;
+      tbody.innerHTML = domains
+        .map((d, i) => `<tr id="pointNsRow${i}"><td>${escapeHtml(d)}</td><td>⏳ Chờ...</td><td>-</td><td>-</td><td>-</td></tr>`)
+        .join("");
+
+      const labels = {
+        changed: "✅ Đã đổi NS",
+        sent: "🟡 Đã gửi lệnh, Spaceship chưa cập nhật",
+        already: "✔️ NS đã đúng sẵn",
+        not_in_spaceship: "⛔ Không có trong Spaceship",
+        skipped: "⏭️ Bỏ qua",
+      };
+      const counts = { ok: 0, fail: 0 };
+      for (let i = 0; i < domains.length; i++) {
+        const row = document.getElementById(`pointNsRow${i}`);
+        row.cells[1].textContent = "🔄 Đang trỏ...";
+        summary.textContent = `Đang xử lý ${i + 1}/${domains.length}...`;
+        let data;
+        try {
+          const res = await fetch("/api/point-ns-cf", {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ domain: domains[i] }),
+          });
+          data = await res.json();
+        } catch (err) {
+          data = { success: false, error: err.message };
+        }
+        const ok = data.success && ["changed", "sent", "already"].includes(data.result);
+        counts[ok ? "ok" : "fail"]++;
+        const label = labels[data.result] || "❌ Lỗi";
+        const reason = !ok && data.error ? `: ${data.error}` : "";
+        row.cells[1].textContent = label + reason;
+        row.cells[2].textContent = (data.nsBefore || []).join(", ") || "-";
+        row.cells[3].textContent = (data.nsTarget || []).join(", ") || "-";
+        row.cells[4].textContent = data.zoneStatus ? `${data.zoneStatus}${data.zoneCreated ? " (mới tạo)" : ""}` : "-";
+      }
+      summary.textContent = `Xong ${domains.length} miền: ${counts.ok} thành công, ${counts.fail} lỗi/bỏ qua. Zone thường chuyển "active" sau vài phút đến vài giờ.`;
+      btn.disabled = false;
     };
   }
 

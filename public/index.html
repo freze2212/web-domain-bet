@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261005-hist-filter2">
+  <link rel="stylesheet" href="style.css?v=20261006-point-ns">
   <script>document.documentElement.classList.add("auth-pending");</script>
 </head>
 <body class="auth-pending">
@@ -439,6 +439,10 @@
             <span class="pill-icon">⚡</span>
             <span>Trỏ 302 Miền Có Sẵn</span>
           </button>
+          <button class="sub-pill" data-sub="point-ns">
+            <span class="pill-icon">🌐</span>
+            <span>Chỉ Trỏ NS Về Cloudflare</span>
+          </button>
         </div>
 
         <!-- Form: Trỏ Miền Có Sẵn ➔ LP -->
@@ -513,6 +517,46 @@
               </button>
             </div>
           </form>
+        </div>
+
+        <!-- Form: Chỉ trỏ NS về Cloudflare -->
+        <div id="form-point-ns" class="wizard-card" style="display: none;">
+          <div class="wizard-header">
+            <h3>🌐 Trỏ Nameserver Về Cloudflare (Hàng Loạt)</h3>
+            <p>Tạo zone Cloudflare (nếu chưa có) rồi đổi NS trên Spaceship sang NS của zone. Không cài mẫu, không đổi link, không mua miền, không trừ Xu. Miền phải nằm trong tài khoản Spaceship hub đang dùng.</p>
+          </div>
+
+          <form id="pointNsForm" class="form-grid">
+            <div class="form-group full-width">
+              <label for="pointNsDomains">Danh sách tên miền <span class="required">*</span></label>
+              <textarea id="pointNsDomains" class="batch-textarea" rows="6" autocomplete="off" spellcheck="false" placeholder="Mỗi dòng một miền, hoặc cách nhau bằng dấu cách / dấu phẩy&#10;xx88top.pw&#10;llwin789.net"></textarea>
+            </div>
+
+            <div class="form-actions full-width">
+              <button type="submit" id="btnPointNs" class="btn btn-primary btn-lg">
+                <span class="btn-icon">🌐</span>
+                <span>Trỏ NS Về Cloudflare</span>
+              </button>
+            </div>
+          </form>
+
+          <div id="pointNsResults" class="ns-results" style="display: none;">
+            <div id="pointNsSummary" class="ns-summary"></div>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Tên miền</th>
+                    <th>Kết quả</th>
+                    <th>NS trước</th>
+                    <th>NS Cloudflare</th>
+                    <th>Zone</th>
+                  </tr>
+                </thead>
+                <tbody id="pointNsTbody"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -2928,7 +2972,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=20261005-hist-filter"></script>
+  <script src="app.js?v=20261006-point-ns"></script>
 </body>
 </html>
 

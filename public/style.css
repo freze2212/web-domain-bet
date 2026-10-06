@@ -4750,3 +4750,13 @@ select option {
     min-width: 0;
   }
 }
+
+.ns-results {
+  margin-top: 18px;
+}
+
+.ns-summary {
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
