@@ -38,7 +38,7 @@ import { switchDomainToTemplate, cleanupOldPlaces } from "./lp-switch.js";
 import { fixDomain } from "./domain-fix.js";
 import { normalizeDomain, normalizeUrl, extractDomainsFromText, isRealLink } from "./utils.js";
 import { findDomainInRepos, checkDomainCfAccount, updateDomainInExactRepos, listAllDomains, removeDomainFromRepo, smartSetLink, detectBrandFromDomain, invalidateDomainListCache, findServingTemplate } from "./repo-scanner.js";
-import { adminSkipPayload, listHubZonesFromCache, isAdminCfZone, invalidateCfZoneCacheMem } from "./cf-account-guard.js";
+import { adminSkipPayload, listHubZonesFromCache, isAdminCfZone, invalidateCfZoneCacheMem, resolveCfZoneOwnership } from "./cf-account-guard.js";
 import { invalidateOwnershipCache } from "./ownership.js";
 import { getDomainBusy, domainBusyPayload, rejectIfDomainBusy, withDomainLock } from "./domain-busy.js";
 import { invalidateEnrichedDomainsCache, queryEnrichedDomainsList } from "./domains-list-service.js";
@@ -1143,6 +1143,11 @@ const server = http.createServer(async (req, res) => {
       const { domain, note } = body;
       if (!domain) {
         sendJson(res, 400, { success: false, error: "Vui lòng nhập tên miền muốn xin cấp quyền" });
+        return;
+      }
+      const reqDomain = normalizeDomain(String(domain)).replace(/^www\./, "");
+      if (!resolveCfZoneOwnership(reqDomain).zones.length && !getDomainOwner(reqDomain)) {
+        sendJson(res, 404, { success: false, error: `Tên miền [${reqDomain}] không có trong hệ thống nên không xin quyền được.` });
         return;
       }
 

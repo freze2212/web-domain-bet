@@ -8,6 +8,11 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
+/** Tham số chuỗi trong onclick="fn(...)": JSON cho JS, rồi escape cho thuộc tính HTML. */
+function jsArg(value) {
+  return escapeHtml(JSON.stringify(String(value ?? "")));
+}
+
 function authHeaders() {
   const token = localStorage.getItem("freze_auth_token") || "";
   const h = { "Content-Type": "application/json" };
@@ -947,8 +952,9 @@ function renderDomainsTable() {
     .map((d, index) => {
       const brand = d.brand || "KHAC";
       const brandBadgeClass = `badge-${brand.toLowerCase()}`;
-      const shortUrl = d.mainUrl || "Chưa gán link";
-      const teleUrl = d.telegramUrl || d.messengerUrl || "";
+      const shortUrl = escapeHtml(d.mainUrl || "Chưa gán link");
+      const teleRaw = d.telegramUrl || d.messengerUrl || "";
+      const teleUrl = escapeHtml(teleRaw);
 
       return `
         <tr>
@@ -967,13 +973,13 @@ function renderDomainsTable() {
               <div style="display: flex; align-items: center; gap: 6px;">
                 <span style="font-size: 11px; color: var(--text-dim); min-width: 38px;">Link:</span>
                 <span class="dom-target-url" title="${shortUrl}">${shortUrl}</span>
-                ${d.mainUrl ? `<button class="btn-copy" onclick="copyText('${d.mainUrl}')" title="Sao chép link đích">📋</button>` : ""}
+                ${d.mainUrl ? `<button class="btn-copy" onclick="copyText(${jsArg(d.mainUrl)})" title="Sao chép link đích">📋</button>` : ""}
               </div>
               ${teleUrl ? `
               <div style="display: flex; align-items: center; gap: 6px;">
                 <span style="font-size: 11px; color: var(--accent-amber); min-width: 38px;">Tele:</span>
                 <span class="dom-target-url" style="color: var(--accent-amber);" title="${teleUrl}">${teleUrl}</span>
-                <button class="btn-copy" onclick="copyText('${teleUrl}')" title="Sao chép link Telegram">📋</button>
+                <button class="btn-copy" onclick="copyText(${jsArg(teleRaw)})" title="Sao chép link Telegram">📋</button>
               </div>` : ""}
             </div>
           </td>
@@ -982,13 +988,13 @@ function renderDomainsTable() {
           </td>
           <td>
             <div class="action-btn-group">
-              <button class="btn btn-sm btn-secondary" onclick="openEditLinkModal('${d.domain}', '${d.mainUrl || ""}', '${teleUrl}')" title="Đổi link chuyển hướng & Telegram">
+              <button class="btn btn-sm btn-secondary" onclick="openEditLinkModal(${jsArg(d.domain)}, ${jsArg(d.mainUrl)}, ${jsArg(teleRaw)})" title="Đổi link chuyển hướng & Telegram">
                 ✏️ Sửa Link
               </button>
-              <button class="btn btn-sm btn-secondary" onclick="openSwitchTemplateModal('${d.domain}', '${d.templateId || ""}', '${d.mainUrl || ""}', '${teleUrl}')" title="Đổi sang mẫu Landing Page khác">
+              <button class="btn btn-sm btn-secondary" onclick="openSwitchTemplateModal(${jsArg(d.domain)}, ${jsArg(d.templateId)}, ${jsArg(d.mainUrl)}, ${jsArg(teleRaw)})" title="Đổi sang mẫu Landing Page khác">
                 🎨 Đổi Mẫu
               </button>
-              <button class="btn-switch-mode" onclick="openSwitchModeModal('${d.domain}', '${d.sourceType === 'redirect_302' ? '302' : 'LP'}', '${d.mainUrl || ''}')" title="Chuyển đổi 1-click giữa 302 và Landing Page">
+              <button class="btn-switch-mode" onclick="openSwitchModeModal(${jsArg(d.domain)}, '${d.sourceType === 'redirect_302' ? '302' : 'LP'}', ${jsArg(d.mainUrl)})" title="Chuyển đổi 1-click giữa 302 và Landing Page">
                 🔁 302/LP
               </button>
             </div>
@@ -2389,10 +2395,10 @@ function renderInspectorResult(r) {
           ${
             r.detectedLink
               ? `
-            <button class="btn btn-secondary" onclick="openEditLinkModal('${r.domain}', '${r.detectedLink}', '${r.detectedTele || ""}')">
+            <button class="btn btn-secondary" onclick="openEditLinkModal(${jsArg(r.domain)}, ${jsArg(r.detectedLink)}, ${jsArg(r.detectedTele)})">
               ✏️ Sửa Link
             </button>
-            <button class="btn btn-secondary" onclick="openSwitchTemplateModal('${r.domain}', '', '${r.detectedLink}', '${r.detectedTele || ""}')">
+            <button class="btn btn-secondary" onclick="openSwitchTemplateModal(${jsArg(r.domain)}, '', ${jsArg(r.detectedLink)}, ${jsArg(r.detectedTele)})">
               🎨 Đổi Mẫu
             </button>
           `
@@ -4303,8 +4309,8 @@ function formatHistoryDate(isoString) {
 }
 
 function formatHistoryActor(h) {
-  const name = h.username || h.fullName || "";
-  const id = h.userId || "";
+  const name = escapeHtml(h.username || h.fullName || "");
+  const id = escapeHtml(h.userId || "");
   if (name && id) {
     return `<div style="display:flex;flex-direction:column;gap:2px;line-height:1.25;">
       <span style="font-weight:700;color:#fff;font-size:12px;">${name}</span>
@@ -4340,9 +4346,9 @@ function renderHistoryTable() {
       else if (h.actionType === "SET_LINK") actionBadgeColor = "var(--accent-cyan)";
 
       const formattedDate = formatHistoryDate(h.timestamp);
-      const shortUrl = h.link || "N/A";
+      const shortUrl = escapeHtml(h.link || "N/A");
       const prevLinkHtml = h.previousLink
-        ? `<div style="font-size:10px;color:var(--text-dim);margin-top:3px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="Link cũ: ${h.previousLink}">← ${h.previousLink}</div>`
+        ? `<div style="font-size:10px;color:var(--text-dim);margin-top:3px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="Link cũ: ${escapeHtml(h.previousLink)}">← ${escapeHtml(h.previousLink)}</div>`
         : "";
       const histIdHtml = h.id
         ? `<div style="font-size:9px;color:var(--text-dim);font-family:var(--font-mono);margin-top:2px;" title="History ID">${h.id}</div>`
@@ -4399,13 +4405,13 @@ function renderHistoryTable() {
         `;
       } else if (h.liveStatus === "ERROR_15M_ALERT" || ageMinutes >= 15) {
         // Quá 15 phút chưa 200 OK -> Hiện cảnh báo liên hệ admin @frezeit
-        const escapedErr = (h.lastCheckError || "Quá 15 phút chưa phản hồi HTTP 200").replace(/'/g, "\\'");
+        const errText = h.lastCheckError || "Quá 15 phút chưa phản hồi HTTP 200";
         liveSectionHtml = `
           <div style="display: flex; flex-direction: column; gap: 3px;">
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="font-size: 13px;">⚠️</span>
               <span style="color: var(--accent-rose); font-size: 11px; font-weight: 700;">Chưa 200 OK (>15p)</span>
-              <button class="btn btn-secondary btn-sm" style="padding: 1px 6px; font-size: 10px; border-color: rgba(244, 63, 94, 0.5); color: var(--accent-rose);" onclick="openErrorAlertModalForDomain('${h.domain}', '${h.link || ''}', '${escapedErr}')" title="Xem chi tiết cảnh báo">
+              <button class="btn btn-secondary btn-sm" style="padding: 1px 6px; font-size: 10px; border-color: rgba(244, 63, 94, 0.5); color: var(--accent-rose);" onclick="openErrorAlertModalForDomain(${jsArg(h.domain)}, ${jsArg(h.link)}, ${jsArg(errText)})" title="Xem chi tiết cảnh báo">
                 Chi tiết
               </button>
             </div>
@@ -4467,10 +4473,10 @@ function renderHistoryTable() {
           <td>
             <div style="display: flex; align-items: center; gap: 6px;">
               <span class="dom-target-url" title="${shortUrl}">${shortUrl}</span>
-              ${h.link && h.link !== "N/A" ? `<button class="btn-copy" onclick="copyText('${h.link}')" title="Sao chép link">📋</button>` : ""}
+              ${h.link && h.link !== "N/A" ? `<button class="btn-copy" onclick="copyText(${escapeHtml(JSON.stringify(String(h.link)))})" title="Sao chép link">📋</button>` : ""}
             </div>
             ${prevLinkHtml}
-            ${h.tele ? `<div style="font-size:10px;color:var(--accent-cyan);margin-top:2px;">Tele: ${h.tele}</div>` : ""}
+            ${h.tele ? `<div style="font-size:10px;color:var(--accent-cyan);margin-top:2px;">Tele: ${escapeHtml(h.tele)}</div>` : ""}
           </td>
           <td>
             ${liveSectionHtml}
@@ -5182,7 +5188,7 @@ async function loadAdminTargetUserOptions() {
     const opts = ['<option value="">— Gán cho chính Admin —</option>'].concat(
       data.users
         .filter((u) => u.role !== "admin" && u.id !== "u_admin")
-        .map((u) => `<option value="${u.id}">${u.username}${u.fullName ? ` (${u.fullName})` : ""}</option>`)
+        .map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.username)}${u.fullName ? ` (${escapeHtml(u.fullName)})` : ""}</option>`)
     );
     ["buyLpTargetUser", "buy302TargetUser"].forEach((id) => {
       const sel = document.getElementById(id);
@@ -5729,7 +5735,7 @@ async function loadUsersList() {
 
     if (topupUserSelect) {
       topupUserSelect.innerHTML = allUsersCache.map((u) => `
-        <option value="${u.id}">${u.username} (${u.fullName}) - Số dư: ${(u.balance || 0).toLocaleString("vi-VN")} Xu</option>
+        <option value="${escapeHtml(u.id)}">${escapeHtml(u.username)} (${escapeHtml(u.fullName)}) - Số dư: ${(u.balance || 0).toLocaleString("vi-VN")} Xu</option>
       `).join("");
     }
 
@@ -7847,7 +7853,7 @@ async function loadMyRequestsHistory() {
           if (r.status === "approved") {
             statusTag = `<span class="badge-status badge-success" style="font-weight: 700;">🟢 ĐÃ ĐƯỢC DUYỆT</span>`;
           } else if (r.status === "rejected") {
-            statusTag = `<span class="badge-status badge-danger" style="font-weight: 700;">🔴 TỪ CHỐI (${r.rejectReason || "Không đạt"})</span>`;
+            statusTag = `<span class="badge-status badge-danger" style="font-weight: 700;">🔴 TỪ CHỐI (${escapeHtml(r.rejectReason || "Không đạt")})</span>`;
           } else {
             statusTag = `<span class="badge-status badge-warning" style="font-weight: 700;">🟡 CHỜ ADMIN DUYỆT</span>`;
           }
@@ -7856,10 +7862,10 @@ async function loadMyRequestsHistory() {
             <tr>
               <td style="color: var(--text-dim); font-family: var(--font-mono);">${idx + 1}</td>
               <td style="color: var(--text-muted); font-size: 12px;">${new Date(r.createdAt).toLocaleString("vi-VN")}</td>
-              <td><strong style="color: #fff; font-family: var(--font-mono); font-size: 14px;">${r.domain}</strong></td>
-              <td style="color: var(--text-dim); font-size: 13px;">${r.note || "Xin cấp quyền quản trị"}</td>
+              <td><strong style="color: #fff; font-family: var(--font-mono); font-size: 14px;">${escapeHtml(r.domain)}</strong></td>
+              <td style="color: var(--text-dim); font-size: 13px;">${escapeHtml(r.note || "Xin cấp quyền quản trị")}</td>
               <td>${statusTag}</td>
-              <td style="color: var(--text-muted); font-size: 12px;">${r.resolvedBy ? `👤 ${r.resolvedBy} (${new Date(r.resolvedAt).toLocaleTimeString('vi-VN')})` : "Đang chờ"}</td>
+              <td style="color: var(--text-muted); font-size: 12px;">${r.resolvedBy ? `👤 ${escapeHtml(r.resolvedBy)} (${new Date(r.resolvedAt).toLocaleTimeString('vi-VN')})` : "Đang chờ"}</td>
             </tr>
           `;
         }).join("");
@@ -7903,21 +7909,21 @@ async function loadAdminPendingRequests() {
             <td style="color: var(--text-dim); font-family: var(--font-mono);">${idx + 1}</td>
             <td style="color: var(--text-muted); font-size: 12px;">${new Date(r.createdAt).toLocaleString("vi-VN")}</td>
             <td>
-              <strong style="color: var(--accent-cyan); font-weight: 700;">👤 ${r.username}</strong>
-              <div style="font-size: 11px; color: var(--text-dim);">${r.fullName || ""}</div>
+              <strong style="color: var(--accent-cyan); font-weight: 700;">👤 ${escapeHtml(r.username)}</strong>
+              <div style="font-size: 11px; color: var(--text-dim);">${escapeHtml(r.fullName || "")}</div>
             </td>
             <td>
-              <strong style="color: #fff; font-family: var(--font-mono); font-size: 14px;">${r.domain}</strong>
-              ${r.isConflict ? `<div style="font-size: 11px; color: #fbbf24; margin-top: 4px;">Đang thuộc @${r.currentOwner?.username || "user khác"}</div>` : ""}
+              <strong style="color: #fff; font-family: var(--font-mono); font-size: 14px;">${escapeHtml(r.domain)}</strong>
+              ${r.isConflict ? `<div style="font-size: 11px; color: #fbbf24; margin-top: 4px;">Đang thuộc @${escapeHtml(r.currentOwner?.username || "user khác")}</div>` : ""}
             </td>
-            <td style="color: var(--text-dim); font-size: 13px;">${r.note || "Xin cấp quyền quản trị"}</td>
+            <td style="color: var(--text-dim); font-size: 13px; max-width: 320px; overflow-wrap: anywhere;">${escapeHtml(r.note || "Xin cấp quyền quản trị")}</td>
             <td><span class="badge-status badge-warning" style="font-weight: 700;">🟡 Chờ Duyệt</span></td>
             <td style="text-align: right;">
               <div style="display: flex; gap: 6px; justify-content: flex-end;">
-                <button class="btn btn-primary btn-sm" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700;" onclick="handleAdminApproveRequest('${r.id}')">
+                <button class="btn btn-primary btn-sm" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700;" onclick="handleAdminApproveRequest('${escapeHtml(r.id)}')">
                   🟢 Duyệt Cấp Quyền
                 </button>
-                <button class="btn btn-secondary btn-sm" style="color: var(--accent-rose); border-color: rgba(244, 63, 94, 0.4);" onclick="handleAdminRejectRequest('${r.id}')">
+                <button class="btn btn-secondary btn-sm" style="color: var(--accent-rose); border-color: rgba(244, 63, 94, 0.4);" onclick="handleAdminRejectRequest('${escapeHtml(r.id)}')">
                   🔴 Từ Chối
                 </button>
               </div>
@@ -8280,7 +8286,7 @@ function renderOrderStatusHtml(o, { adminView = false } = {}) {
       }
     }
   } else if (o.status === "rejected") {
-    statusHtml = `<span class="badge-status badge-danger" style="font-weight: 700;">🔴 TỪ CHỐI (${o.rejectReason || "Không đạt"})</span>`;
+    statusHtml = `<span class="badge-status badge-danger" style="font-weight: 700;">🔴 TỪ CHỐI (${escapeHtml(o.rejectReason || "Không đạt")})</span>`;
   } else {
     statusHtml = `<span class="badge-status badge-warning" style="font-weight: 700;">🟡 CHỜ ADMIN DUYỆT</span>`;
     if (adminView) {
@@ -8336,19 +8342,19 @@ function renderAdminDomainOrdersTable(orders) {
           <td style="color: var(--text-dim); font-family: var(--font-mono);">${idx + 1}</td>
           <td style="color: var(--text-muted); font-size: 12px;">${new Date(o.createdAt).toLocaleString("vi-VN")}</td>
           <td>
-            <strong style="color: var(--accent-cyan); font-weight: 700;">👤 ${o.username}</strong>
-            <div style="font-size: 11px; color: var(--text-dim);">${o.fullName || ""}</div>
+            <strong style="color: var(--accent-cyan); font-weight: 700;">👤 ${escapeHtml(o.username)}</strong>
+            <div style="font-size: 11px; color: var(--text-dim);">${escapeHtml(o.fullName || "")}</div>
           </td>
-          <td><strong style="color: #fbbf24; font-family: var(--font-mono); font-size: 14px;">${o.domain}</strong></td>
+          <td><strong style="color: #fbbf24; font-family: var(--font-mono); font-size: 14px;">${escapeHtml(o.domain)}</strong></td>
           <td>
-            <strong style="color: #10b981; font-family: var(--font-mono);">${o.priceXu} Xu</strong>
-            <div style="font-size: 11px; color: var(--text-dim);">${o.ruleApplied || ""}</div>
-            ${o.link ? `<div style="font-size: 10px; color: var(--text-dim); margin-top: 2px;">🔗 ${o.link.slice(0, 40)}${o.link.length > 40 ? "…" : ""}</div>` : ""}
-            ${o.templateId ? `<div style="font-size: 10px; color: var(--text-dim);">🎨 ${o.templateId}</div>` : ""}
+            <strong style="color: #10b981; font-family: var(--font-mono);">${Number(o.priceXu) || 0} Xu</strong>
+            <div style="font-size: 11px; color: var(--text-dim);">${escapeHtml(o.ruleApplied || "")}</div>
+            ${o.link ? `<div style="font-size: 10px; color: var(--text-dim); margin-top: 2px;">🔗 ${escapeHtml(o.link.slice(0, 40))}${o.link.length > 40 ? "…" : ""}</div>` : ""}
+            ${o.templateId ? `<div style="font-size: 10px; color: var(--text-dim);">🎨 ${escapeHtml(o.templateId)}</div>` : ""}
             ${o.deployMode === "302" ? `<div style="font-size: 10px; color: #38bdf8;">⚡ 302</div>` : ""}
           </td>
           <td>${balanceDisplay}</td>
-          <td style="color: var(--text-dim); font-size: 13px;">${o.note || "-"}</td>
+          <td style="color: var(--text-dim); font-size: 13px; max-width: 320px; overflow-wrap: anywhere;">${escapeHtml(o.note || "-")}</td>
           <td>${statusHtml}</td>
           <td style="text-align: right;">${actionHtml}</td>
         </tr>
@@ -8381,9 +8387,9 @@ function renderUserDomainOrdersTable(orders) {
         <tr>
           <td style="color: var(--text-dim); font-family: var(--font-mono);">${idx + 1}</td>
           <td style="color: var(--text-muted); font-size: 12px;">${new Date(o.createdAt).toLocaleString("vi-VN")}</td>
-          <td><strong style="color: #fbbf24; font-family: var(--font-mono);">${o.domain}</strong></td>
-          <td><strong style="color: #10b981; font-family: var(--font-mono);">${o.priceXu} Xu</strong></td>
-          <td style="color: var(--text-dim); font-size: 13px;">${o.note || "-"}</td>
+          <td><strong style="color: #fbbf24; font-family: var(--font-mono);">${escapeHtml(o.domain)}</strong></td>
+          <td><strong style="color: #10b981; font-family: var(--font-mono);">${Number(o.priceXu) || 0} Xu</strong></td>
+          <td style="color: var(--text-dim); font-size: 13px; max-width: 320px; overflow-wrap: anywhere;">${escapeHtml(o.note || "-")}</td>
           <td>${statusHtml}</td>
         </tr>
       `;

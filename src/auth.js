@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { getStore, setStore } from "./mongo-stores.js";
+import { cleanText } from "./utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, "..", "data");
@@ -162,7 +163,7 @@ export function register({ username, password, fullName, role = "user" }) {
     id: `u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     username: cleanUsername,
     passwordHash: hashPassword(password),
-    fullName: fullName || cleanUsername,
+    fullName: cleanText(fullName, 60) || cleanUsername,
     role: "user",
     status: "active",
     createdAt: new Date().toISOString(),
@@ -239,7 +240,7 @@ export function createUserByAdmin({ username, password, fullName, role = "user",
     id: `u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     username: cleanUsername,
     passwordHash: hashPassword(password),
-    fullName: fullName || cleanUsername,
+    fullName: cleanText(fullName, 60) || cleanUsername,
     role: role === "admin" || role === "assistant" ? role : "user",
     status: "active",
     createdAt: new Date().toISOString(),
@@ -256,7 +257,7 @@ export function updateUserByAdmin(userId, { fullName, password, role, status }) 
   const u = users.find((x) => x.id === userId);
   if (!u) throw new Error("Không tìm thấy người dùng");
 
-  if (fullName !== undefined) u.fullName = fullName;
+  if (fullName !== undefined) u.fullName = cleanText(fullName, 60) || u.username;
   if (password) {
     u.passwordHash = hashPassword(password);
     u.sessionsValidAfter = Date.now();

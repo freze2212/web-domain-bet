@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { assignDomain, getDomainOwner, describeOwnerConflict, unassignDomain } from "./ownership.js";
 import { calculateDomainPriceRule, getBalance, deductBalance, topupBalance } from "./wallet.js";
 import { getStore, setStore } from "./mongo-stores.js";
+import { cleanText, normalizeUrl } from "./utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, "..", "data");
@@ -78,10 +79,10 @@ export function createDomainOrder({ userId, username, fullName, domain, note = "
     username: username || userId,
     fullName: fullName || username || userId,
     domain: normDomain,
-    note: note.trim(),
-    link: String(link || "").trim(),
-    tele: String(tele || "").trim(),
-    templateId: String(templateId || "").trim(),
+    note: cleanText(note, 200),
+    link: link ? normalizeUrl(String(link)).slice(0, 500) : "",
+    tele: tele ? normalizeUrl(String(tele)).slice(0, 500) : "",
+    templateId: String(templateId || "").replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 80),
     deployMode: deployMode === "302" ? "302" : "LP",
     priceXu: pricing.priceXu,
     priceVnd: pricing.priceVnd,

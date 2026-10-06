@@ -2,12 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assignDomain, unassignDomain, getDomainOwner, describeOwnerConflict } from "./ownership.js";
-import { normalizeDomain } from "./utils.js";
+import { normalizeDomain, cleanText } from "./utils.js";
 import { getStore, setStore } from "./mongo-stores.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, "..", "data");
 const REQUESTS_FILE = path.join(DATA_DIR, "domain_requests.json");
+const MAX_PENDING_PER_USER = 20;
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -40,6 +41,10 @@ export function createDomainRequest({ userId, username, fullName, domain, note =
   if (existingPending) {
     throw new Error(`Bạn đã có một yêu cầu cấp quyền cho tên miền ${normDomain} đang chờ Admin duyệt!`);
   }
+  const myPending = requests.filter((r) => r.userId === userId && r.status === "pending").length;
+  if (myPending >= MAX_PENDING_PER_USER) {
+    throw new Error(`Bạn đang có ${myPending} yêu cầu chờ duyệt. Chờ Admin xử lý bớt rồi gửi tiếp.`);
+  }
 
   // Kiểm tra xem user đã sở hữu domain này chưa
   const currentOwner = getDomainOwner(normDomain);
@@ -53,7 +58,7 @@ export function createDomainRequest({ userId, username, fullName, domain, note =
     username: username || userId,
     fullName: fullName || username || userId,
     domain: normDomain,
-    note: note.trim(),
+    note: cleanText(note, 200),
     status: "pending", // pending | approved | rejected
     createdAt: new Date().toISOString(),
     resolvedAt: null,

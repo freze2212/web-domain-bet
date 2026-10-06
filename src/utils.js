@@ -57,11 +57,20 @@ export function normalizeDomain(input) {
   throw new Error(`Domain không hợp lệ: ${input}`);
 }
 
+/** Văn bản tự do do user nhập (họ tên, ghi chú): bỏ ký tự HTML/điều khiển, gộp khoảng trắng, cắt độ dài. */
+export function cleanText(input, max = 200) {
+  return String(input ?? "")
+    .replace(/[<>`"'\\\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+}
+
 export function normalizeUrl(input) {
   if (!input || typeof input !== "string") {
     throw new Error("Link không được để trống");
   }
-  let url = input.replace(/[`"'*]/g, "").trim();
+  let url = input.replace(/[`"'*<>\\\s]/g, "").trim();
   // Nếu người dùng nhập t.me/... hoặc www.... thì tự động thêm https://
   if (!/^https?:\/\//i.test(url)) {
     if (/^[a-z0-9-]+\.[a-z0-9.]+/i.test(url)) {
