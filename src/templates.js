@@ -274,7 +274,7 @@ export const ACTIVE_TEMPLATES = [
   },
   {
     "id": "lp_gg88_c168_qte",
-    "name": "GG88BZ — Cổng quốc tế chính thức ☀ 2026",
+    "name": "LLWIN — c168 Cổng quốc tế chính thức ☀ 2026",
     "title": "Welcome to cổng quốc tế chính thức ☀ 2026️",
     "folder": "lp-c168-qte",
     "path": "C:\\Landingpages\\LLWIN\\lp-c168-qte",
@@ -285,6 +285,22 @@ export const ACTIVE_TEMPLATES = [
     "sampleDomain": "ggtop.us",
     "sampleUrl": "https://ggtop.us",
     "totalDomains": 2,
+    "brand": "LLWIN",
+    "brandLabel": "LLWIN"
+  },
+  {
+    "id": "lp_gg88_c168",
+    "name": "GG88BZ — Cổng quốc tế chính thức ☀ 2026",
+    "title": "Welcome to cổng quốc tế chính thức ☀ 2026️",
+    "folder": "lp-gg88-c168",
+    "path": "C:\\Landingpages\\GG88\\lp-gg88-c168",
+    "gitRepo": "freze2212/lp-gg88-c168",
+    "pagesProject": "lp-gg88-c168",
+    "cnameTarget": "lp-gg88-c168.pages.dev",
+    "pagesAccountId": "456da4d89821d871fac09c0e5651338a",
+    "sampleDomain": "lp-gg88-c168.pages.dev",
+    "sampleUrl": "https://lp-gg88-c168.pages.dev",
+    "totalDomains": 0,
     "brand": "GG88",
     "brandLabel": "GG88"
   },
