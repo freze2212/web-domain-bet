@@ -273,6 +273,22 @@ export const ACTIVE_TEMPLATES = [
     "brandLabel": "LLWIN"
   },
   {
+    "id": "lp_xoamaan_mm88",
+    "name": "Tool Xoá Mã Ẩn Nhà Cái | MM88",
+    "title": "Tool Xoá Mã Ẩn Nhà Cái | Kích Hoạt RTP & Tắt Theo Dõi IP",
+    "folder": "lp-xoamaan-mm88",
+    "path": "C:\\Landingpages\\MM88\\lp-xoamaan-mm88",
+    "gitRepo": "freze2212/lp-xoamaan-mm88",
+    "pagesProject": "lp-xoamaan-mm88",
+    "cnameTarget": "lp-xoamaan-mm88.pages.dev",
+    "pagesAccountId": "456da4d89821d871fac09c0e5651338a",
+    "sampleDomain": "xoamaanai.com",
+    "sampleUrl": "https://xoamaanai.com",
+    "totalDomains": 1,
+    "brand": "MM88",
+    "brandLabel": "MM88"
+  },
+  {
     "id": "lp_gg88_c168_qte",
     "name": "LLWIN — c168 Cổng quốc tế chính thức ☀ 2026",
     "title": "Welcome to cổng quốc tế chính thức ☀ 2026️",
