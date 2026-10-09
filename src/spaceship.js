@@ -12,11 +12,16 @@ async function spaceshipRequest(path, { method = "GET", body } = {}) {
     headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let response;
+  for (let attempt = 0; ; attempt++) {
+    response = await fetch(url, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (response.status !== 429 || method !== "GET" || attempt >= 2) break;
+    await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+  }
 
   const asyncId = response.headers.get("spaceship-async-operationid");
   const text = await response.text();
@@ -75,7 +80,7 @@ export async function quoteSpaceshipPurchase(domain) {
   if (!norm) throw new Error("Thiếu tên miền");
 
   const privacyLevel = resolvePrivacyLevel(norm);
-  const availability = await checkDomainAvailability(norm).catch(() => ({ result: "unknown" }));
+  const availability = await checkDomainAvailability(norm).catch((e) => ({ result: "unknown", error: e.message }));
 
   if (availability.result === "taken") {
     try {
@@ -110,7 +115,9 @@ export async function quoteSpaceshipPurchase(domain) {
       domain: norm,
       canPurchase: false,
       reason: availability.result || "unavailable",
-      message: `Không thể mua: trạng thái ${availability.result || "unknown"}`,
+      message: availability.error
+        ? `Không kiểm tra được miền trên Spaceship (${availability.error}) — thử lại sau ít phút`
+        : `Không thể mua: trạng thái ${availability.result || "unknown"}`,
     };
   }
 
