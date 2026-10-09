@@ -41,7 +41,7 @@ export async function executeBuyAndDeploy(taskId) {
     if (!isRealLink(link)) throw new Error("Thiếu link đích");
     if (mode !== "302" && !template?.cnameTarget) throw new Error("Chưa chọn mẫu Landing Page");
     const templateName = template?.name || "Direct 302 Redirect";
-    const cnameTarget = mode === "302" ? "8.8.8.8" : template.cnameTarget;
+    const cnameTarget = mode === "302" ? "192.0.2.1" : template.cnameTarget;
 
     // Thêm vào bảng lịch sử ban đầu (Pending)
     addHistoryItem({
@@ -76,7 +76,7 @@ export async function executeBuyAndDeploy(taskId) {
     let cfResult = null;
     if (mode === "302") {
       setHistoryProgress(historyId, "Đang thiết lập Page Rule 302...");
-      updateTaskProgress(taskId, 55, "Đang thiết lập Cloudflare Page Rule 302...", "Tạo Page Rule & Proxy DNS 8.8.8.8", "info");
+      updateTaskProgress(taskId, 55, "Đang thiết lập Cloudflare Page Rule 302...", "Tạo Page Rule & Proxy DNS 192.0.2.1", "info");
       cfResult = await setupDirect302Redirect(domain, link);
       // Gỡ khỏi LP source sau khi 302 đã chạy
       for (const m of findDomainInRepos(domain)) {
@@ -254,7 +254,7 @@ export async function executeSwitchMode(taskId) {
         actionLabel: "Chuyển sang 302 Redirect",
         templateName: "Direct 302 Redirect",
         templateId: null,
-        cnameTarget: "8.8.8.8",
+        cnameTarget: "192.0.2.1",
         link: targetUrl,
         status: "success",
         progress: null,
