@@ -1691,7 +1691,7 @@ export async function setupCloudflare(domain, customTarget, templatePath = "") {
   }
 
   const cname = await ensurePagesCname(domain, finalTarget);
-  // Chỉ gỡ 302 sau khi CNAME đã thay A 8.8.8.8. Gỡ trước đó thì request rơi vào dns.google.
+  // Chỉ gỡ 302 sau khi CNAME đã thay A 192.0.2.1. Gỡ trước đó thì miền không còn đích (522).
   await deleteForwardingPageRules(zone.id, { token: tokenForZone(zone) });
 
   // ensurePagesCname đã re-assert cross-user nếu cần; ở đây chỉ chờ SSL active
@@ -1841,7 +1841,7 @@ export async function updateOrCreatePageRule(domain, targetUrl, statusCode = 302
 }
 
 // ── Cài đặt trỏ 302 trực tiếp (Direct 302 Redirect) ─────────────────────────
-/** Page Rule chỉ chạy khi apex có record proxied — thiếu thì tạo A 8.8.8.8 proxied, có mà chưa proxied thì bật proxy. */
+/** Page Rule chỉ chạy khi apex có record proxied — thiếu thì tạo A 192.0.2.1 proxied, có mà chưa proxied thì bật proxy. */
 export async function ensureProxiedApexFor302(domain) {
   const zone = await findZoneByName(domain);
   if (!zone) return { ok: false, reason: "no_zone" };
@@ -1854,7 +1854,7 @@ export async function ensureProxiedApexFor302(domain) {
     await cfRequest(`/zones/${zone.id}/dns_records`, {
       method: "POST",
       ...zOpts,
-      body: { type: "A", name: "@", content: "8.8.8.8", proxied: true, ttl: 1 },
+      body: { type: "A", name: "@", content: "192.0.2.1", proxied: true, ttl: 1 },
     });
     return { ok: true, action: "created" };
   }
@@ -1875,7 +1875,7 @@ export async function setupDirect302Redirect(domain, targetUrl, opts = {}) {
   const nameservers = getZoneNameservers(zone);
   const zOpts = { token: tokenForZone(zone) };
 
-  // Tạo dummy A record trỏ tới 8.8.8.8 (proxied) để Cloudflare Edge bắt request và thực thi Page Rule 302
+  // Tạo dummy A record trỏ tới 192.0.2.1 (proxied) để Cloudflare Edge bắt request và thực thi Page Rule 302
   try {
     const records = await cfRequest(`/zones/${zone.id}/dns_records`, zOpts);
     const rootA = records?.find(
@@ -1888,7 +1888,7 @@ export async function setupDirect302Redirect(domain, targetUrl, opts = {}) {
         body: {
           type: "A",
           name: "@",
-          content: "8.8.8.8",
+          content: "192.0.2.1",
           proxied: true,
           ttl: 1,
         },
@@ -1900,7 +1900,7 @@ export async function setupDirect302Redirect(domain, targetUrl, opts = {}) {
         body: {
           type: "A",
           name: "@",
-          content: "8.8.8.8",
+          content: "192.0.2.1",
           proxied: true,
           ttl: 1,
         },
@@ -1922,7 +1922,7 @@ export async function setupDirect302Redirect(domain, targetUrl, opts = {}) {
       await cfRequest(`/zones/${zone.id}/dns_records/${rec.id}`, { method: "DELETE", ...zOpts }).catch(() => {});
     }
   } catch (err) {
-    console.error(`Lỗi tạo DNS dummy 8.8.8.8 cho 302 trên ${domain}:`, err.message);
+    console.error(`Lỗi tạo DNS dummy 192.0.2.1 cho 302 trên ${domain}:`, err.message);
   }
 
   // Tạo hoặc kích hoạt Page Rule 302
