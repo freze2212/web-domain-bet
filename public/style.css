@@ -4760,3 +4760,34 @@ select option {
   font-size: 13px;
   color: var(--text-dim);
 }
+
+/* PC: bảng lịch sử cuộn ngang thay vì bị cắt cột (mobile giữ nguyên) */
+@media (min-width: 993px) {
+  .domains-table-wrapper {
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+  }
+
+  .domains-table-wrapper::-webkit-scrollbar {
+    height: 8px;
+  }
+
+  .domains-table-wrapper::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.35);
+    border-radius: 8px;
+  }
+
+  .history-table {
+    min-width: 1360px;
+  }
+
+  .history-table th,
+  .history-table td:last-child .btn {
+    white-space: nowrap;
+  }
+
+  .history-table td:last-child .action-btn-group {
+    flex-wrap: nowrap;
+  }
+}
