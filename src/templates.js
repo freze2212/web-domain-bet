@@ -700,6 +700,21 @@ export const ACTIVE_TEMPLATES = [
     "totalDomains": 1,
     "brand": "MM88",
     "brandLabel": "MM88"
+  },
+  {
+    "id": "lp_mm88_video5s",
+    "name": "MM88 - VIDEO NỀN (PC & MB) TỰ CHUYỂN 5S",
+    "title": "MM88 - VIDEO NỀN (PC & MB) TỰ CHUYỂN 5S",
+    "folder": "lp-mm88-video5s",
+    "path": "C:\\Landingpages\\MM88\\lp-mm88-video5s",
+    "gitRepo": "freze2212/lp-mm88-video5s",
+    "pagesProject": "lp-mm88-video5s",
+    "cnameTarget": "lp-mm88-video5s.pages.dev",
+    "sampleDomain": "mm88tqt.com",
+    "sampleUrl": "https://mm88tqt.com",
+    "totalDomains": 1,
+    "brand": "MM88",
+    "brandLabel": "MM88"
   }
 ];
 
